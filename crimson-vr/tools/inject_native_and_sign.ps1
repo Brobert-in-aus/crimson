@@ -33,19 +33,23 @@ try {
     # Strip Godot's signature (adding a file invalidates it; apksigner re-signs).
     @($zip.Entries | Where-Object { $_.FullName -match '^META-INF/.*\.(SF|RSA|DSA|EC)$' }) |
         ForEach-Object { $_.Delete() }
-    # Add/replace the native lib.
+    # Add/replace the native lib, STORED (uncompressed) so it works whether or
+    # not the manifest sets extractNativeLibs=false (gradle builds often do,
+    # which then requires uncompressed + page-aligned .so entries).
     $existing = $zip.GetEntry('lib/arm64-v8a/libcrimson_host.so')
     if ($existing) { $existing.Delete() }
     [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-        $zip, $so, 'lib/arm64-v8a/libcrimson_host.so')
+        $zip, $so, 'lib/arm64-v8a/libcrimson_host.so',
+        [System.IO.Compression.CompressionLevel]::NoCompression)
 }
 finally {
     $zip.Dispose()
 }
 
 # Align, then sign (order matters: zipalign must precede apksigner).
+# -p page-aligns uncompressed .so entries (required when extractNativeLibs=false).
 if (Test-Path $OutputApk) { Remove-Item $OutputApk -Force }
-& $zipalign -f 4 $work $OutputApk
+& $zipalign -f -p 4 $work $OutputApk
 Remove-Item $work -Force
 & $apksigner sign --ks $keystore --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android $OutputApk
 & $apksigner verify --print-certs $OutputApk | Select-Object -First 2
