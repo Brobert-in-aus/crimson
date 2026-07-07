@@ -65,8 +65,15 @@ extern "C" {
 #define CRIMSON_HOST_AIM_JOYSTICK 2
 
 /* Per-player input for one 60 Hz tick.
- * move_x/move_y: with move_mode MOUSE_POINT_CLICK + MOVE_TO_CURSOR flag,
- *   the game-world point to run toward. aim_x/aim_y: game-world aim point. */
+ * move_x/move_y: the analog move DIRECTION vector (typically unit length, or
+ *   0 to stand still) -- the runtime consumes it directly as the move axis.
+ *   It is NOT an absolute target point: the frontend does the point->direction
+ *   conversion itself (dir = normalize(target - player), zeroed within a small
+ *   stop radius), mirroring the desktop point-click path in local_input.zig.
+ *   The ABI passes move_x/move_y straight through and does no such conversion.
+ * aim_x/aim_y: game-world aim point (absolute).
+ * flags MOVE_TO_CURSOR: a passive intent marker recorded for replays; it does
+ *   NOT itself drive movement through this ABI (movement is purely move_x/y). */
 typedef struct crimson_host_input {
     float move_x;
     float move_y;

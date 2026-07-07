@@ -3,15 +3,28 @@ using Godot;
 namespace CrimsonVR;
 
 /// <summary>
-/// M0 spike scene: OpenXR bootstrap, a tabletop arena plane, and the
-/// controller vertical-projection reticles (PLAN.md §4). Everything is built
-/// in code; scenes/main.tscn is just this script on a root node.
+/// M2 diorama scene: OpenXR bootstrap, a tabletop arena, the controller
+/// vertical-projection reticles (PLAN.md §4), and the live simulation rendered
+/// as a colored-quad diorama. The sim ticks at a fixed 60 Hz in
+/// _PhysicsProcess; rendering interpolates between the last two snapshots at
+/// headset refresh. Everything is built in code; scenes/main.tscn is just this
+/// script on a root node.
 /// </summary>
 public partial class Main : Node3D
 {
     private const float ArenaSideMeters = 1.0f;
     private const float ArenaHeightMeters = 0.75f;
     private const float GameWorldSize = 1024.0f;
+    private const float ArenaDistanceMeters = 0.6f;
+    private const int SimTicksPerSecond = 60;
+
+    private const float TriggerThreshold = 0.5f;
+    private const float GripThreshold = 0.7f;
+    private const int RestartDelayTicks = 120; // ~2 s pause on death before reset
+
+    // Survival, seed 1, standard 1024 world at 60 Hz (mirrors HostSessionConfig).
+    private const string SurvivalConfig =
+        "{\"seed\":1,\"game_mode\":1,\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60}";
 
     private XROrigin3D _origin = null!;
     private XRCamera3D _camera = null!;
@@ -24,26 +37,54 @@ public partial class Main : Node3D
     private Node3D _rightGuide = null!;
     private Label3D _status = null!;
 
+    private SimSession? _sim;
+    private Diorama _diorama = null!;
+    private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+    private int _deadTicks;
+
+    // Hand roles: default left = movement, right = aim/fire (PLAN §1); swap is a
+    // settings toggle wired in M4. Index 0 = left, 1 = right.
+    private bool _handSwap;
+    private readonly bool[] _prevTrigger = new bool[2];
+    private readonly bool[] _prevGrip = new bool[2];
+
     private bool _xrActive;
-    // Place the arena in front of the head on first valid frame, and whenever a
-    // recenter is requested. On standalone the OpenXR "stage" origin is the
-    // center of the play space, not the seated head pose, so a fixed offset
-    // spawns the table wherever the guardian center is (PLAN.md §5 recenter).
     private bool _recenterPending = true;
     private bool _prevRecenterHeld;
     private int _framesSinceStart;
 
     public override void _Ready()
     {
+        Engine.PhysicsTicksPerSecond = SimTicksPerSecond;
+
         InitializeXr();
         BuildEnvironment();
         BuildRig();
         BuildArena();
         BuildReticles();
         BuildStatusLabel();
-        _status.Text = _xrActive
-            ? $"XR active | sim abi v{TryQueryAbiVersion()}"
-            : "XR NOT ACTIVE (flat window fallback)";
+        StartSession();
+
+        _status.Text = _sim != null
+            ? $"CrimsonVR | sim abi v{TryQueryAbiVersion()}"
+            : "sim unavailable (native lib missing)";
+    }
+
+    private void StartSession()
+    {
+        _diorama = new Diorama();
+        _arenaRoot.AddChild(_diorama);
+        _diorama.Configure(ArenaSideMeters, GameWorldSize);
+
+        try
+        {
+            _sim = new SimSession(SurvivalConfig);
+        }
+        catch (System.Exception e)
+        {
+            GD.PushError($"CrimsonVR: sim session create failed: {e.Message}");
+            _sim = null;
+        }
     }
 
     private void InitializeXr()
@@ -102,12 +143,10 @@ public partial class Main : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = color },
         };
 
-    private const float ArenaDistanceMeters = 0.6f;
-
     private void BuildArena()
     {
         // Initial position is a placeholder; RecenterArena() repositions it in
-        // front of the head once tracking is valid (see _Process).
+        // front of the head once tracking is valid (see HandleRecenter).
         _arenaRoot = new Node3D { Position = new Vector3(0.0f, ArenaHeightMeters, -ArenaDistanceMeters) };
         AddChild(_arenaRoot);
 
@@ -130,16 +169,6 @@ public partial class Main : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.15f, 0.15f, 0.18f) },
         };
         _arenaRoot.AddChild(rim);
-
-        // Placeholder "player" marker at arena center (game 512,512).
-        var player = new MeshInstance3D
-        {
-            Mesh = new CapsuleMesh { Radius = 0.012f, Height = 0.05f },
-            Position = Mapper.GameToArenaLocal(new Vector2(512, 512), ArenaSideMeters, GameWorldSize)
-                       + new Vector3(0, 0.025f, 0),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.9f, 0.9f, 0.9f) },
-        };
-        _arenaRoot.AddChild(player);
     }
 
     private void BuildReticles()
@@ -155,8 +184,7 @@ public partial class Main : Node3D
     }
 
     private static Node3D MakeReticle(Color color)
-    {
-        var reticle = new MeshInstance3D
+        => new MeshInstance3D
         {
             Mesh = new TorusMesh { InnerRadius = 0.018f, OuterRadius = 0.028f },
             MaterialOverride = new StandardMaterial3D
@@ -165,8 +193,6 @@ public partial class Main : Node3D
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             },
         };
-        return reticle;
-    }
 
     private static Node3D MakeGuide(Color color)
         => new MeshInstance3D
@@ -192,18 +218,146 @@ public partial class Main : Node3D
         AddChild(_status);
     }
 
+    // ---- Simulation: fixed 60 Hz tick ----
+
+    public override void _PhysicsProcess(double delta)
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+
+        // Death handling: hold for a moment, then restart the session (PLAN M2
+        // "death -> restart").
+        if (_sim.GameOver)
+        {
+            if (++_deadTicks >= RestartDelayTicks)
+            {
+                _sim.Restart();
+                _deadTicks = 0;
+                _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+            }
+            return;
+        }
+
+        HandSample left = SampleHand(_leftHand, 0);
+        HandSample right = SampleHand(_rightHand, 1);
+        (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
+        Sim.HostInput input = VrInput.Build(move, aim, _playerGame);
+
+        Sim.TickResult result = _sim.Tick(input);
+        SnapshotView snap = _sim.CaptureSnapshot();
+        if (snap.Header.PlayerCount > 0)
+        {
+            Sim.PlayerSnap p = snap.Players[0];
+            _playerGame = new Vector2(p.X, p.Y);
+        }
+        _diorama.PushSnapshot(snap);
+
+        UpdateStatus(result);
+    }
+
+    private HandSample SampleHand(XRController3D hand, int index)
+    {
+        if (!hand.GetHasTrackingData())
+        {
+            _prevTrigger[index] = false;
+            _prevGrip[index] = false;
+            return new HandSample { ReticleGame = _playerGame };
+        }
+
+        Vector2 game = ComputeReticle(hand, out _, out _);
+
+        bool triggerHeld = hand.GetFloat("trigger") > TriggerThreshold;
+        bool triggerPressed = triggerHeld && !_prevTrigger[index];
+        _prevTrigger[index] = triggerHeld;
+
+        bool gripDown = hand.GetFloat("grip") > GripThreshold;
+        bool reloadPressed = gripDown && !_prevGrip[index];
+        _prevGrip[index] = gripDown;
+
+        return new HandSample
+        {
+            ReticleGame = game,
+            TriggerHeld = triggerHeld,
+            TriggerPressed = triggerPressed,
+            ReloadPressed = reloadPressed,
+        };
+    }
+
+    private void UpdateStatus(Sim.TickResult result)
+    {
+        _status.Text =
+            $"HP {result.PlayerHealth:0}  Lv {result.PlayerLevel}  " +
+            $"foes {result.CreatureActiveCount}";
+    }
+
+    // ---- Rendering: reticles + interpolated diorama at headset refresh ----
+
     public override void _Process(double delta)
     {
         HandleRecenter();
-        UpdateHand(_leftHand, _leftReticle, _leftGuide, isMoveHand: true);
-        UpdateHand(_rightHand, _rightReticle, _rightGuide, isMoveHand: false);
+        UpdateHandVisual(_leftHand, _leftReticle, _leftGuide, isMoveHand: !_handSwap);
+        UpdateHandVisual(_rightHand, _rightReticle, _rightGuide, isMoveHand: _handSwap);
+
+        if (_sim != null)
+        {
+            _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
+        }
+    }
+
+    /// <summary>Shared vertical projection of a controller onto the arena plane
+    /// (PLAN §4). Returns the clamped game-space point; also reports whether the
+    /// hand is over the arena footprint and the clamped world position.</summary>
+    private Vector2 ComputeReticle(XRController3D hand, out bool over, out Vector3 clampedWorld)
+    {
+        float planeY = _arenaRoot.GlobalPosition.Y;
+        Vector3 handPos = hand.GlobalPosition;
+        Vector3 hit = Mapper.ProjectVertically(handPos, planeY);
+        Vector3 arenaLocal = _arenaRoot.ToLocal(hit);
+        over = Mapper.IsOverArena(arenaLocal, ArenaSideMeters);
+        Vector2 game = Mapper.ArenaLocalToGame(arenaLocal, ArenaSideMeters, GameWorldSize);
+        Vector3 clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
+        clampedWorld = _arenaRoot.ToGlobal(clampedLocal);
+        return game;
+    }
+
+    private void UpdateHandVisual(XRController3D hand, Node3D reticle, Node3D guide, bool isMoveHand)
+    {
+        bool tracking = hand.GetHasTrackingData();
+        reticle.Visible = tracking;
+        guide.Visible = tracking;
+        if (!tracking)
+        {
+            return;
+        }
+
+        ComputeReticle(hand, out bool over, out Vector3 clampedWorld);
+        reticle.GlobalPosition = clampedWorld + new Vector3(0, 0.002f, 0);
+
+        var mesh = (MeshInstance3D)reticle;
+        var material = (StandardMaterial3D)mesh.MaterialOverride;
+        float triggerValue = hand.GetFloat("trigger");
+        Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
+        // Opaque reticle material: dim by darkening RGB (an alpha change would be
+        // invisible without alpha transparency enabled).
+        material.AlbedoColor = over
+            ? baseColor.Lerp(Colors.White, triggerValue)
+            : baseColor.Darkened(0.6f);
+
+        // Vertical guide line from the controller down to the plane point.
+        float planeY = _arenaRoot.GlobalPosition.Y;
+        Vector3 handPos = hand.GlobalPosition;
+        float guideHeight = Mathf.Max(0.02f, handPos.Y - planeY);
+        guide.GlobalPosition = new Vector3(handPos.X, planeY + guideHeight * 0.5f, handPos.Z);
+        ((MeshInstance3D)guide).Scale = new Vector3(1, guideHeight, 1);
     }
 
     private void HandleRecenter()
     {
-        // Request a recenter when either hand's menu/primary button is pressed
-        // (rising edge). The initial _recenterPending places the table on the
-        // first frame the head pose is valid.
+        // Request a recenter on the rising edge of either hand's menu/AX button.
+        // The initial _recenterPending places the table on the first valid head
+        // frame (PLAN §5). Reload uses grip, so AX stays free for recenter.
         _framesSinceStart++;
         bool held = (_leftHand.GetHasTrackingData() && _leftHand.IsButtonPressed("menu_button"))
                     || (_rightHand.GetHasTrackingData() && _rightHand.IsButtonPressed("ax_button"));
@@ -213,9 +367,7 @@ public partial class Main : Node3D
         }
         _prevRecenterHeld = held;
 
-        // Wait a few frames after startup so the head pose has settled before the
-        // first placement. Button-triggered recenters apply immediately.
-        if (!_recenterPending || (!_xrActive) || _framesSinceStart < 15)
+        if (!_recenterPending || !_xrActive || _framesSinceStart < 15)
         {
             return;
         }
@@ -225,9 +377,9 @@ public partial class Main : Node3D
 
     private void RecenterArena()
     {
-        // Put the arena on the floor plane at ArenaDistance in front of the
-        // head, at ArenaHeight, yawed to face the player. Forward is flattened
-        // to horizontal so table tilt never follows head pitch.
+        // Put the arena on the floor plane at ArenaDistance in front of the head,
+        // at ArenaHeight, yawed to face the player. Forward is flattened to
+        // horizontal so table tilt never follows head pitch.
         Vector3 headPos = _camera.GlobalPosition;
         Vector3 forward = -_camera.GlobalTransform.Basis.Z;
         forward.Y = 0.0f;
@@ -243,44 +395,6 @@ public partial class Main : Node3D
         _arenaRoot.GlobalTransform = new Transform3D(Basis.FromEuler(new Vector3(0, yaw, 0)), pos);
     }
 
-    private void UpdateHand(XRController3D hand, Node3D reticle, Node3D guide, bool isMoveHand)
-    {
-        bool tracking = hand.GetHasTrackingData();
-        reticle.Visible = tracking;
-        guide.Visible = tracking;
-        if (!tracking)
-        {
-            return;
-        }
-
-        float planeY = _arenaRoot.GlobalPosition.Y;
-        Vector3 handPos = hand.GlobalPosition;
-        Vector3 hit = Mapper.ProjectVertically(handPos, planeY);
-
-        // Clamp the reticle to the arena footprint; dim it when outside.
-        Vector3 arenaLocal = _arenaRoot.ToLocal(hit);
-        bool over = Mapper.IsOverArena(arenaLocal, ArenaSideMeters);
-        Vector2 game = Mapper.ArenaLocalToGame(arenaLocal, ArenaSideMeters, GameWorldSize);
-        Vector3 clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
-        Vector3 clampedWorld = _arenaRoot.ToGlobal(clampedLocal);
-
-        reticle.GlobalPosition = clampedWorld + new Vector3(0, 0.002f, 0);
-        var mesh = (MeshInstance3D)reticle;
-        var material = (StandardMaterial3D)mesh.MaterialOverride;
-        float triggerValue = hand.GetFloat("trigger");
-        Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
-        // The reticle material is opaque, so dim by darkening RGB (an alpha
-        // change would be invisible without alpha transparency enabled).
-        material.AlbedoColor = over
-            ? baseColor.Lerp(Colors.White, triggerValue)
-            : baseColor.Darkened(0.6f);
-
-        // Vertical guide line from the controller down to the plane point.
-        float guideHeight = Mathf.Max(0.02f, handPos.Y - planeY);
-        guide.GlobalPosition = new Vector3(handPos.X, planeY + guideHeight * 0.5f, handPos.Z);
-        ((MeshInstance3D)guide).Scale = new Vector3(1, guideHeight, 1);
-    }
-
     private static uint TryQueryAbiVersion()
     {
         try
@@ -289,7 +403,7 @@ public partial class Main : Node3D
         }
         catch (System.Exception)
         {
-            return 0; // native library not present; fine for the M0 spike
+            return 0;
         }
     }
 }

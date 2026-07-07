@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>CrimsonVR.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- GodotSharp provides the pure managed math types (Vector2/3, Basis,
+         Mathf) that Mapper/VrInput use. No engine runtime is needed for the
+         math under test. -->
+    <PackageReference Include="GodotSharp" Version="4.7.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <!-- Compile the frontend files under test directly (no Godot.NET.Sdk here).
+       Native P/Invoke stubs in Sim.cs compile fine; they are never invoked by
+       these pure-math tests. -->
+  <ItemGroup>
+    <Compile Include="..\..\godot\src\Mapper.cs" />
+    <Compile Include="..\..\godot\src\VrInput.cs" />
+    <Compile Include="..\..\godot\src\Sim.cs" />
+  </ItemGroup>
+</Project>

@@ -81,13 +81,22 @@ crimson-vr/
   PLAN.md              this document
   godot/               Godot 4 project (frontend)
     project.godot
-    src/               C# code (Sim bindings, InputMapper, renderers, UI)
+    src/               C# code:
+                         Sim.cs        P/Invoke bindings + packed struct layouts
+                         SimSession.cs session driver + snapshot decode
+                         Mapper.cs     pure world<->arena<->game transforms (§4)
+                         VrInput.cs    pure reticle/button -> CrimsonHostInput (§4)
+                         Diorama.cs    MultiMesh colored-quad renderer + interp
+                         Main.cs       OpenXR rig, arena, 60 Hz sim loop, reticles
     scenes/            .tscn (text) scenes
+    native/            libcrimson binaries per rid (generated, gitignored)
     assets/            imported atlases (generated, gitignored)
   abi/                 C header for libcrimson host ABI (source of truth)
-  tools/               asset bake scripts (PAQ -> atlas), build glue
+  tests/               CrimsonVR.Tests/ — xUnit math tests (net9.0 + GodotSharp)
+  tools/               build glue + gen_vr_verify_replay.py (M2 .crd gate);
+                       asset bake scripts (PAQ -> atlas) come in M3/M6
 crimson-zig/
-  src/host_abi/        new: C-ABI export layer (peer of the WASM ABI)
+  src/host_abi/        C-ABI export layer (peer of the WASM ABI)
 ```
 
 The fork remains a monorepo. Upstream (`banteg/crimson`) is pulled into
@@ -126,9 +135,18 @@ int32_t  crimson_host_snapshot(uint64_t session, /*out*/ uint8_t* buf, /*inout*/
 // Audio events accumulated during the last tick (FrameAudioEvents, flattened).
 int32_t  crimson_host_audio_events(uint64_t session, /*out*/ uint8_t* buf, /*inout*/ uint32_t* len);
 
-// Replay recording (standard .crd, same format as desktop).
-int32_t  crimson_host_replay_begin(uint64_t session);
-int32_t  crimson_host_replay_finish(uint64_t session, /*out*/ uint8_t* buf, /*inout*/ uint32_t* len);
+// Replay verify passthrough — runs the native verifier on .crd bytes, writing
+// its JSON report. Lets the host validate it links the exact verified stack.
+int32_t  crimson_host_verify_replay_json(const uint8_t* replay, uint32_t replay_len,
+                                         /*out*/ uint8_t* out, /*inout*/ uint32_t* out_len);
+
+// Live replay RECORDING (standard .crd) — DEFERRED TO M4. The Zig runtime is
+// read/verify-only; there is no .crd encoder in crimson-zig. Until then, the
+// M2 verify gate produces .crd via the Python recorder (crimson.replay,
+// crimson-vr/tools/gen_vr_verify_replay.py); in-headset recording (M4) will add
+// these exports backed by a new msgpack encoder:
+//   int32_t crimson_host_replay_begin(uint64_t session);
+//   int32_t crimson_host_replay_finish(uint64_t session, uint8_t* buf, uint32_t* len);
 
 // Perk menu interaction (mirrors FrameInput.perk_choice_index / perk_menu_active).
 // Folded into CrimsonHostInput rather than separate calls.
@@ -137,11 +155,17 @@ int32_t  crimson_host_replay_finish(uint64_t session, /*out*/ uint8_t* buf, /*in
 int32_t  crimson_host_last_error(/*out*/ char* buf, uint32_t len);
 ```
 
+The checked-in header `crimson-vr/abi/crimson_host.h` is the authoritative
+signature list (exact struct layouts, buffer protocols); the sketch above is
+the intent. As of M1/M2 it implements everything except the two deferred
+`replay_*` recording calls.
+
 `CrimsonHostInput` mirrors `GameInput` (`crimson-zig/src/runtime/player.zig`):
 
 ```c
 typedef struct {
-  float move_x, move_y;        // analog move vector (game units/normalized)
+  float move_x, move_y;        // analog move DIRECTION vector (unit-length or 0);
+                               // NOT a target point — see note below
   float aim_x, aim_y;          // aim point in game-world coordinates
   uint32_t flags;              // fire_down, fire_pressed, reload_pressed,
                                // reload_down, move_to_cursor_pressed bits
@@ -152,6 +176,16 @@ typedef struct {
   uint8_t _pad[3];
 } CrimsonHostInput;
 ```
+
+> **Movement semantics (important, discovered in M2).** `move_x/move_y` is the
+> analog move *direction*, consumed as-is by the runtime — it is **not** the
+> point-click target. The desktop's point-click mode converts a world target
+> into this vector (`dir = normalize(target − player)`, zeroed within
+> `point_click_stop_radius`) inside `local_input.zig`, and the host ABI
+> **bypasses** that conversion. So the **frontend** must produce the normalized
+> direction (see `VrInput.Build`); the `move_to_cursor` flag is a passive intent
+> marker and does not itself drive movement through the ABI. The header comment
+> in `crimson_host.h` is the corrected source of truth.
 
 ### Snapshot contents (v1)
 
@@ -227,20 +261,22 @@ still moves toward the clamped edge point.
 
 | VR input | Sim input |
 |---|---|
-| Move-hand reticle, trigger **held** | `move_mode = MOUSE_POINT_CLICK`, `aim`-independent move target = reticle point, `move_to_cursor` semantics; move vector derived exactly as the desktop point-click mode does |
+| Move-hand reticle, trigger **held** | `move_mode = MOUSE_POINT_CLICK`; frontend emits `move_x/move_y` = `normalize(reticle − player)`, zeroed within the stop radius — the ABI consumes a **direction**, not a target point (see §3 note). `move_to_cursor` flag set as an intent marker |
 | Move-hand trigger released | zero move vector (player stops) |
 | Aim-hand reticle | `aim_x/aim_y` = reticle point, `aim_scheme = MOUSE` |
 | Aim-hand trigger | `fire_down` / `fire_pressed` |
-| Aim-hand lower (grip or A/X) button | `reload_pressed` |
-| Either hand, menu button | pause |
+| Aim-hand **grip** squeeze | `reload_pressed` (grip chosen over A/X so A/X stays free for recenter) |
+| Either hand, menu / AX button | recenter arena (M0/M2); pause is M4 |
 | Perk menu open | reticle-over-card + aim-hand trigger selects → `perk_choice_index` |
 | Settings toggle | swap hand roles (move ↔ aim/fire) |
 
 Notes:
 
-- Dead zone: if the move reticle is within a small radius of the player
-  (~12 game units, tuned in M4), treat as zero movement to prevent jitter
-  when "standing on" your own marker.
+- Dead zone: if the move reticle is within a small radius of the player, treat
+  as zero movement to prevent jitter when "standing on" your own marker. M2
+  defaults this to the desktop point-click stop radius (`point_click_stop_radius
+  = 20` game units) for parity; PLAN's earlier ~12 is a comfort-tuning target
+  for M4.
 - The sim ticks at 60 Hz via a fixed accumulator inside `_PhysicsProcess`;
   controller poses are sampled at tick time (latest predicted pose). Rendering
   interpolates entity positions between the last two snapshots at headset
@@ -485,6 +521,38 @@ gate for LLM-generated work.
   `crimson-zig replay verify`; mapper math covered by C# unit tests
   (projection, clamping, game↔arena transforms, hand swap).
 
+**Status (2026-07): code-complete; 2 of 3 verify criteria met, in-headset
+playtest pending.** New frontend code in `crimson-vr/godot/src/`:
+- `SimSession.cs` — managed session driver over the C ABI: create/tick/restart/
+  dispose, zero-copy `SnapshotView` decode, ping-pong buffers so the last two
+  snapshots stay live for interpolation.
+- `VrInput.cs` — pure §4 mapping (hand-role resolve, dead zone, fire/reload
+  bits); emits `move_x/move_y` as a **normalized direction** (see §3 note).
+- `Diorama.cs` — one `MultiMeshInstance3D` per entity layer (players, creatures,
+  projectiles, secondaries, bonuses) as flat colored quads on the arena plane;
+  index-matched interpolation between the last two snapshots.
+- `Main.cs` rewired: fixed 60 Hz `_PhysicsProcess` sim loop (poses sampled at
+  tick time), interpolated draw in `_Process` via
+  `GetPhysicsInterpolationFraction`, death→restart; placeholder capsule removed.
+- Verify status: **C# unit tests ✅** — 18 tests in
+  `crimson-vr/tests/CrimsonVR.Tests/` (net9.0, GodotSharp from nuget), covering
+  projection/clamping/round-trips/hand-swap/input construction. **Scripted
+  `.crd` gate ✅** — `crimson-vr/tools/gen_vr_verify_replay.py` records a
+  VR-schema survival sequence and `crimson-zig replay verify` re-simulates with
+  `match=True`, exit 0 (3000 ticks, 12 kills). **Playable on PCVR ⏳** — needs
+  headset; the win-x64 `crimson_host.dll` is staged and the scene boots + ticks
+  + decodes headlessly.
+- Toolchain notes: build the frontend assembly with `dotnet build
+  crimson-vr/godot/CrimsonVR.csproj`; run the scene headless for a smoke test
+  with the Godot console exe **without** `--build-solutions` (that flag opens the
+  editor build pass and `--quit-after` exits before the scene runs). The `.crd`
+  harness runs via the Roaming Python 3.13 `uv`
+  (`%APPDATA%\Python\Python313\Scripts\uv.exe run ...`).
+- Key finding (see §3 movement note): the host ABI takes a move **direction**,
+  not a target point — the frontend does the point→direction conversion the
+  desktop's `local_input.zig` normally does. Caught by a headless smoke test
+  (player drifted off-center with no input) and fixed.
+
 ### M3 — Real presentation
 - Asset bake pipeline; terrain + decal layer; creature/player/projectile/
   particle sprites with 2.5D tilt + shadows; positional audio + music;
@@ -708,8 +776,11 @@ verify itself*. Rules to keep it that way:
 - **Never let generated code touch `crimson-zig/src/runtime/` gameplay logic**
   for VR reasons. VR needs go in `host_abi/` or the frontend.
 - Every PR-sized change must pass: `zig build test` (incl. the M1 ABI replay
-  gate), C# unit tests for mapper/transform math, and `just check` for any
-  Python-side tooling touched.
+  gate); the C# mapper/transform tests (`dotnet test
+  crimson-vr/tests/CrimsonVR.Tests`); and `just check` for any Python-side
+  tooling touched. When frontend input/mapping changes, regenerate the M2 gate
+  (`uv run crimson-vr/tools/gen_vr_verify_replay.py <out.crd>` then
+  `crimson-zig replay verify <out.crd>`).
 - Keep Godot scenes minimal and prefer C#-constructed nodes over deep `.tscn`
   hierarchies — code is what LLMs (and reviewers) handle best; scenes are for
   static structure only.
@@ -722,12 +793,16 @@ verify itself*. Rules to keep it that way:
 
 ## 12. Immediate next steps
 
-1. M0 spike: install Godot 4 (latest stable, .NET edition) + Android build
-   templates; validate Quest 3 C# export (go/no-go).
-2. M1: scaffold `crimson-zig/src/host_abi/` + the replay-through-ABI test
-   gate. Keep it structured as a clean overlay (self-contained directory,
-   minimal touches to upstream build files) so the §10 patch-distribution
-   model stays cheap.
+M0, M1, and M2 (code) are done — see each milestone's Status block. ~~M0 spike~~
+~~/ Android export~~, ~~M1 host ABI + replay gate~~, and ~~M2 diorama skeleton +~~
+~~C# tests + `.crd` verify gate~~ are complete. Remaining, in order:
+
+1. **Finish M2**: in-headset PCVR playtest — build the desktop frontend, confirm
+   the diorama boots/ticks/renders and move/aim/fire/reload feel right (the
+   win-x64 `crimson_host.dll` is staged; the scene already runs headless).
+2. **M3 — Real presentation**: asset bake pipeline, terrain + decal layer,
+   2.5D sprites with tilt + shadows, positional audio, HUD; Quest 72 Hz stress
+   pass. This retires the last big rendering risk (§9.2).
 3. Development proceeds privately using upstream's asset flow; the
    banteg/10tons permission conversations happen with a finished build in
    hand (per §10), with M6 as the hard gate before anything ships.
