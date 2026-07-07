@@ -417,9 +417,23 @@ gate for LLM-generated work.
      projection, edge clamping, and trigger-brighten all correct. One bug found
      and fixed: off-arena dim used an alpha change on an opaque material (no-op);
      now darkens RGB.
-  3. install the APK on Quest 3 via SideQuest and confirm it boots to the
-     arena scene (still pending; also needs the arm64 `.so` wired into the APK
-     — see item 1 above).
+  3. **PARTIAL (2026-07): Quest APK installs, launches, and runs the full
+     managed+native stack on-device — but falls back to flat (no VR).**
+     Verified via adb/logcat on Quest 3: APK installs, launches as an immersive
+     HorizonOS app, the .NET runtime + our `CrimsonVR.dll` execute
+     (`Main._Ready()`→`InitializeXr()` in the C# backtrace), and the arm64
+     `libcrimson_host.so` loads with no dlopen/`getauxval` failure (that worry
+     is retired). The native `.so` is bundled by post-processing the exported
+     APK: `crimson-vr/tools/inject_native_and_sign.ps1` injects it into
+     `lib/arm64-v8a/`, re-aligns (zipalign), and re-signs (apksigner). Manifest
+     has `extractNativeLibs=true`, so compressed injection is fine.
+     **Blocker for actual VR:** Godot's stock Android export omits
+     `libopenxr_loader.so`, so OpenXR can't start ("OpenXR loader not found" →
+     "Godot will start in normal mode"). Fix = **Godot OpenXR Vendors plugin**
+     (latest 5.1.0-stable; provides the Quest loader + required VR manifest
+     entries) which needs Godot's **gradle-based** Android build (the M0 export
+     used the simpler non-gradle path). This converts the Android export model
+     and is its own task — see M2 note below.
 
 ### M1 — libcrimson host ABI
 - `crimson-zig/src/host_abi/` implementing §3; builds for win-x64 first.
