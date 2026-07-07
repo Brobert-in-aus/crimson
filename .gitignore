@@ -34,6 +34,7 @@ zig-pkg/
 zig-out/
 /tools/zig/
 .DS_Store
+.idea/
 .mcp.json
 .gemini/
 gha-creds-*.json
