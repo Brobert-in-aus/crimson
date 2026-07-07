@@ -211,9 +211,11 @@ public partial class Main : Node3D
         var material = (StandardMaterial3D)mesh.MaterialOverride;
         float triggerValue = hand.GetFloat("trigger");
         Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
+        // The reticle material is opaque, so dim by darkening RGB (an alpha
+        // change would be invisible without alpha transparency enabled).
         material.AlbedoColor = over
             ? baseColor.Lerp(Colors.White, triggerValue)
-            : baseColor * new Color(1, 1, 1, 0.35f);
+            : baseColor.Darkened(0.6f);
 
         // Vertical guide line from the controller down to the plane point.
         float guideHeight = Mathf.Max(0.02f, handPos.Y - planeY);
