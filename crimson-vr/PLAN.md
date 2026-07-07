@@ -194,7 +194,12 @@ existing asset — the parity/replay infrastructure — as an automated reviewer
   world_size]`, `world_size = 1024` for Survival. Square.
 - **Arena space**: a square in Godot world space; node `ArenaRoot` with
   uniform scale `s` (meters per full arena side / world_size), positioned at
-  height `h` (playfield plane), yaw `θ` (user-facing rotation).
+  height `h` (playfield plane), yaw `θ` (user-facing rotation). `ArenaRoot`'s
+  position is normally static (recenter is a one-shot user action), but in
+  **player-centered mode** (§5) it is recomputed every rendered frame to track
+  the player avatar's game-space position — reticle projection (below) is
+  unaffected either way since it always operates on the current `ArenaRoot`
+  transform.
 - Mapping: `godot_pos = ArenaRoot.transform * vec3(gx * k, 0, gy * k)` where
   `k = arena_side_m / world_size`. Game +y (screen down) maps to Godot +z so
   the arena reads correctly when the player stands at its "south" edge.
@@ -264,6 +269,29 @@ Notes:
 - Grabbable/rotatable arena: **not in v1** (agreed: likely a
   wanted-but-regretted feature). The recenter action + yaw snap covers the
   legitimate need. Revisit after playtesting.
+
+### Player-centered (follow) mode
+
+- **Control feature, optional setting, off by default.** An alternative to the
+  fixed world-anchored arena: `ArenaRoot` is smoothly re-centered every frame
+  so the player's in-game avatar position stays near the middle of the
+  physical play area, instead of the user having to walk to reach far corners
+  of a large arena. Yaw continues to follow the last recenter/snap, not the
+  avatar's facing — only position tracks.
+- Motion is a critically-damped follow (never a snap/teleport of the arena)
+  to keep the visual displacement low-acceleration and reduce vection-induced
+  discomfort; exposed as a comfort setting alongside the existing vignette
+  option (see M4).
+- This is the mechanism that decouples arena size from physical room size: it
+  lets a large `world_size` arena (or the >2 m "walk-inside" override) be
+  played from a small physical footprint, or lets a seated player reach the
+  whole arena without leaning. Because of the overlap in what problem they
+  solve, treat player-centered mode and the >2 m walk-inside override as
+  alternatives presented together in settings, not required to compose.
+- Implementation stays entirely in the frontend (`ArenaRoot` transform each
+  frame); no ABI or sim changes — the sim only ever sees game-space
+  coordinates, which are unaffected by where the arena sits in the room.
+- Persisted per user, same as arena scale/height (§5).
 
 ---
 
@@ -343,6 +371,32 @@ gate for LLM-generated work.
   tracking; reticles track hands correctly. **Go/no-go on Godot C# Android
   export happens here** (fallback plan in §9).
 
+**Status (2026-07): scaffold + Android export GO; in-headset verify pending.**
+- `crimson-vr/godot/` builds (`dotnet build`, 0 errors) and imports headlessly
+  in Godot 4.7 .NET with no script errors. Main.cs bootstraps OpenXR, the
+  tabletop arena, and the two vertical-projection reticles + guide lines;
+  Mapper.cs holds the coordinate transforms.
+- **Headless C# Android APK export succeeds**: signed 99 MB arm64-v8a APK
+  containing the .NET/Mono runtime and our AOT-published `CrimsonVR.dll`. The
+  §9 risk-1 (Godot C# Android maturity) is **retired** — no GDScript fallback
+  needed.
+- **Toolchain fact (supersedes earlier setup note): Godot 4.7's Android export
+  template requires `net9.0`, not `net8.0`.** A net8.0 project fails export with
+  "export template only supports net9.0". `CrimsonVR.csproj` targets net9.0.
+  (The desktop-only native smoke harness still uses net8; only the Godot
+  project's TFM is constrained by the template.)
+- Native `crimson_host.dll` (win-x64) round-trips through C# P/Invoke (session
+  create + 600 survival ticks + snapshot decode). Note: session init and the
+  replay verifier run on a dedicated 64 MiB thread because the sim builds
+  multi-MB structs on the stack and host threads (.NET default ~1 MiB) overflow.
+- **Remaining before in-headset run (needs the user + hardware):**
+  1. cross-compile `crimson_host` for `aarch64-linux-android` and bundle the
+     `.so` into the APK (build script has the `-android` hook; needs Android
+     NDK libc wiring). Not required for the PCVR reticle spike.
+  2. launch PCVR spike via Virtual Desktop and confirm head/hand tracking;
+  3. install the APK on Quest 3 via SideQuest and confirm it boots to the
+     arena scene.
+
 ### M1 — libcrimson host ABI
 - `crimson-zig/src/host_abi/` implementing §3; builds for win-x64 first.
 - C header in `crimson-vr/abi/crimson_host.h` as the checked-in contract.
@@ -378,11 +432,13 @@ gate for LLM-generated work.
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
-  (§5 rules incl. play-area fit + override), hand swap, dead-zone tuning,
-  haptics, comfort pass.
+  (§5 rules incl. play-area fit + override), player-centered follow mode
+  toggle (§5), hand swap, dead-zone tuning, haptics, comfort pass.
 - Replay recording on by default, saved to the standard runtime replays dir.
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
-  without touching desktop; recorded `.crd` verifies; settings persist.
+  without touching desktop; recorded `.crd` verifies; settings persist;
+  player-centered follow mode tracks the avatar smoothly with no
+  reported-comfort regressions in the comfort pass.
 
 ### M5 — Shell + builds
 - VR-native minimal menu (start survival, settings, quit), version/about.
@@ -424,24 +480,58 @@ Nothing ships publicly until this milestone is done.
   install as input; legal checklist in §10 fully resolved or the release is
   scoped down accordingly.
 
-### M7 — Post-v1 (unordered backlog)
+### M7 — Move-hand abilities (aim↔move remap)
+- **Optional setting, off by default.** Preserve the locked hand mapping
+  (left = movement, right = aim/fire) as the default experience; when the
+  setting is enabled, one or more abilities normally triggered from the
+  aim hand are instead triggered from the move hand, targeted at the
+  move-hand reticle rather than the aim-hand reticle.
+- Crimsonland's classic perk set is **entirely passive** — confirmed no
+  active-use, player-triggered abilities exist today in
+  `crimson-zig/src/runtime/perks.zig`. This milestone therefore starts with
+  designing and implementing at least one new active-use ability at the sim
+  level (a short-range **teleport/blink** is the working example: instant
+  relocation to a targeted point, on a cooldown). This is genuine new
+  gameplay, not a VR-motivated hack, so it is not exempted by the §11
+  guardrail against touching runtime gameplay logic for VR reasons — it goes
+  through the normal `crimson-zig` design/test process like any other
+  runtime feature, VR is simply its first (and possibly only) consumer.
+  If additional abilities are added later they get the same treatment.
+- New ability input needs a dedicated flag (e.g. `ability_pressed`) added to
+  `GameInput`/`CrimsonHostInput` alongside the existing fire/reload bits, plus
+  an ability-target point (reuses the move-hand reticle's projected point when
+  the setting is on).
+- Binding stays additive on the move hand: whatever button/trigger drives
+  movement continues to drive movement unchanged; the ability fires from a
+  separate control (grip, or a distinct button) so movement is never lost
+  when the setting is on.
+- ✅ *Verify*: new ability covered by Zig unit tests plus at least one
+  committed `.crd` fixture exercising it; M1's replay-through-ABI gate passes
+  with the new input bit; toggling the setting off reproduces the original
+  aim-only control scheme exactly (regression-tested against existing `.crd`
+  fixtures); toggling it on lets a scripted-input harness trigger the ability
+  from the move-hand reticle and produces a verifying replay.
+
+### M8 — Post-v1 (unordered backlog)
 - Rush/Quests/Typ-o modes (mostly shell work — sim already supports them).
 - Steam Frame/arm64 Linux target when hardware exists.
 - Optional: grabbable arena experiment, giant room-scale mode polish,
   spectator flat-screen mirror, 3D creature models (big art project — this
   would also double as replacement assets for M6's stretch goal).
+- Additional move-hand abilities beyond the M7 teleport example, if
+  playtesting shows demand.
 
 ---
 
 ## 9. Risks and mitigations
 
-1. **Godot C# (.NET) Android export maturity.** Historically experimental;
-   quality varies by Godot 4.x release. *Mitigation*: M0 validates it before
-   any real investment. Fallback A: write the frontend in GDScript (Rider
-   supports GDScript; the frontend is thin so the LLM-codegen penalty is
-   modest; P/Invoke is replaced by a ~200-line GDExtension shim over the same
-   C ABI). Fallback B: C# on PCVR + GDExtension/GDScript only for the Quest
-   build (avoid — two frontends).
+1. **Godot C# (.NET) Android export maturity.** ~~Historically experimental~~
+   **RESOLVED at M0 (2026-07):** Godot 4.7 .NET exports a signed, self-contained
+   C# arm64 Quest APK (`.NET/Mono runtime + AOT CrimsonVR.dll` bundled). The
+   one gotcha — the 4.7 Android template requires `net9.0` — is handled by
+   pinning the Godot project to net9.0. The GDScript fallbacks below are no
+   longer needed but retained for the record: (A) GDScript frontend + ~200-line
+   GDExtension shim over the same C ABI; (B) C# PCVR + GDScript Quest (avoid).
 2. **Quest 3 fill-rate/draw calls with thousands of sprites.** *Mitigation*:
    MultiMesh instancing from day one (M2), atlas packing, no per-entity
    nodes; stress-test in M3 with worst-case seeds.
@@ -464,6 +554,18 @@ Nothing ships publicly until this milestone is done.
    our own code plus an overlay build against the user's own clone (§10).
    Worst case, the project remains fully buildable-from-source rather than
    binary-distributable; development is unaffected either way.
+7. **Player-centered follow mode causes motion sickness.** Moving the arena
+   under a stationary user is a vection source even when critically damped.
+   *Mitigation*: off by default, tuned in the M4 comfort pass alongside the
+   vignette option, and positioned in settings as an alternative to (not a
+   requirement alongside) the >2 m walk-inside override.
+8. **M7's new sim ability is scope creep against "no gameplay
+   reimplementation."** Adding an active-use ability is new game design, not
+   a port of existing behavior, and could balloon in scope (balance, VFX,
+   perk-menu interactions). *Mitigation*: keep the M7 ability minimal (one
+   ability, teleport, clearly specified) and gate it behind the same
+   replay-verification process as any other runtime change (§11); treat
+   further abilities as M8 backlog, not M7 scope.
 
 ---
 
