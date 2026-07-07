@@ -390,15 +390,26 @@ gate for LLM-generated work.
   replay verifier run on a dedicated 64 MiB thread because the sim builds
   multi-MB structs on the stack and host threads (.NET default ~1 MiB) overflow.
 - **Remaining before in-headset run (needs the user + hardware):**
-  1. cross-compile `crimson_host` for `aarch64-linux-android` and bundle the
-     `.so` into the APK. Not required for the PCVR reticle spike. Two blockers
-     found at M0: (a) `crimson-zig/build.zig` eagerly calls
-     `b.dependency("raylib_zig", ...)` at the top of `build()`, so **every**
-     build (incl. the raylib-free host lib) tries to compile raylib, which
-     panics "Target is not supported" for android — needs build.zig refactored
-     to resolve raylib lazily per-step; (b) after that, the android target
-     needs the NDK bionic sysroot wired for libc (`std.Thread`/`page_allocator`/
-     `std.json` pull in libc). Treat as an early M2 task.
+  1. ~~cross-compile `crimson_host` for `aarch64-linux-android`~~ **DONE
+     (2026-07):** `zig build host-lib -Dtarget=aarch64-linux-android` now
+     produces a valid aarch64 ELF `.so` with all 9 exports, staged into
+     `godot/native/android-arm64/`. Fixes applied: `build.zig` now defines the
+     raylib-free host lib first and early-returns for Android before the
+     raylib/desktop/test steps (raylib's build.zig hard-panics on Android ABI);
+     desktop `zig build`/`test` unaffected (18-failure baseline unchanged). Zig
+     0.16 ships bionic stubs, so **no NDK was needed** to build (an NDK is
+     installed only for on-device `readelf`/robustness work). Two on-device /
+     integration items remain, both genuinely needing the Quest or Godot export
+     wiring (not blockers to the PCVR spike):
+       - the `.so` has one undefined symbol, `getauxval` (bionic), and **no
+         `DT_NEEDED libc.so`** because Zig makes direct syscalls. It resolves
+         from the process global scope inside the Godot APK (bionic already
+         loaded), so it should load — but confirm on-device, and if it fails,
+         link bionic explicitly via the installed NDK sysroot to get a proper
+         `DT_NEEDED libc.so`.
+       - wire the `.so` into the APK's `lib/arm64-v8a/` during Godot export
+         (Godot's Android export doesn't pick up arbitrary P/Invoke natives
+         automatically) — an M2 export-integration task.
   2. launch PCVR spike via Virtual Desktop and confirm head/hand tracking;
   3. install the APK on Quest 3 via SideQuest and confirm it boots to the
      arena scene.

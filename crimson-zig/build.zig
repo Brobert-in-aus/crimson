@@ -1,19 +1,12 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const zemscripten = b.lazyImport(@This(), "zemscripten").?;
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const msgpack_dep = b.dependency("msgpack", .{
         .target = target,
         .optimize = optimize,
     });
-    const raylib_dep = b.dependency("raylib_zig", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const raylib_module = raylib_dep.module("raylib");
-    const raylib_artifact = raylib_dep.artifact("raylib");
 
     const mod = b.addModule("crimson_zig", .{
         .root_source_file = b.path("src/root.zig"),
@@ -22,6 +15,41 @@ pub fn build(b: *std.Build) void {
             .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
         },
     });
+
+    // crimson_host C-ABI shared library. It has no raylib/windowing deps, so
+    // it is the one artifact that cross-compiles cleanly to Android and other
+    // targets. Defined before the desktop/raylib steps so an Android build can
+    // early-return without touching raylib (whose build.zig panics on Android).
+    const host_abi_module = b.createModule(.{
+        .root_source_file = b.path("src/host_abi/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "crimson_zig", .module = mod },
+            .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
+        },
+    });
+    const host_lib = b.addLibrary(.{
+        .name = "crimson_host",
+        .linkage = .dynamic,
+        .root_module = host_abi_module,
+    });
+    const install_host_lib = b.addInstallArtifact(host_lib, .{});
+    const host_lib_step = b.step("host-lib", "Build crimson_host C-ABI shared library");
+    host_lib_step.dependOn(&install_host_lib.step);
+
+    // The desktop app, tests, and web steps below all pull raylib, whose
+    // build.zig hard-panics on Android ABI targets. For an Android target we
+    // build only the host lib and stop here.
+    if (target.result.abi.isAndroid()) return;
+
+    const zemscripten = b.lazyImport(@This(), "zemscripten").?;
+    const raylib_dep = b.dependency("raylib_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const raylib_module = raylib_dep.module("raylib");
+    const raylib_artifact = raylib_dep.artifact("raylib");
 
     const exe = b.addExecutable(.{
         .name = "crimson-zig",
@@ -218,24 +246,6 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| {
         run_relay_cmd.addArgs(args);
     }
-
-    const host_abi_module = b.createModule(.{
-        .root_source_file = b.path("src/host_abi/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "crimson_zig", .module = mod },
-            .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
-        },
-    });
-    const host_lib = b.addLibrary(.{
-        .name = "crimson_host",
-        .linkage = .dynamic,
-        .root_module = host_abi_module,
-    });
-    const install_host_lib = b.addInstallArtifact(host_lib, .{});
-    const host_lib_step = b.step("host-lib", "Build crimson_host C-ABI shared library");
-    host_lib_step.dependOn(&install_host_lib.step);
 
     const test_root_module = b.createModule(.{
         .root_source_file = b.path("src/test_root.zig"),

@@ -18,11 +18,13 @@ try {
     Copy-Item (Join-Path $zigDir 'zig-out\bin\crimson_host.dll') (Join-Path $godotNative 'win-x64\') -Force
     Write-Output "win-x64: crimson_host.dll -> $godotNative\win-x64"
 
-    # Quest / Android arm64 (pass -AndroidNdk to enable once NDK libc paths are wired)
+    # Quest / Android arm64. Zig 0.16 ships bionic stubs, so no NDK is required
+    # to produce the .so; the NDK is only needed for on-device readelf/robustness
+    # work. The .so lands in zig-out/lib (not bin) for non-Windows targets.
     if ($args -contains '-android') {
         & $zig build host-lib -Dtarget=aarch64-linux-android
         New-Item -ItemType Directory -Force (Join-Path $godotNative 'android-arm64') | Out-Null
-        Copy-Item (Join-Path $zigDir 'zig-out\bin\libcrimson_host.so') (Join-Path $godotNative 'android-arm64\') -Force
+        Copy-Item (Join-Path $zigDir 'zig-out\lib\libcrimson_host.so') (Join-Path $godotNative 'android-arm64\') -Force
         Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64"
     }
 }
