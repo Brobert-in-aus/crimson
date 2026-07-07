@@ -294,14 +294,28 @@ Notes:
     fits the OpenXR play-area rectangle (`XR_REFERENCE_SPACE_TYPE_STAGE`
     bounds), minus a 0.25 m safety margin per side.
   - Fallback when bounds are unavailable (common on PCVR/Virtual Desktop):
-    default `L = 1.0 m`, slider max **2.0 m**.
+    slider max **2.0 m**. **M2 in-headset finding (2026-07): a seated player's
+    reach envelope — chest to fully outstretched — is well under a metre, so
+    `L = 1.0 m` overshoots it and the arena's far edge is unreachable while
+    seated.** M2 hardcodes `L = 0.4 m` as the seated default; the movement/aim
+    mechanic (project the hand straight down onto the table) requires the whole
+    table to sit inside reach, so the default must track the *player's* reach,
+    not a fixed guess.
   - Override: an "I know what I'm doing" setting unlocks the slider up to
     **10 m** (room-scale walk-inside-the-arena mode). Persisted per user.
+- **Seated arena-size calibration (M4 setup step, flagged in M2).** Because the
+  seated reach envelope varies per player and per chair, the seated default `L`
+  should be *measured*, not guessed: a short calibration where the user holds a
+  controller at a comfortable near point and a fully-outstretched far point, and
+  `L` (and arena distance/height) is derived to fit that reach with margin —
+  the seated analogue of the play-area-fit rule above. Persisted per user like
+  scale/height. Until then M2 ships the fixed 0.4 m default.
 - Height `h`: default 0.75 m (desk height), adjustable 0.4–1.4 m; a "recenter"
   action places the arena centered in front of the current head pose at the
   configured height and snaps yaw to face the player.
 - Seated and standing both work by construction (arena is world-anchored;
-  posture just changes viewing angle — the "isometric" look).
+  posture just changes viewing angle — the "isometric" look). Reach, however,
+  differs — see the seated calibration note above.
 - Grabbable/rotatable arena: **not in v1** (agreed: likely a
   wanted-but-regretted feature). The recenter action + yaw snap covers the
   legitimate need. Revisit after playtesting.
@@ -557,6 +571,12 @@ playtest pending.** New frontend code in `crimson-vr/godot/src/`:
 - Asset bake pipeline; terrain + decal layer; creature/player/projectile/
   particle sprites with 2.5D tilt + shadows; positional audio + music;
   HUD panels; muzzle/explosion effects.
+- **Id-based snapshot matching.** M2's renderer interpolates by dense index and
+  skips interpolation on spawn/death frames (dense order shifts). Real sprites
+  need persistent per-entity state (animation phase, hit flash), so the snapshot
+  should carry a stable entity id (e.g. pool slot index) and the renderer should
+  match by id — which also removes the last interpolation seam. Append-only ABI
+  field; re-run the M1 replay gate.
 - ✅ *Verify*: side-by-side with the desktop Python build on the same seed
   looks equivalent (spot-check video); Quest 3 standalone holds 72 Hz with
   late-game survival entity counts (use `replay benchmark`-style stress
@@ -564,8 +584,9 @@ playtest pending.** New frontend code in `crimson-vr/godot/src/`:
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
-  (§5 rules incl. play-area fit + override), player-centered follow mode
-  toggle (§5), hand swap, dead-zone tuning, haptics, comfort pass.
+  (§5 rules incl. play-area fit + override, and the **seated reach-envelope
+  calibration** flagged in §5), player-centered follow mode toggle (§5), hand
+  swap, dead-zone tuning, haptics, comfort pass.
 - Replay recording on by default, saved to the standard runtime replays dir.
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
   without touching desktop; recorded `.crd` verifies; settings persist;

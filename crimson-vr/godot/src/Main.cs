@@ -12,10 +12,18 @@ namespace CrimsonVR;
 /// </summary>
 public partial class Main : Node3D
 {
-    private const float ArenaSideMeters = 1.0f;
+    // 0.4 m/side suits a seated player's reach (chest to fully-outstretched is
+    // well under a meter). A proper seated reach-envelope calibration is a
+    // future setup step (PLAN §5); for now this is the fixed default.
+    private const float ArenaSideMeters = 0.4f;
     private const float ArenaHeightMeters = 0.75f;
     private const float GameWorldSize = 1024.0f;
-    private const float ArenaDistanceMeters = 0.6f;
+    // Placement is defined by the near edge, not the centre: a seated player
+    // wants the near edge just in front of them (~0.10 m) with the far edge at
+    // arm's reach. Distance to centre = near-edge offset + half the side. (In-
+    // headset finding, 2026-07: centre at 0.6 m put the far half out of reach.)
+    private const float ArenaNearEdgeMeters = 0.10f;
+    private const float ArenaDistanceMeters = ArenaNearEdgeMeters + ArenaSideMeters * 0.5f;
     private const int SimTicksPerSecond = 60;
 
     private const float TriggerThreshold = 0.5f;

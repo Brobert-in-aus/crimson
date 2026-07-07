@@ -153,6 +153,7 @@ public sealed partial class Diorama : Node3D
     /// <paramref name="frac"/> is 0..1 between the last two ticks.</summary>
     public void Interpolate(float frac)
     {
+        frac = Mathf.Clamp(frac, 0.0f, 1.0f);
         InterpolateLayer(_players, frac);
         InterpolateLayer(_creatures, frac);
         InterpolateLayer(_projectiles, frac);
@@ -163,13 +164,21 @@ public sealed partial class Diorama : Node3D
     private void InterpolateLayer(Layer layer, float frac)
     {
         float k = _arenaSideMeters / _worldSize;
+        // Snapshot arrays are dense with no stable ids, so index i maps to the
+        // same entity across ticks ONLY while the active set is unchanged (equal
+        // counts). On a spawn/death frame the dense order shifts, so
+        // interpolating by index would streak unrelated tokens across the arena
+        // for a frame -- draw the fresh positions directly on those frames. (A
+        // proper fix is id-based matching, an M3 concern once sprites need
+        // persistent per-entity state.)
+        bool interp = layer.PrevCount == layer.CurrCount;
         for (int i = 0; i < layer.CurrCount; i++)
         {
             Ent cur = layer.Curr[i];
             Vector2 game = cur.Game;
             float angle = cur.Angle;
             float sizeGame = cur.SizeGame;
-            if (i < layer.PrevCount)
+            if (interp)
             {
                 Ent prev = layer.Prev[i];
                 game = prev.Game.Lerp(cur.Game, frac);
