@@ -349,6 +349,12 @@ gate for LLM-generated work.
 - ✅ *Verify*: new Zig test target replays ≥3 committed `.crd` fixtures
   through the C ABI and matches `replay verify` stats + checkpoint diffs
   exactly; `zig build test` green; ABI version handshake works.
+- Known Windows baseline (Zig 0.16.0, measured 2026-07): 18 upstream tests
+  fail on Windows — all UDP/lockstep/rollback networking tests
+  (`error.ConcurrencyUnavailable` from Zig std threaded IO on Windows) plus
+  one asset-extract path-conversion test. All deterministic runtime, replay,
+  and codec tests pass. "Green" for our gates means no regressions beyond
+  this baseline.
 
 ### M2 — Diorama skeleton (programmer art)
 - Godot project skeleton, P/Invoke bindings (`Sim.cs`), 60 Hz fixed-step
