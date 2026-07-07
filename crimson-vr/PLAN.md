@@ -410,9 +410,16 @@ gate for LLM-generated work.
        - wire the `.so` into the APK's `lib/arm64-v8a/` during Godot export
          (Godot's Android export doesn't pick up arbitrary P/Invoke natives
          automatically) — an M2 export-integration task.
-  2. launch PCVR spike via Virtual Desktop and confirm head/hand tracking;
+  2. ~~launch PCVR spike via Virtual Desktop and confirm head/hand tracking~~
+     **DONE (2026-07): PCVR spike verified in-headset.** OpenXR came up on
+     VirtualDesktopXR 1.0.10 (Vulkan/RTX 4090); arena, status label ("sim abi
+     v1" — C#→native DLL call confirmed), controller tracking, vertical
+     projection, edge clamping, and trigger-brighten all correct. One bug found
+     and fixed: off-arena dim used an alpha change on an opaque material (no-op);
+     now darkens RGB.
   3. install the APK on Quest 3 via SideQuest and confirm it boots to the
-     arena scene.
+     arena scene (still pending; also needs the arm64 `.so` wired into the APK
+     — see item 1 above).
 
 ### M1 — libcrimson host ABI
 - `crimson-zig/src/host_abi/` implementing §3; builds for win-x64 first.
