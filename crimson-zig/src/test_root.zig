@@ -300,6 +300,7 @@ test {
     _ = @import("asset_extract_main.zig");
     _ = @import("asset_smoke_main.zig");
     _ = @import("wasm_exports.zig");
+    _ = @import("host_abi/exports.zig");
 }
 
 test "aggregate dbg health summarizes native CDT trace" {

@@ -219,6 +219,24 @@ pub fn build(b: *std.Build) void {
         run_relay_cmd.addArgs(args);
     }
 
+    const host_abi_module = b.createModule(.{
+        .root_source_file = b.path("src/host_abi/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "crimson_zig", .module = mod },
+            .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
+        },
+    });
+    const host_lib = b.addLibrary(.{
+        .name = "crimson_host",
+        .linkage = .dynamic,
+        .root_module = host_abi_module,
+    });
+    const install_host_lib = b.addInstallArtifact(host_lib, .{});
+    const host_lib_step = b.step("host-lib", "Build crimson_host C-ABI shared library");
+    host_lib_step.dependOn(&install_host_lib.step);
+
     const test_root_module = b.createModule(.{
         .root_source_file = b.path("src/test_root.zig"),
         .target = target,

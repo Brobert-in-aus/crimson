@@ -1,0 +1,265 @@
+//! M1 verification gate for the crimson_host C ABI.
+//!
+//! These tests exercise the public exports exactly as an external host would
+//! (raw pointers, packed buffers) and pin three properties:
+//!   1. the replay-verify stack reachable through the ABI matches the native
+//!      verifier byte-for-byte on committed fixtures,
+//!   2. the ABI adds nothing to the sim: driving identical inputs through the
+//!      ABI and through LiveRunner directly yields identical summaries,
+//!   3. sessions are deterministic: same config + inputs => identical
+//!      snapshot bytes.
+
+const std = @import("std");
+const crimson_zig = @import("crimson_zig");
+const exports = @import("exports.zig");
+
+const live_runner = crimson_zig.live_runner;
+const verify_native = crimson_zig.verify_native;
+
+const survival_fixture = @embedFile("testdata/gameplay_diff_capture.survival.run1.crd");
+const rush_fixture = @embedFile("testdata/gameplay_diff_capture.rush.run1.crd");
+
+const test_config_json =
+    \\{"seed": 1234, "game_mode": 1, "player_count": 1, "world_size": 1024.0}
+;
+
+fn scriptedInput(tick: usize) exports.CrimsonHostInput {
+    // Deterministic pseudo-play: swirl the aim point around the arena center,
+    // hold fire in bursts, and walk toward a moving point.
+    const t: f32 = @floatFromInt(tick);
+    const angle = t * 0.02;
+    var flags: u32 = 0;
+    if ((tick / 30) % 2 == 0) flags |= 1; // fire_down bursts
+    if (tick % 90 == 0) flags |= 2; // fire_pressed
+    return .{
+        .move_x = 512.0 + 200.0 * @cos(angle * 0.5),
+        .move_y = 512.0 + 200.0 * @sin(angle * 0.5),
+        .aim_x = 512.0 + 300.0 * @cos(angle),
+        .aim_y = 512.0 + 300.0 * @sin(angle),
+        .flags = flags | 16, // move_to_cursor_pressed
+        .move_mode = 4, // MOUSE_POINT_CLICK
+        .aim_scheme = 0, // MOUSE
+        .perk_choice_index = -1,
+        .perk_menu_active = 0,
+    };
+}
+
+fn createTestSession() !u64 {
+    var handle: u64 = 0;
+    const rc = exports.crimson_host_session_create(
+        test_config_json.ptr,
+        @intCast(test_config_json.len),
+        &handle,
+    );
+    try std.testing.expectEqual(exports.ok, rc);
+    return handle;
+}
+
+test "abi version reports v1" {
+    try std.testing.expectEqual(@as(u32, 1), exports.crimson_host_abi_version());
+}
+
+test "abi verify passthrough matches native verifier byte for byte" {
+    const allocator = std.testing.allocator;
+    for ([_][]const u8{ survival_fixture, rush_fixture }) |fixture| {
+        const expected = try verify_native.runReplayVerifyBytesJson(
+            allocator,
+            "<host_abi>",
+            fixture,
+            null,
+        );
+        defer expected.deinit(allocator);
+
+        var out_len: u32 = 0;
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_verify_replay_json(
+            fixture.ptr,
+            @intCast(fixture.len),
+            null,
+            &out_len,
+        ));
+        try std.testing.expectEqual(@as(u32, @intCast(expected.stdout.len)), out_len);
+
+        const out = try allocator.alloc(u8, out_len);
+        defer allocator.free(out);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_verify_replay_json(
+            fixture.ptr,
+            @intCast(fixture.len),
+            out.ptr,
+            &out_len,
+        ));
+        try std.testing.expectEqualStrings(expected.stdout, out[0..out_len]);
+    }
+}
+
+test "abi session matches direct LiveRunner on identical scripted inputs" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    const staging = try std.testing.allocator.create(live_runner.LiveRunnerSnapshot);
+    defer std.testing.allocator.destroy(staging);
+    staging.runner = try live_runner.LiveRunner.init(.{
+        .seed = 1234,
+        .game_mode = .survival,
+        .player_count = 1,
+        .world_size = 1024.0,
+    });
+    const direct = try std.testing.allocator.create(live_runner.LiveRunner);
+    defer std.testing.allocator.destroy(direct);
+    direct.restoreSnapshot(staging);
+
+    var abi_result: exports.CrimsonHostTickResult = undefined;
+    const total_ticks: usize = 1200; // 20 seconds of survival
+
+    for (0..total_ticks) |tick| {
+        const host_input = scriptedInput(tick);
+        const inputs = [_]exports.CrimsonHostInput{host_input};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(
+            handle,
+            &inputs,
+            1,
+            &abi_result,
+        ));
+
+        var frame: live_runner.FrameInput = .{};
+        frame.player_count = 1;
+        frame.players[0] = .{
+            .move_x = host_input.move_x,
+            .move_y = host_input.move_y,
+            .aim_x = host_input.aim_x,
+            .aim_y = host_input.aim_y,
+            .flags = .{
+                .fire_down = host_input.flags & 1 != 0,
+                .fire_pressed = host_input.flags & 2 != 0,
+                .reload_pressed = false,
+                .move_to_cursor_pressed = host_input.flags & 16 != 0,
+                .move_mode = 4,
+                .aim_scheme = 0,
+            },
+        };
+        frame.player = frame.players[0];
+        _ = try direct.stepFrame(direct.session.dt_nominal, frame);
+    }
+
+    const direct_summary = direct.summary();
+    try std.testing.expectEqual(direct_summary.player_level, abi_result.player_level);
+    try std.testing.expectEqual(direct_summary.player_experience, abi_result.player_experience);
+    try std.testing.expectEqual(direct_summary.player_weapon_id, abi_result.player_weapon_id);
+    try std.testing.expectEqual(
+        @as(u32, @intCast(direct_summary.creature_active_count)),
+        abi_result.creature_active_count,
+    );
+    try std.testing.expectEqual(direct.session.tick_index, @as(usize, total_ticks));
+
+    // Player position must also match exactly (float parity).
+    var snap_len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, null, &snap_len));
+    const snap_buf = try std.testing.allocator.alloc(u8, snap_len);
+    defer std.testing.allocator.free(snap_buf);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, snap_buf.ptr, &snap_len));
+
+    var header: exports.SnapshotHeader = undefined;
+    @memcpy(std.mem.asBytes(&header), snap_buf[0..@sizeOf(exports.SnapshotHeader)]);
+    try std.testing.expectEqual(exports.snapshot_magic, header.magic);
+    try std.testing.expectEqual(@as(u32, 1), header.player_count);
+
+    var player: exports.PlayerSnap = undefined;
+    @memcpy(
+        std.mem.asBytes(&player),
+        snap_buf[@sizeOf(exports.SnapshotHeader)..][0..@sizeOf(exports.PlayerSnap)],
+    );
+    const direct_player = direct.player0Const().?;
+    try std.testing.expectEqual(direct_player.pos.x, player.x);
+    try std.testing.expectEqual(direct_player.pos.y, player.y);
+    try std.testing.expectEqual(direct_player.health, player.health);
+}
+
+test "abi sessions are deterministic across instances" {
+    const allocator = std.testing.allocator;
+    const handle_a = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle_a);
+    const handle_b = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle_b);
+
+    for (0..600) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle_a, &inputs, 1, null));
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle_b, &inputs, 1, null));
+    }
+
+    var len_a: u32 = 0;
+    var len_b: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle_a, null, &len_a));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle_b, null, &len_b));
+    try std.testing.expectEqual(len_a, len_b);
+    try std.testing.expect(len_a > @sizeOf(exports.SnapshotHeader));
+    try std.testing.expect(len_a <= exports.snapshotMaxSize());
+
+    const buf_a = try allocator.alloc(u8, len_a);
+    defer allocator.free(buf_a);
+    const buf_b = try allocator.alloc(u8, len_b);
+    defer allocator.free(buf_b);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle_a, buf_a.ptr, &len_a));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle_b, buf_b.ptr, &len_b));
+    try std.testing.expectEqualSlices(u8, buf_a, buf_b);
+}
+
+test "abi audio events decode after ticking" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    // Tick with fire held until at least one shot event lands.
+    var saw_shot = false;
+    for (0..240) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+
+        var len: u32 = 0;
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_audio_events(handle, null, &len));
+        try std.testing.expect(len >= @sizeOf(exports.AudioHeader));
+        var buf: [4096]u8 = undefined;
+        try std.testing.expect(len <= buf.len);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_audio_events(handle, &buf, &len));
+
+        var header: exports.AudioHeader = undefined;
+        @memcpy(std.mem.asBytes(&header), buf[0..@sizeOf(exports.AudioHeader)]);
+        if (header.shot_count > 0) {
+            var shot: exports.ShotAudioSnap = undefined;
+            @memcpy(
+                std.mem.asBytes(&shot),
+                buf[@sizeOf(exports.AudioHeader)..][0..@sizeOf(exports.ShotAudioSnap)],
+            );
+            try std.testing.expect(shot.weapon_id > 0);
+            saw_shot = true;
+            break;
+        }
+    }
+    try std.testing.expect(saw_shot);
+}
+
+test "abi rejects invalid handles and configs" {
+    var result: exports.CrimsonHostTickResult = undefined;
+    const inputs = [_]exports.CrimsonHostInput{scriptedInput(0)};
+    try std.testing.expectEqual(
+        exports.err_invalid_handle,
+        exports.crimson_host_session_tick(0xDEAD_BEEF_0000_0007, &inputs, 1, &result),
+    );
+
+    var handle: u64 = 0;
+    const bad_json = "{\"game_mode\": 99}";
+    try std.testing.expectEqual(
+        exports.err_invalid_config,
+        exports.crimson_host_session_create(bad_json.ptr, @intCast(bad_json.len), &handle),
+    );
+
+    var err_buf: [256]u8 = undefined;
+    const err_len = exports.crimson_host_last_error(&err_buf, err_buf.len);
+    try std.testing.expect(err_len > 0);
+
+    // Destroyed handles must be rejected afterwards (generation check).
+    const live = try createTestSession();
+    exports.crimson_host_session_destroy(live);
+    try std.testing.expectEqual(
+        exports.err_invalid_handle,
+        exports.crimson_host_session_tick(live, &inputs, 1, &result),
+    );
+}
