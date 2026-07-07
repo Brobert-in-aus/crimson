@@ -210,6 +210,32 @@ fn setErrorFmt(comptime fmt: []const u8, args: anytype) void {
     last_error_len = written.len;
 }
 
+// Session init (and the replay verifier) build multi-megabyte structs on the
+// stack. Host threads (e.g. .NET, 1 MiB) are too small, so stack-heavy entry
+// points run to completion on a dedicated big-stack thread.
+const dispatch_stack_size: usize = 64 * 1024 * 1024;
+
+fn runOnBigStack(comptime func: anytype, args: anytype) !void {
+    const Args = @TypeOf(args);
+    const Task = struct {
+        args: Args,
+        err: ?anyerror = null,
+        fn run(task: *@This()) void {
+            @call(.auto, func, task.args) catch |e| {
+                task.err = e;
+            };
+        }
+    };
+    var task = Task{ .args = args };
+    const thread = try std.Thread.spawn(
+        .{ .stack_size = dispatch_stack_size },
+        Task.run,
+        .{&task},
+    );
+    thread.join();
+    if (task.err) |e| return e;
+}
+
 fn handleFor(index: usize, generation: u32) u64 {
     return (@as(u64, generation) << 32) | @as(u64, @intCast(index));
 }
@@ -296,7 +322,12 @@ pub export fn crimson_host_session_create(
     };
     defer gpa.destroy(staging);
 
-    staging.runner = live_runner.LiveRunner.init(.{
+    const initStaging = struct {
+        fn run(dst: *live_runner.LiveRunnerSnapshot, cfg: live_runner.LiveModeConfig) !void {
+            dst.runner = try live_runner.LiveRunner.init(cfg);
+        }
+    }.run;
+    runOnBigStack(initStaging, .{ staging, live_runner.LiveModeConfig{
         .seed = config.seed,
         .game_mode = game_mode,
         .quest_level_key = config.quest_level_key,
@@ -310,7 +341,7 @@ pub export fn crimson_host_session_create(
         .demo_mode_active = config.demo_mode_active,
         .status_quest_unlock_index = config.status_quest_unlock_index,
         .status_quest_unlock_index_full = config.status_quest_unlock_index,
-    }) catch |err| {
+    } }) catch |err| {
         gpa.destroy(box);
         setErrorFmt("session init failed: {s}", .{@errorName(err)});
         return err_invalid_config;
@@ -673,13 +704,18 @@ pub export fn crimson_host_verify_replay_json(
         setError("out_len is null");
         return err_invalid_input;
     };
-    const output = verify_native.runReplayVerifyBytesJson(
-        gpa,
-        "<host_abi>",
-        replay_ptr[0..replay_len],
-        null,
-    ) catch |err| {
+    var output_slot: ?verify_native.CommandOutput = null;
+    const runVerify = struct {
+        fn run(slot: *?verify_native.CommandOutput, bytes: []const u8) !void {
+            slot.* = try verify_native.runReplayVerifyBytesJson(gpa, "<host_abi>", bytes, null);
+        }
+    }.run;
+    runOnBigStack(runVerify, .{ &output_slot, replay_ptr[0..replay_len] }) catch |err| {
         setErrorFmt("verify failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    const output = output_slot orelse {
+        setError("verify produced no output");
         return err_generic;
     };
     defer output.deinit(gpa);

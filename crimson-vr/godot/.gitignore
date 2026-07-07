@@ -1,0 +1,6 @@
+.godot/
+bin/
+obj/
+native/
+android/
+*.apk
