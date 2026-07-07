@@ -427,13 +427,39 @@ gate for LLM-generated work.
      APK: `crimson-vr/tools/inject_native_and_sign.ps1` injects it into
      `lib/arm64-v8a/`, re-aligns (zipalign), and re-signs (apksigner). Manifest
      has `extractNativeLibs=true`, so compressed injection is fine.
-     **Blocker for actual VR:** Godot's stock Android export omits
-     `libopenxr_loader.so`, so OpenXR can't start ("OpenXR loader not found" →
-     "Godot will start in normal mode"). Fix = **Godot OpenXR Vendors plugin**
-     (latest 5.1.0-stable; provides the Quest loader + required VR manifest
-     entries) which needs Godot's **gradle-based** Android build (the M0 export
-     used the simpler non-gradle path). This converts the Android export model
-     and is its own task — see M2 note below.
+     ~~Blocker for actual VR~~ **RESOLVED (2026-07): full VR on Quest 3 verified
+     in-headset — runs identically to the PCVR build.** Recipe that worked
+     (see also `Untitled VR Game/BUILD_FOR_QUEST.md` for the general version):
+       - Installed **Godot OpenXR Vendors plugin 5.1.0** into
+         `godot/addons/godotopenxrvendors/` (gitignored; restore via
+         `tools/fetch_vendors_plugin.ps1`).
+       - **Install Android Build Template from the editor** (Project menu) — a
+         manually-staged template is NOT recognized; the editor's installer
+         registers pieces the export checks for. (`.gdignore` must be at
+         `android/build/.gdignore`, not `android/.gdignore`, or Godot ignores the
+         whole template.)
+       - Export preset: `gradle_build/use_gradle_build=true`,
+         `xr_features/enable_meta_plugin=true`, `xr_features/xr_mode=1`,
+         arm64-v8a only. This bundles `libopenxr_loader.so` + all VR manifest
+         entries (headtracking feature, runtime-broker `<queries>`, IMMERSIVE_HMD
+         + oculus VR launch categories).
+       - Ran the gradle export **headless from the container** (which has the
+         SDK/JDK/NDK the host lacks); **close the editor first** — editor and
+         export can't both hold the plugin's `libgodotopenxrvendors.dll`.
+       - Bundled `libcrimson_host.so` via `tools/inject_native_and_sign.ps1`,
+         now using **`jar uf0`** (stored) + **`zipalign -P 16`** (Quest is a
+         16 KB-page OS) + **v2/v3 signing**. (.NET `ZipArchive` injection made
+         the installer reject the APK: `Failed to extract native libraries
+         res=-2`; gradle sets `extractNativeLibs=false`.)
+       - Install/launch over network adb; the Quest gates adb launches with a
+         "controllers required" dialog — **launch from the in-headset app
+         library** (Unknown Sources).
+     **Known open issue:** the arena spawns at the OpenXR *stage* origin (play-
+     space center), not in front of a seated player, and OS recenter doesn't fix
+     it. Fix added (untested on Quest): `Main.cs` now places the arena in front
+     of the head on the first valid frame and on a menu/AX-button recenter
+     (PLAN §5). Verify next session; may also want to switch to `local` reference
+     space or expose a scale/height/recenter settings panel.
 
 ### M1 — libcrimson host ABI
 - `crimson-zig/src/host_abi/` implementing §3; builds for win-x64 first.

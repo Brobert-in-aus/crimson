@@ -7,3 +7,6 @@ android/
 
 # Prebuilt third-party plugin (~46 MB); restore with tools/fetch_vendors_plugin.ps1
 addons/godotopenxrvendors/
+
+# Editor GodotSharp copy (workaround for .NET API path resolution); not source
+GodotSharp/

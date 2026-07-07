@@ -1,10 +1,19 @@
-# Post-processes a Godot-exported Android APK to bundle the crimson_host
-# native library into lib/arm64-v8a/ (Godot's export does not carry P/Invoke
-# natives), then re-aligns and re-signs it for sideloading.
+# Post-processes a Godot-exported (gradle) Android APK to bundle the
+# crimson_host native library into lib/arm64-v8a/, then re-aligns and re-signs
+# it for sideloading on Quest.
 #
 # Usage: inject_native_and_sign.ps1 <exported.apk> <output.apk>
-# Requires: Android build-tools (zipalign, apksigner), a JDK, and the debug
-# keystore at ~/.android/debug.keystore.
+# Requires: JDK (jar), Android build-tools (zipalign, apksigner), debug keystore.
+#
+# Notes learned the hard way:
+#  - Add the .so with `jar uf0` (STORED/uncompressed). Do NOT use .NET
+#    System.IO.Compression.ZipArchive — its full-archive rewrite produces a zip
+#    the Quest installer rejects (INSTALL_FAILED_INVALID_APK: Failed to extract
+#    native libraries, res=-2) for gradle APKs (extractNativeLibs=false).
+#  - Quest runs a 16 KB-page OS, so align native libs with `zipalign -P 16`
+#    (4 KB alignment installs fine on desktop but fails on Quest).
+#  - Sign v2/v3 only; injecting after Godot's signing invalidates it, and
+#    leaving stale v1 signature files around breaks v1 verification.
 
 param(
     [string]$InputApk = 'D:\Projects\crimson\artifacts\CrimsonVR.apk',
@@ -20,37 +29,35 @@ $zipalign = Join-Path $buildTools 'zipalign.exe'
 $apksigner = Join-Path $buildTools 'apksigner.bat'
 $keystore = Join-Path $env:USERPROFILE '.android\debug.keystore'
 $jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' | Select-Object -First 1 -ExpandProperty FullName
+$jar = Join-Path $jdk 'bin\jar.exe'
 $env:JAVA_HOME = $jdk
 
-if (-not (Test-Path $so)) { throw "native lib not found: $so (run build_libcrimson.ps1 -android)" }
+if (-not (Test-Path $so)) { throw "native lib not found: $so (build with build_libcrimson.ps1 -android)" }
+
+# Stage the .so at its APK-relative path in a temp dir (jar preserves the path).
+$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("apkinject_" + [System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force (Join-Path $staging 'lib\arm64-v8a') | Out-Null
+Copy-Item $so (Join-Path $staging 'lib\arm64-v8a\libcrimson_host.so') -Force
 
 $work = [System.IO.Path]::ChangeExtension($OutputApk, '.work.apk')
 Copy-Item $InputApk $work -Force
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::Open($work, 'Update')
+Push-Location $staging
 try {
-    # Strip Godot's signature (adding a file invalidates it; apksigner re-signs).
-    @($zip.Entries | Where-Object { $_.FullName -match '^META-INF/.*\.(SF|RSA|DSA|EC)$' }) |
-        ForEach-Object { $_.Delete() }
-    # Add/replace the native lib, STORED (uncompressed) so it works whether or
-    # not the manifest sets extractNativeLibs=false (gradle builds often do,
-    # which then requires uncompressed + page-aligned .so entries).
-    $existing = $zip.GetEntry('lib/arm64-v8a/libcrimson_host.so')
-    if ($existing) { $existing.Delete() }
-    [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-        $zip, $so, 'lib/arm64-v8a/libcrimson_host.so',
-        [System.IO.Compression.CompressionLevel]::NoCompression)
+    & $jar uf0 $work -C $staging 'lib/arm64-v8a/libcrimson_host.so'
+    if ($LASTEXITCODE -ne 0) { throw "jar add failed ($LASTEXITCODE)" }
 }
 finally {
-    $zip.Dispose()
+    Pop-Location
+    Remove-Item $staging -Recurse -Force
 }
 
-# Align, then sign (order matters: zipalign must precede apksigner).
-# -p page-aligns uncompressed .so entries (required when extractNativeLibs=false).
+# Align (16 KB pages for Quest), then sign (v2/v3 only).
 if (Test-Path $OutputApk) { Remove-Item $OutputApk -Force }
-& $zipalign -f -p 4 $work $OutputApk
+& $zipalign -P 16 -f 4 $work $OutputApk
+if ($LASTEXITCODE -ne 0) { throw "zipalign failed ($LASTEXITCODE)" }
 Remove-Item $work -Force
-& $apksigner sign --ks $keystore --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android $OutputApk
-& $apksigner verify --print-certs $OutputApk | Select-Object -First 2
-Write-Output "signed APK: $OutputApk"
+& $apksigner sign --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true `
+    --ks $keystore --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android $OutputApk
+if ($LASTEXITCODE -ne 0) { throw "apksigner failed ($LASTEXITCODE)" }
+Write-Output "signed Quest APK: $OutputApk"

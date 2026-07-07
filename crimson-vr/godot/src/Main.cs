@@ -14,6 +14,7 @@ public partial class Main : Node3D
     private const float GameWorldSize = 1024.0f;
 
     private XROrigin3D _origin = null!;
+    private XRCamera3D _camera = null!;
     private XRController3D _leftHand = null!;
     private XRController3D _rightHand = null!;
     private Node3D _arenaRoot = null!;
@@ -24,6 +25,13 @@ public partial class Main : Node3D
     private Label3D _status = null!;
 
     private bool _xrActive;
+    // Place the arena in front of the head on first valid frame, and whenever a
+    // recenter is requested. On standalone the OpenXR "stage" origin is the
+    // center of the play space, not the seated head pose, so a fixed offset
+    // spawns the table wherever the guardian center is (PLAN.md §5 recenter).
+    private bool _recenterPending = true;
+    private bool _prevRecenterHeld;
+    private int _framesSinceStart;
 
     public override void _Ready()
     {
@@ -75,7 +83,8 @@ public partial class Main : Node3D
     {
         _origin = new XROrigin3D();
         AddChild(_origin);
-        _origin.AddChild(new XRCamera3D { Position = new Vector3(0, 1.7f, 0) });
+        _camera = new XRCamera3D { Position = new Vector3(0, 1.7f, 0) };
+        _origin.AddChild(_camera);
 
         _leftHand = new XRController3D { Tracker = "left_hand", Pose = "grip" };
         _rightHand = new XRController3D { Tracker = "right_hand", Pose = "grip" };
@@ -93,9 +102,13 @@ public partial class Main : Node3D
             MaterialOverride = new StandardMaterial3D { AlbedoColor = color },
         };
 
+    private const float ArenaDistanceMeters = 0.6f;
+
     private void BuildArena()
     {
-        _arenaRoot = new Node3D { Position = new Vector3(0.0f, ArenaHeightMeters, -0.6f) };
+        // Initial position is a placeholder; RecenterArena() repositions it in
+        // front of the head once tracking is valid (see _Process).
+        _arenaRoot = new Node3D { Position = new Vector3(0.0f, ArenaHeightMeters, -ArenaDistanceMeters) };
         AddChild(_arenaRoot);
 
         var surface = new MeshInstance3D
@@ -181,8 +194,53 @@ public partial class Main : Node3D
 
     public override void _Process(double delta)
     {
+        HandleRecenter();
         UpdateHand(_leftHand, _leftReticle, _leftGuide, isMoveHand: true);
         UpdateHand(_rightHand, _rightReticle, _rightGuide, isMoveHand: false);
+    }
+
+    private void HandleRecenter()
+    {
+        // Request a recenter when either hand's menu/primary button is pressed
+        // (rising edge). The initial _recenterPending places the table on the
+        // first frame the head pose is valid.
+        _framesSinceStart++;
+        bool held = (_leftHand.GetHasTrackingData() && _leftHand.IsButtonPressed("menu_button"))
+                    || (_rightHand.GetHasTrackingData() && _rightHand.IsButtonPressed("ax_button"));
+        if (held && !_prevRecenterHeld)
+        {
+            _recenterPending = true;
+        }
+        _prevRecenterHeld = held;
+
+        // Wait a few frames after startup so the head pose has settled before the
+        // first placement. Button-triggered recenters apply immediately.
+        if (!_recenterPending || (!_xrActive) || _framesSinceStart < 15)
+        {
+            return;
+        }
+        RecenterArena();
+        _recenterPending = false;
+    }
+
+    private void RecenterArena()
+    {
+        // Put the arena on the floor plane at ArenaDistance in front of the
+        // head, at ArenaHeight, yawed to face the player. Forward is flattened
+        // to horizontal so table tilt never follows head pitch.
+        Vector3 headPos = _camera.GlobalPosition;
+        Vector3 forward = -_camera.GlobalTransform.Basis.Z;
+        forward.Y = 0.0f;
+        if (forward.LengthSquared() < 1e-5f)
+        {
+            forward = Vector3.Forward;
+        }
+        forward = forward.Normalized();
+
+        Vector3 pos = headPos + forward * ArenaDistanceMeters;
+        pos.Y = ArenaHeightMeters;
+        float yaw = Mathf.Atan2(forward.X, forward.Z);
+        _arenaRoot.GlobalTransform = new Transform3D(Basis.FromEuler(new Vector3(0, yaw, 0)), pos);
     }
 
     private void UpdateHand(XRController3D hand, Node3D reticle, Node3D guide, bool isMoveHand)
