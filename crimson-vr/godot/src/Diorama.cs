@@ -64,6 +64,11 @@ public sealed partial class Diorama : Node3D
         // travel, tinted per type via MultiMesh instance colors.
         public bool Streak;
 
+        // Creature layers: render the sprite at the reference world size —
+        // 64 * clamp(size/64, 0.25, 2.0) game units (creature_render_type) — so
+        // the sprite matches the sim hit radius instead of overshooting it.
+        public bool ClampRefSize;
+
         public Layer(int capacity)
         {
             Prev = new Ent[capacity];
@@ -203,9 +208,12 @@ public sealed partial class Diorama : Node3D
         // Player: bodyset sprite if available, else white quad. Priorities below
         // set draw order (higher = on top): bonuses under, then creatures (by
         // type), effects/projectiles above, player on top.
+        // sizeScale 1.0 = faithful: the reference draws a sprite at ~its `size`
+        // world units (player) / 64*clamp(size/64,.25,2) (creatures), so the sprite
+        // matches the sim hit radius. Bigger scales overshoot the hitbox.
         _players = manifest?.player is { } pd
-            ? BuildSpriteLayer(PlayerCap, pd, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 2.6f)
-            : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 2.2f, renderPriority: 15);
+            ? BuildSpriteLayer(PlayerCap, pd, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f)
+            : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
 
         // One creature layer per type so each can bind its own sheet texture.
         if (manifest?.creatures is { } creatures)
@@ -214,13 +222,16 @@ public sealed partial class Diorama : Node3D
             {
                 if (int.TryParse(kv.Key, out int typeId))
                 {
-                    _creatureLayers[typeId] =
-                        BuildAnimatedSpriteLayer(CreatureCapPerType, kv.Value, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.4f);
+                    Layer layer =
+                        BuildAnimatedSpriteLayer(CreatureCapPerType, kv.Value, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f);
+                    layer.ClampRefSize = true;
+                    _creatureLayers[typeId] = layer;
                 }
             }
         }
         // Fallback for unmapped creature types (e.g. bosses) so nothing vanishes.
-        _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.0f, renderPriority: 8);
+        _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
+        _creatureFallback.ClampRefSize = true;
 
         // Native pass order (top of the stack): player < projectiles/effects < bonuses/UI.
         // Projectiles/secondaries: additive per-type-tinted glow streaks. Lifted to
@@ -714,7 +725,12 @@ public sealed partial class Diorama : Node3D
             // Flat on the plane at a constant per-layer lift; layering is by draw
             // order (RenderPriority), not physical height.
             Vector3 pos = arena + new Vector3(0.0f, layer.Lift, 0.0f);
-            float meters = Mathf.Max(sizeGame * k * layer.SizeScale, 0.002f);
+            // Faithful creature world size: 64 * clamp(size/64, 0.25, 2.0) game
+            // units (creature_render_type). Others scale linearly from size.
+            float sizeUnits = layer.ClampRefSize
+                ? 64.0f * Mathf.Clamp(sizeGame / 64.0f, 0.25f, 2.0f)
+                : sizeGame;
+            float meters = Mathf.Max(sizeUnits * k * layer.SizeScale, 0.002f);
 
             if (castShadow)
             {
