@@ -622,14 +622,29 @@ manifest and draws:
   `src/crimson/render/world/draw.py`.
 - Projectiles/secondaries/bonuses are still colored quads.
 
-**Remaining M3 slices:** (a) **combined atlas + per-instance UV shader** (one
-mesh, per-instance custom-data UV) — unlocks animation AND, if ever wanted, true
-per-instance sorting; (b) **animation** (`anim_phase`→frame: 8x8, long-strip vs
-ping-pong, per-type mirror — `src/crimson/creatures/anim.py`; player
-legs=`move_phase`, torso=+16) on that path; (c) projectile/effect sprites;
-(d) terrain + decals (needs an ABI terrain seed/tile field); (e) positional
-audio + music (73 sfx Oggs extracted); (f) HUD; (g) 2.5D tilt + drop shadows;
-(h) id-based snapshot matching (above).
+**Slice 2 done (2026-07-08): creature animation.** Creatures now animate:
+`CreatureAnim.SelectFrame` (a faithful port of `creature_anim_select_frame`,
+`src/crimson/creatures/anim.py`) picks the 8x8 frame per instance from the
+snapshot's `anim_phase` + runtime `flags` (long-strip vs ping-pong, mirror fold,
+ranged-shock +0x20 offset). Per-type `base_frame`/`mirror` come from the manifest
+(baked from `CREATURE_ANIM`); flag bits (PING_PONG 0x04, SHOCK 0x10, LONG_STRIP
+0x40) arrive verbatim in `CreatureSnap.flags`. Each creature MultiMesh now uses a
+small unshaded sprite **shader** with per-instance **custom data** = (uvOffX,
+uvOffY, uvScale, 0) selecting the cell — replacing the StandardMaterial static-UV
+path. Frame uses the current tick's phase (no interp across the phase wrap).
+28 new golden-value C# tests (`CreatureAnimTests`, vs the Python reference) — 46
+total green; `dotnet build` clean; headless boot exercises the animated
+custom-data path with no exceptions. Player stays a static torso frame (leg anim
+needs a `move_phase` ABI field — deferred). GPU shader compile still pending
+in-headset/PCVR confirmation (headless uses the dummy renderer).
+
+**Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
+now done per-type; a combined atlas would add true per-instance depth sorting —
+low priority); (c) projectile/effect sprites; (d) terrain + decals (needs an ABI
+terrain seed/tile field); (e) positional audio + music (73 sfx Oggs extracted,
+`crimson_host_audio_events` already exposed); (f) HUD; (g) 2.5D tilt + drop
+shadows; (h) id-based snapshot matching (above); plus player leg animation
+(needs a `move_phase` ABI field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings

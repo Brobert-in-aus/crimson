@@ -6,13 +6,14 @@ using Godot;
 namespace CrimsonVR;
 
 /// <summary>
-/// Diorama renderer. M3 slice 1: creatures and the player are drawn as real
-/// Crimsonland sprites (static frame from their 8x8 sheets, PLAN §6), one
-/// MultiMeshInstance3D per creature type so each can carry its own sheet
-/// texture; projectiles/secondaries/bonuses remain colored quads for now.
-/// Orientation comes from each entity's heading (a yaw applied per instance),
-/// so static frames still face the right way — animation (anim_phase -> frame)
-/// is slice 2 on this same per-instance path.
+/// Diorama renderer. M3: creatures and the player are drawn as real Crimsonland
+/// sprites from their 8x8 sheets (PLAN §6), one MultiMeshInstance3D per creature
+/// type so each can carry its own sheet texture; projectiles/secondaries/bonuses
+/// remain colored quads for now. Orientation comes from each entity's heading (a
+/// yaw applied per instance). Creatures are ANIMATED (slice 2): a sprite shader
+/// selects the 8x8 frame per instance from the snapshot's anim_phase + flags
+/// (CreatureAnim.SelectFrame) via MultiMesh custom data. The player is a static
+/// torso frame (leg animation needs a move-phase ABI field; deferred).
 ///
 /// Sprites/manifest are produced by crimson-vr/tools/bake_assets.py into
 /// res://assets/sprites/ (gitignored). If they're absent the renderer falls
@@ -28,6 +29,8 @@ public sealed partial class Diorama : Node3D
         public Vector2 Game;
         public float Angle;
         public float SizeGame;
+        public float AnimPhase; // creatures only; drives per-instance frame
+        public uint Flags;      // creatures only; anim strip/mirror/shock bits
     }
 
     private sealed class Layer
@@ -40,6 +43,14 @@ public sealed partial class Diorama : Node3D
         public float Lift;
         public float SizeScale;
         public float HeadingOffset; // radians; corrects a sheet's baked art facing
+
+        // Animation (creature layers): pick the 8x8 frame per instance from
+        // anim_phase + flags via CreatureAnim.SelectFrame, written into the
+        // MultiMesh instance custom data (UV offset) for the sprite shader.
+        public bool Animated;
+        public int Grid = 1;
+        public int BaseFrame;
+        public bool MirrorLong;
 
         public Layer(int capacity)
         {
@@ -54,13 +65,20 @@ public sealed partial class Diorama : Node3D
             CurrCount = 0;
         }
 
-        public void Add(Vector2 game, float angle, float sizeGame)
+        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0)
         {
             if (CurrCount >= Curr.Length)
             {
                 return;
             }
-            Curr[CurrCount++] = new Ent { Game = game, Angle = angle, SizeGame = sizeGame };
+            Curr[CurrCount++] = new Ent
+            {
+                Game = game,
+                Angle = angle,
+                SizeGame = sizeGame,
+                AnimPhase = animPhase,
+                Flags = flags,
+            };
         }
     }
 
@@ -122,7 +140,7 @@ public sealed partial class Diorama : Node3D
                 if (int.TryParse(kv.Key, out int typeId))
                 {
                     _creatureLayers[typeId] =
-                        BuildSpriteLayer(CreatureCapPerType, kv.Value, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.4f);
+                        BuildAnimatedSpriteLayer(CreatureCapPerType, kv.Value, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.4f);
                 }
             }
         }
@@ -206,11 +224,36 @@ public sealed partial class Diorama : Node3D
         return layer;
     }
 
-    private Layer BuildLayer(int capacity, Material material, float lift, float sizeScale)
+    /// <summary>Animated textured layer: one MultiMesh bound to the sheet, with
+    /// per-instance custom data selecting the 8x8 frame's UV cell each tick
+    /// (CreatureAnim.SelectFrame). Falls back to a colored layer when the sheet
+    /// is missing.</summary>
+    private Layer BuildAnimatedSpriteLayer(int capacity, SpriteDesc desc, Color fallback, float lift, float sizeScale)
+    {
+        string path = SpriteDir + desc.sheet;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
+            return BuildColorLayer(capacity, fallback, lift, sizeScale);
+        }
+
+        var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = desc.priority };
+        material.SetShaderParameter("sheet", tex);
+        Layer layer = BuildLayer(capacity, material, lift, sizeScale, useCustomData: true);
+        layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
+        layer.Animated = true;
+        layer.Grid = Mathf.Max(desc.grid, 1);
+        layer.BaseFrame = desc.baseFrame;
+        layer.MirrorLong = desc.mirror;
+        return layer;
+    }
+
+    private Layer BuildLayer(int capacity, Material material, float lift, float sizeScale, bool useCustomData = false)
     {
         var mesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = useCustomData,
             Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
             InstanceCount = capacity,
             VisibleInstanceCount = 0,
@@ -219,6 +262,28 @@ public sealed partial class Diorama : Node3D
         AddChild(node);
         return new Layer(capacity) { Mesh = mesh, Lift = lift, SizeScale = sizeScale };
     }
+
+    // Sprite shader for animated layers: samples one 8x8 cell chosen per instance
+    // via INSTANCE_CUSTOM = (uv_offset_x, uv_offset_y, uv_scale, unused). Unshaded,
+    // alpha-blended, depth-write off so material RenderPriority alone orders the
+    // flat 2.5D layers (matches the StandardMaterial path in BuildSpriteLayer).
+    private Shader? _spriteShader;
+    private Shader SpriteShader => _spriteShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform sampler2D sheet : source_color, filter_nearest;
+            varying vec4 inst;
+            void vertex() { inst = INSTANCE_CUSTOM; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                ALBEDO = c.rgb;
+                ALPHA = c.a;
+            }
+            """,
+    };
 
     /// <summary>Copy one sim snapshot into the layers' current buffers, rolling
     /// the previous current into prev. Call once per sim tick.</summary>
@@ -239,7 +304,7 @@ public sealed partial class Diorama : Node3D
         foreach (Sim.CreatureSnap c in view.Creatures)
         {
             Layer target = _creatureLayers.TryGetValue(c.TypeId, out Layer? l) ? l : _creatureFallback;
-            target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size);
+            target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags);
         }
 
         _projectiles.BeginPush();
@@ -321,6 +386,23 @@ public sealed partial class Diorama : Node3D
             }
             layer.Mesh.SetInstanceTransform(i, new Transform3D(basis, pos));
 
+            if (layer.Animated)
+            {
+                // Frame from the current tick's phase (not interpolated: the
+                // phase wraps, so lerping across the seam would glitch; 60 Hz is
+                // already smooth). Custom data = (uvOffX, uvOffY, uvScale, 0).
+                int grid = layer.Grid;
+                int frame = CreatureAnim.SelectFrame(cur.AnimPhase, layer.BaseFrame, layer.MirrorLong, cur.Flags);
+                int cells = grid * grid;
+                frame = frame < 0 ? 0 : (frame >= cells ? cells - 1 : frame);
+                float inv = 1.0f / grid;
+                layer.Mesh.SetInstanceCustomData(i, new Color(
+                    (frame % grid) * inv,
+                    (frame / grid) * inv,
+                    inv,
+                    0.0f));
+            }
+
             if (sprite && _needles != null)
             {
                 AddNeedle(arena, angle);
@@ -384,6 +466,13 @@ public sealed partial class Diorama : Node3D
         public float offsetDeg { get; set; }
 
         public int priority { get; set; } = 8;
+
+        // Animation layout (creatures): base frame + long-strip mirror fold,
+        // consumed by CreatureAnim.SelectFrame with the snapshot's anim_phase.
+        [JsonPropertyName("base_frame")]
+        public int baseFrame { get; set; }
+
+        public bool mirror { get; set; }
     }
 
     private sealed class SpriteManifest

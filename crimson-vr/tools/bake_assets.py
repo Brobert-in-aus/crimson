@@ -7,11 +7,12 @@ committed, PLAN §10), alongside a JSON manifest describing how each entity type
 maps to a sheet + frame. The manifest holds only factual layout metadata
 (sheet name, grid, frame index, pivot), not asset-derived art.
 
-Slice 1 (static frames): creatures + player as single representative frames.
-Sheets are 8x8 grids (creature_render_type, src/crimson/creatures/anim.py); the
-frame index within a sheet is chosen from anim_phase at render time — deferred
-to slice 2, so this bakes frame 0 as the static pose (orientation still comes
-from the entity heading, applied by the renderer).
+Sheets are 8x8 grids (creature_render_type, src/crimson/creatures/anim.py). The
+manifest carries each creature's animation layout (base_frame, mirror); the
+renderer selects the live frame per instance from the snapshot's anim_phase +
+flags (CreatureAnim.SelectFrame, slice 2). Orientation comes from the entity
+heading, applied by the renderer. The player is still a single static torso
+frame (leg animation needs a move-phase ABI field; deferred).
 
 Usage:
     uv run crimson-vr/tools/bake_assets.py [assets_dir] [out_dir]
@@ -36,6 +37,21 @@ CREATURE_SHEETS: dict[int, str] = {
     5: "trooper.png",
 }
 CREATURE_GRID = 8  # 8x8 atlas (creature_render_type)
+
+# Per-type animation layout (src/crimson/sim/world_defs.py CREATURE_ANIM):
+# base frame index + whether the long-strip walk cycle mirror-folds. The live
+# anim_phase + runtime flags (both in the ABI snapshot) pick the actual frame at
+# render time via CreatureAnim.SelectFrame (a port of creature_anim_select_frame).
+# anim_rate is a sim-side quantity (it advances anim_phase) and is not needed by
+# the frontend. type_id -> (base_frame, mirror).
+CREATURE_ANIM: dict[int, tuple[int, bool]] = {
+    0: (0x20, False),  # zombie
+    1: (0x10, True),   # lizard
+    2: (0x20, False),  # alien
+    3: (0x10, True),   # spider_sp1
+    4: (0x10, True),   # spider_sp2
+    5: (0x00, False),  # trooper
+}
 
 # Draw-order priority per type (higher = drawn on top), matching the original's
 # fixed creature draw order (_NATIVE_CREATURE_SPRITE_DRAW_ORDER, bottom->top):
@@ -87,7 +103,13 @@ def main() -> None:
         # rotate them -90 (validated in-headset against the debug needle).
         "creatures": {
             str(type_id): {
-                "sheet": sheet, "grid": CREATURE_GRID, "frame": 0,
+                "sheet": sheet, "grid": CREATURE_GRID,
+                # frame is the static fallback (used only if animation is off or
+                # the layer draws colored quads); base_frame + mirror drive the
+                # animated per-instance frame selection.
+                "frame": CREATURE_ANIM.get(type_id, (0, False))[0],
+                "base_frame": CREATURE_ANIM.get(type_id, (0, False))[0],
+                "mirror": CREATURE_ANIM.get(type_id, (0, False))[1],
                 "pivot": [0.5, 0.5], "offset_deg": -90.0,
                 "priority": CREATURE_PRIORITY.get(type_id, 8),
             }
