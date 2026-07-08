@@ -720,13 +720,36 @@ no asset) flat under each creature/player, at the lowest RenderPriority so every
 sprite sits on top. Build clean; headless boot runs the shadow/tilt path with no
 exceptions. Tilt angle + shadow size/opacity are first-pass — tune in-headset.
 
-**Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
-now done per-type; a combined atlas would add true per-instance depth sorting —
-low priority); slice 6b effect/particle pools (needs ABI, above); faithful
-per-weapon projectile rendering (registry port); (d) terrain + decals (needs an
-ABI terrain seed/tile field); (h) id-based snapshot matching (above); music
-(loose Ogg, game-tune trigger); the off-arena spawn-margin edge treatment (§6
-known issue); plus player leg animation (needs a `move_phase` ABI field).
+**In-headset findings (2026-07-08 PCVR) — not-yet-implemented / to tune:**
+- **Creature death + corpses.** Killed creatures currently show their walk frame
+  briefly then vanish. The reference fades + swaps to a corpse frame when
+  `lifecycle_stage < 0` (negative-phase fallback in `creature_render_type`) and
+  paints persistent corpse decals from `bodyset.png` (`fx_queue`). `CreatureSnap`
+  already carries `lifecycle_stage` — the renderer just ignores it. A "death +
+  corpse" slice: fade/corpse-frame on lifecycle, then bodyset decals.
+- **Creature overlays (freeze ice-block, energizer tint, etc.).** The frozen
+  ice-block over a creature is a `draw_creature_overlays` pass, not implemented;
+  freeze *particles* (freeze_shard/shatter EffectIds) do show via 6b. A
+  creature-overlay slice covers freeze/energizer/hit-flash tints.
+- **Sprite-vs-hitbox scale.** Bullets pass through zombie limbs and only hit the
+  body. The hitbox is faithful (sim-driven), but our creature `SizeScale` = 2.4
+  draws sprites ~2.4× the reference proportion (reference world-width ≈
+  `creature.size`, i.e. `size_scale = size/64`), exaggerating limbs past the hit
+  radius. Reducing SizeScale toward ~1.0 would match the hitbox + be
+  proportionally accurate, but makes creatures notably smaller — a look decision.
+- **Bullet origin.** Bullets spawn at the player's centre (sim spawn point), not
+  the gun muzzle; a small aim-direction offset on the projectile origin would
+  align them. Low priority.
+- **Effect scale.** Muzzle flash / explosions / blood all render but are subtle;
+  a dedicated effects-scale tuning pass wanted. Gibs not obviously visible.
+
+**Remaining M3 slices:** creature death + corpses (above; uses `lifecycle_stage`,
+no ABI change); creature overlays (above); (a) combined atlas + single-mesh (true
+per-instance depth sort — low priority); faithful per-weapon projectile rendering
+(registry port); (d) terrain + decals (needs an ABI terrain seed/tile field);
+(h) id-based snapshot matching (above); music (loose Ogg, game-tune trigger);
+off-arena spawn-margin edge treatment (§6); effect-scale tuning + sprite-hitbox
+scale (above); player leg animation (needs a `move_phase` ABI field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
