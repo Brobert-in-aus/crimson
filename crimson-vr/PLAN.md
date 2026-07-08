@@ -692,12 +692,23 @@ The faithful per-weapon projectile rendering (the `render/projectile_draw/`
 registry: beam/plasma tail-head-aura segments, bullet-trail textures) is a bigger
 job left for later; the glow-streak captures the essential look meanwhile.
 
-**Slice 6b — effect/particle pools (needs ABI).** The real particle systems
-(blood, gibs, sparks) live in `crimson-zig` runtime pools (`effects.zig`
-`EffectPool` w/ `effect_id`→atlas, `SpriteEffectPool`; `particles.zig`
-`ParticlePool`) but aren't in the snapshot. Exposing them is an append-only ABI
-snapshot array + C# decode + effect-atlas (particles.png) bake + **M1 gate re-run**
-+ native-lib rebuilds (win-x64 + arm64). A proper ABI slice, deferred.
+**Slice 6b done (2026-07-08): sprite-effect particles via the ABI (v2).** The
+`EffectPool` (blood, gibs, explosions, casings, glows — `effects.zig`) is now in
+the snapshot: **ABI bumped to v2**, `SnapshotHeader.particle_count` +
+`crimson_host_particle_snap[]` appended after bonuses (pos, half_w/h, scale,
+rotation, rgba, age, effect_id, flags), packed for live entries
+(`flags != 0 && age >= 0`, `draw_effect_pool`'s gate). C# decodes it
+(`Sim.ParticleSnap`, `SnapshotView.Particles`); `Diorama.RenderParticles` draws
+them from **particles.png** with a per-instance UV+color shader, flat on the
+plane, sized `half*2*scale`, rotated, alpha-blended, RenderPriority 23 (effects
+draw over the world in the native order). The bake precomputes each `effect_id`'s
+UV cell (`effect_atlas_table` from `EFFECT_ID_ATLAS_TABLE`, variable
+size_code grid, 2px inset). **M1 gate re-run green** (443/461, the 18 baseline
+failures only; append-only field doesn't touch determinism); both native libs
+rebuilt (win-x64 + arm64). C# build + headless boot clean (v2 snapshot decodes,
+no magic/offset error). Sim particles (flamethrower `ParticlePool`,
+`SpriteEffectPool`) not yet exposed — a later add. On-device visual confirmation
+pending.
 
 **Slice 5 done (2026-07-08): 2.5D tilt + drop shadows.** Creature/player sprites
 get a fixed back-tilt (`SpriteTilt`, default 22°, tunable) applied about the arena

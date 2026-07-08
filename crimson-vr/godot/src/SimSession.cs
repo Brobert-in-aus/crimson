@@ -18,6 +18,7 @@ public readonly ref struct SnapshotView
     private readonly int _projectilesOff;
     private readonly int _secondariesOff;
     private readonly int _bonusesOff;
+    private readonly int _particlesOff;
 
     public SnapshotView(ReadOnlySpan<byte> buf)
     {
@@ -38,6 +39,8 @@ public readonly ref struct SnapshotView
         _secondariesOff = off;
         off += (int)Header.SecondaryCount * Unsafe.SizeOf<Sim.SecondarySnap>();
         _bonusesOff = off;
+        off += (int)Header.BonusCount * Unsafe.SizeOf<Sim.BonusSnap>();
+        _particlesOff = off;
     }
 
     public ReadOnlySpan<Sim.PlayerSnap> Players
@@ -50,6 +53,8 @@ public readonly ref struct SnapshotView
         => Cast<Sim.SecondarySnap>(_secondariesOff, Header.SecondaryCount);
     public ReadOnlySpan<Sim.BonusSnap> Bonuses
         => Cast<Sim.BonusSnap>(_bonusesOff, Header.BonusCount);
+    public ReadOnlySpan<Sim.ParticleSnap> Particles
+        => Cast<Sim.ParticleSnap>(_particlesOff, Header.ParticleCount);
 
     public ulong Tick => ((ulong)Header.TickHi << 32) | Header.TickLo;
 

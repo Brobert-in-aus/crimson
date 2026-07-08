@@ -17,7 +17,10 @@ namespace CrimsonVR;
 ///
 /// 2.5D (slice 5, PLAN §6): sprites get a fixed back-tilt toward the player so
 /// they read as "standing" from a low angle, and a shared soft drop-shadow blob
-/// grounds each creature/player on the plane.
+/// grounds each creature/player on the plane. Projectiles/secondaries are
+/// additive per-type glow streaks with muzzle/explosion bursts (slice 6a);
+/// sprite-effect particles (blood/gibs/explosions/casings from the ABI v2
+/// particle stream) draw from particles.png over the world (slice 6b).
 ///
 /// Sprites/manifest are produced by crimson-vr/tools/bake_assets.py into
 /// res://assets/sprites/ (gitignored). If they're absent the renderer falls
@@ -97,6 +100,9 @@ public sealed partial class Diorama : Node3D
     private const int ProjectileCap = 8192;
     private const int SecondaryCap = 2048;
     private const int BonusCap = 256;
+    private const int ParticleCap = 512; // crimson-zig effect_pool_size (0x200)
+
+    private const int EffectDrawFlag = 0x40; // draw_effect_pool gate (flags & 0x40)
 
     private const string SpriteDir = "res://assets/sprites/";
 
@@ -153,6 +159,12 @@ public sealed partial class Diorama : Node3D
     private MultiMesh _fx = null!;
     private int _fxCount;
     private const int FxCap = 2048;
+
+    // Sprite-effect pool (slice 6b): blood/gibs/explosions/casings from the ABI
+    // particle stream, drawn from particles.png. effect_id -> precomputed UV cell
+    // (uv offset + scale) from the bake; per-instance UV + color via the shader.
+    private MultiMesh? _particles;
+    private readonly Dictionary<int, Vector3> _effectUv = new(); // effect_id -> (offX, offY, scale)
 
     // Per-type projectile glow tint (known_proj_rgb, projectile_render_registry.py).
     // Colors only (not asset-derived); default is the tan bullet glow.
@@ -217,6 +229,7 @@ public sealed partial class Diorama : Node3D
 
         BuildShadows();
         BuildFx();
+        BuildParticles(manifest);
 
         if (DebugFacing)
         {
@@ -370,6 +383,104 @@ public sealed partial class Diorama : Node3D
         AddChild(new MultiMeshInstance3D { Multimesh = _fx, MaterialOverride = AdditiveGlowMaterial(22) });
     }
 
+    // Particle shader: per-instance UV cell (INSTANCE_CUSTOM = off.xy, scale.z)
+    // and per-instance rgba tint (COLOR). Alpha-blended (draw_effect_pool uses
+    // BLEND_ALPHA), depth-write off so RenderPriority orders it above the world.
+    private Shader? _particleShader;
+    private Shader ParticleShader => _particleShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform sampler2D sheet : source_color, filter_linear;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                ALBEDO = c.rgb * col.rgb;
+                ALPHA = c.a * col.a;
+            }
+            """,
+    };
+
+    /// <summary>Sprite-effect layer: particles.png with per-instance UV+color.
+    /// Effects draw after creatures/projectiles in the native order, so this sits
+    /// on top (RenderPriority 23). Absent assets -> no particles (still runs).</summary>
+    private void BuildParticles(SpriteManifest? manifest)
+    {
+        if (manifest?.effects is not { Count: > 0 } effects || manifest.effects_sheet is not { } sheetName)
+        {
+            return;
+        }
+        string path = SpriteDir + sheetName;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            GD.PushWarning($"CrimsonVR: effects sheet missing ({path}); no particles");
+            return;
+        }
+        foreach (KeyValuePair<string, EffectUv> kv in effects)
+        {
+            if (int.TryParse(kv.Key, out int id) && kv.Value.uv_off is { Length: >= 2 })
+            {
+                _effectUv[id] = new Vector3(kv.Value.uv_off[0], kv.Value.uv_off[1], kv.Value.uv_scale);
+            }
+        }
+
+        var material = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 23 };
+        material.SetShaderParameter("sheet", tex);
+        _particles = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = ParticleCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _particles, MaterialOverride = material });
+    }
+
+    /// <summary>Draw the live sprite-effect entries from one snapshot (called at
+    /// tick time from PushSnapshot). Effects are short-lived and the pool
+    /// reorders, so they aren't interpolated — 60 Hz is fine.</summary>
+    private void RenderParticles(in SnapshotView view)
+    {
+        if (_particles == null)
+        {
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        int n = 0;
+        foreach (Sim.ParticleSnap p in view.Particles)
+        {
+            // Match draw_effect_pool's gate (alpha pass) and skip unknown effects.
+            if ((p.Flags & EffectDrawFlag) == 0 || !_effectUv.TryGetValue(p.EffectId, out Vector3 uv))
+            {
+                continue;
+            }
+            if (n >= ParticleCap)
+            {
+                break;
+            }
+            float w = Mathf.Max(p.HalfWidth * 2.0f * p.Scale * k, 0.001f);
+            float h = Mathf.Max(p.HalfHeight * 2.0f * p.Scale * k, 0.001f);
+            Vector3 pos = Mapper.GameToArenaLocal(new Vector2(p.X, p.Y), _arenaSideMeters, _worldSize)
+                + new Vector3(0.0f, 0.007f, 0.0f);
+            // Flat on the plane, spun by the effect's rotation. The quad's width
+            // and height are basis columns 0 and 1 (its local X/Y); the normal is
+            // column 2, left unscaled.
+            Basis basis = new Basis(Vector3.Up, p.Rotation) * FlatBasis;
+            basis = basis.Scaled(new Vector3(w, h, 1.0f));
+            _particles.SetInstanceTransform(n, new Transform3D(basis, pos));
+            _particles.SetInstanceColor(n, new Color(p.R, p.G, p.B, p.A));
+            _particles.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+            n++;
+        }
+        _particles.VisibleInstanceCount = n;
+    }
+
     /// <summary>One shared MultiMesh of soft round blobs drawn flat on the plane
     /// under the creature/player sprites to ground them (PLAN §6). Drawn first
     /// (lowest RenderPriority) so every sprite sits on top.</summary>
@@ -498,6 +609,8 @@ public sealed partial class Diorama : Node3D
         {
             _bonuses.Add(new Vector2(b.X, b.Y), 0.0f, 1.0f);
         }
+
+        RenderParticles(view);
     }
 
     /// <summary>Write interpolated instance transforms for the current frame.
@@ -735,10 +848,18 @@ public sealed partial class Diorama : Node3D
         public bool mirror { get; set; }
     }
 
+    private sealed class EffectUv
+    {
+        public float[] uv_off { get; set; } = { 0.0f, 0.0f };
+        public float uv_scale { get; set; } = 1.0f;
+    }
+
     private sealed class SpriteManifest
     {
         public Dictionary<string, SpriteDesc>? creatures { get; set; }
         public SpriteDesc? player { get; set; }
+        public Dictionary<string, EffectUv>? effects { get; set; }
+        public string? effects_sheet { get; set; }
     }
 
     private static SpriteManifest? LoadManifest()

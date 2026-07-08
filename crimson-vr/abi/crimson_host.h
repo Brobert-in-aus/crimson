@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 1u
+#define CRIMSON_HOST_ABI_VERSION 2u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -110,6 +110,7 @@ typedef struct crimson_host_tick_result {
  *   crimson_host_projectile_snap[projectile_count]
  *   crimson_host_secondary_snap [secondary_count]
  *   crimson_host_bonus_snap     [bonus_count]
+ *   crimson_host_particle_snap  [particle_count]   (ABI v2+)
  */
 typedef struct crimson_host_snapshot_header {
     uint32_t magic;   /* CRIMSON_HOST_SNAPSHOT_MAGIC */
@@ -127,6 +128,7 @@ typedef struct crimson_host_snapshot_header {
     uint32_t projectile_count;
     uint32_t secondary_count;
     uint32_t bonus_count;
+    uint32_t particle_count; /* ABI v2+; sprite-effect pool (blood/gibs/etc.) */
 } crimson_host_snapshot_header;
 
 typedef struct crimson_host_player_snap {
@@ -186,6 +188,25 @@ typedef struct crimson_host_bonus_snap {
     int32_t bonus_id;
     int32_t amount;
 } crimson_host_bonus_snap;
+
+/* One live sprite-effect (blood, gibs, explosions, casings, glows) from the
+ * effect pool. effect_id indexes the particles atlas; the render size is
+ * half_width/half_height * scale; flags & 0x40 + age >= 0 gate the alpha pass. */
+typedef struct crimson_host_particle_snap {
+    float x;
+    float y;
+    float half_width;
+    float half_height;
+    float scale;
+    float rotation;
+    float r;
+    float g;
+    float b;
+    float a;
+    float age;
+    int32_t effect_id;
+    int32_t flags;
+} crimson_host_particle_snap;
 
 /* Audio payload layout (packed, in order):
  *   crimson_host_audio_header

@@ -18,7 +18,7 @@ const live_runner = crimson_zig.live_runner;
 const state_mod = crimson_zig.state;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 1;
+pub const abi_version: u32 = 2;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 pub const ok: i32 = 0;
@@ -85,6 +85,7 @@ pub const SnapshotHeader = extern struct {
     projectile_count: u32,
     secondary_count: u32,
     bonus_count: u32,
+    particle_count: u32,
 };
 
 pub const PlayerSnap = extern struct {
@@ -143,6 +144,26 @@ pub const BonusSnap = extern struct {
     time_max: f32,
     bonus_id: i32,
     amount: i32,
+};
+
+// One live entry of the sprite EffectPool (blood, gibs, explosions, casings,
+// glows). Mirrors what draw_effect_pool reads: an effect_id (-> particles atlas
+// frame), size (half_width/height * scale), rotation, rgba color, and the
+// flags/age liveness gate. Packed after bonuses in the snapshot (append-only).
+pub const ParticleSnap = extern struct {
+    x: f32,
+    y: f32,
+    half_width: f32,
+    half_height: f32,
+    scale: f32,
+    rotation: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+    age: f32,
+    effect_id: i32,
+    flags: i32,
 };
 
 pub const AudioHeader = extern struct {
@@ -457,7 +478,8 @@ pub fn snapshotMaxSize() u32 {
         @sizeOf(CreatureSnap) * crimson_zig.creatures.max_creatures +
         @sizeOf(ProjectileSnap) * crimson_zig.projectiles.main_projectile_pool_size +
         @sizeOf(SecondarySnap) * crimson_zig.secondary_projectiles.secondary_projectile_pool_size +
-        @sizeOf(BonusSnap) * crimson_zig.bonuses.bonus_pool_size;
+        @sizeOf(BonusSnap) * crimson_zig.bonuses.bonus_pool_size +
+        @sizeOf(ParticleSnap) * crimson_zig.effects.effect_pool_size;
     return @intCast(total);
 }
 
@@ -498,6 +520,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .projectile_count = 0,
         .secondary_count = 0,
         .bonus_count = 0,
+        .particle_count = 0,
     };
 
     if (header.perk_pending_count > 0) {
@@ -522,13 +545,18 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     for (box.runner.session.bonuses.entries) |entry| {
         if (entry.bonus_id != .unused and !entry.picked) header.bonus_count += 1;
     }
+    // Live sprite-effect entries, using draw_effect_pool's liveness gate.
+    for (box.runner.session.effects.entries) |entry| {
+        if (entry.flags != 0 and entry.age >= 0.0) header.particle_count += 1;
+    }
 
     const required: u32 = @sizeOf(SnapshotHeader) +
         @sizeOf(PlayerSnap) * header.player_count +
         @sizeOf(CreatureSnap) * header.creature_count +
         @sizeOf(ProjectileSnap) * header.projectile_count +
         @sizeOf(SecondarySnap) * header.secondary_count +
-        @sizeOf(BonusSnap) * header.bonus_count;
+        @sizeOf(BonusSnap) * header.bonus_count +
+        @sizeOf(ParticleSnap) * header.particle_count;
 
     const out_ptr = buf orelse {
         len_ptr.* = required;
@@ -609,6 +637,24 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .time_max = entry.time_max,
             .bonus_id = @intFromEnum(entry.bonus_id),
             .amount = entry.amount,
+        });
+    }
+    for (box.runner.session.effects.entries) |entry| {
+        if (entry.flags == 0 or entry.age < 0.0) continue;
+        writeStruct(out, &offset, ParticleSnap{
+            .x = entry.pos.x,
+            .y = entry.pos.y,
+            .half_width = entry.half_width,
+            .half_height = entry.half_height,
+            .scale = entry.scale,
+            .rotation = entry.rotation,
+            .r = entry.color.r,
+            .g = entry.color.g,
+            .b = entry.color.b,
+            .a = entry.color.a,
+            .age = entry.age,
+            .effect_id = entry.effect_id,
+            .flags = entry.flags,
         });
     }
 

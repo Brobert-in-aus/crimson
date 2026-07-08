@@ -86,6 +86,7 @@ public static partial class Sim
         public uint ProjectileCount;
         public uint SecondaryCount;
         public uint BonusCount;
+        public uint ParticleCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -154,6 +155,27 @@ public static partial class Sim
         public float TimeMax;
         public int BonusId;
         public int Amount;
+    }
+
+    // One live sprite-effect (blood, gibs, explosion, casing, glow). Mirrors the
+    // Zig ParticleSnap: effect_id -> particles-atlas frame, size from
+    // half_width/half_height*scale, rotation, rgba color, flags/age gate.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParticleSnap
+    {
+        public float X;
+        public float Y;
+        public float HalfWidth;
+        public float HalfHeight;
+        public float Scale;
+        public float Rotation;
+        public float R;
+        public float G;
+        public float B;
+        public float A;
+        public float Age;
+        public int EffectId;
+        public int Flags;
     }
 
     // Audio events drained per tick (crimson_host_audio_events). Header then

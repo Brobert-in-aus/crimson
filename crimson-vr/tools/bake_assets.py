@@ -78,12 +78,37 @@ PLAYER_PRIORITY = 15  # above creatures, below projectiles/bonuses (native pass 
 GAME = "crimson/game"
 
 
+def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | None:
+    """effect_id -> {uv_off:[x,y], uv_scale} for the particles.png sprite-effect
+    atlas (EFFECT_ID_ATLAS_TABLE). Each effect_id occupies one cell of a
+    per-effect grid (size_code); we precompute the UV rect (with the native 2px
+    inset that avoids cell bleed) so the renderer just looks it up by the ABI
+    ParticleSnap.effect_id and feeds it as per-instance UV."""
+    if not particles_size:
+        return None
+    from src.crimson.effects_atlas import EFFECT_ID_ATLAS_TABLE, SIZE_CODE_GRID
+
+    tex_w = float(particles_size[0])
+    inset = 2.0 / tex_w  # native clamps UVs to (cell - 2px)
+    out: dict[str, dict] = {}
+    for e in EFFECT_ID_ATLAS_TABLE:
+        grid = SIZE_CODE_GRID[e.size_code]
+        cell = 1.0 / grid
+        col = e.frame % grid
+        row = e.frame // grid
+        out[str(e.effect_id)] = {
+            "uv_off": [col * cell + inset, row * cell + inset],
+            "uv_scale": cell - 2.0 * inset,
+        }
+    return out
+
+
 def main() -> None:
     assets_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("artifacts/assets")
     out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("crimson-vr/godot/assets/sprites")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    needed = set(CREATURE_SHEETS.values()) | {"bodyset.png", "projs.png", "bonuses.png"}
+    needed = set(CREATURE_SHEETS.values()) | {"bodyset.png", "projs.png", "bonuses.png", "particles.png"}
     staged: dict[str, list[int]] = {}
     for name in sorted(needed):
         src = assets_dir / GAME / name
@@ -132,6 +157,12 @@ def main() -> None:
         }
         if "trooper.png" in staged
         else None,
+        # Sprite-effect atlas (particles.png): effect_id -> the UV cell to sample.
+        # Each effect uses its own grid (size_code), so precompute per-effect
+        # uv_off/uv_scale here (with the native 2px cell inset) for the renderer's
+        # per-instance UV. Keyed off ABI ParticleSnap.effect_id.
+        "effects": effect_atlas_table(staged.get("particles.png")),
+        "effects_sheet": "particles.png" if "particles.png" in staged else None,
     }
 
     manifest_path = out_dir / "sprite_manifest.json"
