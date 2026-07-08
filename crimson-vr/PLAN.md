@@ -684,12 +684,23 @@ clean slice, and a quick "tint the quads" version mostly renders the default tan
 Deferred until it can be done properly (likely alongside the combined-atlas
 single-mesh path). Projectiles/secondaries/bonuses stay colored quads meanwhile.
 
+**Slice 5 done (2026-07-08): 2.5D tilt + drop shadows.** Creature/player sprites
+get a fixed back-tilt (`SpriteTilt`, default 22°, tunable) applied about the arena
+X axis so the lean is the same for every sprite regardless of heading and tips
+toward the player's near edge (-z); the sprite centre is raised by
+`½·size·sin(tilt)` so the tilted base stays near the plane. A shared drop-shadow
+MultiMesh (`BuildShadows`) draws a soft radial-gradient blob (generated in code,
+no asset) flat under each creature/player, at the lowest RenderPriority so every
+sprite sits on top. Build clean; headless boot runs the shadow/tilt path with no
+exceptions. Tilt angle + shadow size/opacity are first-pass — tune in-headset.
+
 **Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
 now done per-type; a combined atlas would add true per-instance depth sorting —
 low priority); (c) projectile/effect sprites (see above — large); (d) terrain +
-decals (needs an ABI terrain seed/tile field); (g) 2.5D tilt + drop shadows;
-(h) id-based snapshot matching (above); music (loose Ogg, game-tune trigger);
-plus player leg animation (needs a `move_phase` ABI field).
+decals (needs an ABI terrain seed/tile field); (h) id-based snapshot matching
+(above); music (loose Ogg, game-tune trigger); the off-arena spawn-margin edge
+treatment (§6 known issue); plus player leg animation (needs a `move_phase` ABI
+field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
