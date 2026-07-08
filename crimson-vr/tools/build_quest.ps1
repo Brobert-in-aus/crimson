@@ -1,5 +1,6 @@
 # One-shot Quest APK pipeline: gradle Android export (headless) -> inject the
-# arm64 crimson_host native lib -> zipalign + sign -> optional adb install.
+# arm64 crimson_host native lib -> zipalign + sign -> verify payload -> optional
+# adb install.
 # Wraps the two manual steps (Godot export, inject_native_and_sign.ps1) that
 # ship a sideloadable Quest build.
 #
@@ -49,8 +50,10 @@ Remove-Item $outLog, $errLog -ErrorAction SilentlyContinue
 if (Test-Path $apk) { Remove-Item $apk -Force }
 
 Write-Host "==> Exporting Android APK (headless gradle build)..." -ForegroundColor Cyan
+# --xr-mode off keeps this local export process from trying to start XR (a
+# flat-fallback popup); it does NOT disable XR in the export preset / the APK.
 $p = Start-Process -FilePath $Godot `
-    -ArgumentList @('--headless', '--path', $proj, '--export-debug', 'Android', $apk) `
+    -ArgumentList @('--headless', '--xr-mode', 'off', '--path', $proj, '--export-debug', 'Android', $apk) `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
 
 function Get-ExportLog {
@@ -103,6 +106,28 @@ Write-Host ("==> Exported {0} ({1} MB)" -f (Split-Path $apk -Leaf), $apkMb) -For
 Write-Host "==> Injecting native lib + signing..." -ForegroundColor Cyan
 & $inject -InputApk $apk -OutputApk $questApk
 if ($LASTEXITCODE -ne 0) { throw "inject/sign failed ($LASTEXITCODE)" }
+
+# Fail-closed payload check before a headset trip (learning from the Untitled VR
+# Game build script): a broken export/inject otherwise only surfaces on-device as
+# a flat app (missing OpenXR loader/vendor) or a dlopen failure (missing native
+# lib). A cheap "jar tf" listing vs the required VR + native entries.
+Write-Host "==> Verifying APK payload..." -ForegroundColor Cyan
+$jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+$jar = if ($jdk) { Join-Path $jdk 'bin\jar.exe' } else { 'jar' }
+$entries = & $jar tf $questApk 2>$null
+$required = @(
+    'classes.dex',                               # .NET/managed runtime present
+    'lib/arm64-v8a/libcrimson_host.so',          # our injected native sim lib
+    'lib/arm64-v8a/libopenxr_loader.so',         # real VR (else flat mode)
+    'lib/arm64-v8a/libgodotopenxrvendors.so'     # OpenXR Vendors plugin
+)
+foreach ($e in $required) {
+    if ($entries -notcontains $e) {
+        throw "APK verification failed: '$e' missing from $questApk -- the export/inject is broken (would run flat or fail dlopen on-device)."
+    }
+}
+Write-Host ("    payload OK ({0} required entries present)" -f $required.Count) -ForegroundColor DarkGray
 
 if ($Install) {
     $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
