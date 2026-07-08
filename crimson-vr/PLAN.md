@@ -656,12 +656,29 @@ oggs import cleanly; headless boot routes audio with no exceptions. **Sound
 output pending in-headset/PCVR confirmation.** Music (game-tune trigger) is
 deferred — the hit-event game-tune path is recognized but plays nothing yet.
 
+**Slice 4 done (2026-07-08): in-world HUD.** `Hud.cs` — a panel anchored under
+`ArenaRoot` at the near edge (a Label3D + two unshaded quad bars), updated each
+tick from `TickResult` + `PlayerSnap`: health (bar vs an assumed-100 max + exact
+numeric), ammo/clip (bar) that switches to a reload-progress bar while reloading,
+and a `HP / LV / FOES` line. No sim/ABI change. `dotnet build` clean; headless
+boot updates the HUD with no exceptions. Placement/tilt are first-pass, to be
+tuned in-headset.
+
+**Projectile/effect sprites — scoped out for now.** The desktop projectile
+renderer is a large multi-file dispatch (`render/projectile_draw/`:
+beam/bullet/plasma/special/rocket + secondary detonation/rocket, additive bullet
+trails, per-type plasma tail/head/aura segment configs, `KNOWN_PROJ_FRAMES` +
+`known_proj_rgb` tints). A faithful port is a milestone-sized effort, not a
+clean slice, and a quick "tint the quads" version mostly renders the default tan.
+Deferred until it can be done properly (likely alongside the combined-atlas
+single-mesh path). Projectiles/secondaries/bonuses stay colored quads meanwhile.
+
 **Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
 now done per-type; a combined atlas would add true per-instance depth sorting —
-low priority); (c) projectile/effect sprites; (d) terrain + decals (needs an ABI
-terrain seed/tile field); (f) HUD; (g) 2.5D tilt + drop shadows; (h) id-based
-snapshot matching (above); music (loose Ogg, game-tune trigger); plus player leg
-animation (needs a `move_phase` ABI field).
+low priority); (c) projectile/effect sprites (see above — large); (d) terrain +
+decals (needs an ABI terrain seed/tile field); (g) 2.5D tilt + drop shadows;
+(h) id-based snapshot matching (above); music (loose Ogg, game-tune trigger);
+plus player leg animation (needs a `move_phase` ABI field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings

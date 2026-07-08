@@ -54,6 +54,7 @@ public partial class Main : Node3D
     private SimSession? _sim;
     private Diorama _diorama = null!;
     private AudioBank _audio = null!;
+    private Hud _hud = null!;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -96,6 +97,11 @@ public partial class Main : Node3D
         _audio = new AudioBank();
         _arenaRoot.AddChild(_audio);
         _audio.Configure(ArenaSideMeters, GameWorldSize);
+
+        // HUD panel at the arena's near edge (health/ammo/level), also arena-local.
+        _hud = new Hud();
+        _arenaRoot.AddChild(_hud);
+        _hud.Build(ArenaSideMeters);
 
         try
         {
@@ -272,14 +278,13 @@ public partial class Main : Node3D
         {
             Sim.PlayerSnap p = snap.Players[0];
             _playerGame = new Vector2(p.X, p.Y);
+            _hud.Update(result, p);
         }
         _diorama.PushSnapshot(snap);
 
         // Play the audio this tick emitted, positioned relative to the player.
         AudioEventsView audio = _sim.CaptureAudio();
         _audio.Route(audio, _playerGame);
-
-        UpdateStatus(result);
     }
 
     private HandSample SampleHand(XRController3D hand, int index)
@@ -308,13 +313,6 @@ public partial class Main : Node3D
             TriggerPressed = triggerPressed,
             ReloadPressed = reloadPressed,
         };
-    }
-
-    private void UpdateStatus(Sim.TickResult result)
-    {
-        _status.Text =
-            $"HP {result.PlayerHealth:0}  Lv {result.PlayerLevel}  " +
-            $"foes {result.CreatureActiveCount}";
     }
 
     // ---- Rendering: reticles + interpolated diorama at headset refresh ----
