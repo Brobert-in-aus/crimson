@@ -38,10 +38,13 @@ public sealed partial class Hud : Node3D
         _barWidth = arenaSideMeters * 0.8f;
         float barHeight = arenaSideMeters * 0.05f;
 
-        // Anchor just outside the near edge (game +y -> arena +z), lifted a touch
-        // and tilted up toward a seated player looking down at the table.
-        Position = new Vector3(0.0f, 0.02f, half + arenaSideMeters * 0.14f);
-        RotationDegrees = new Vector3(-55.0f, 0.0f, 0.0f);
+        // Anchor just outside the NEAR edge. RecenterArena yaws the arena so its
+        // local +z points along the player's forward (across the table), so the
+        // near edge — the player's side — is arena-local -z. The 180 deg yaw
+        // turns the panel back to face the player; the -55 deg pitch tilts its
+        // top away so a seated player looking down reads it upright.
+        Position = new Vector3(0.0f, 0.02f, -(half + arenaSideMeters * 0.14f));
+        RotationDegrees = new Vector3(-55.0f, 180.0f, 0.0f);
 
         _text = new Label3D
         {
@@ -60,18 +63,22 @@ public sealed partial class Hud : Node3D
     }
 
     /// <summary>Create a bar (bg quad + fill quad) at a local Y offset. Returns
-    /// the fill node; the fill grows from the left as its X scale shrinks.</summary>
+    /// the fill node; the fill grows from the left as its X scale shrinks. The
+    /// track and fill are alpha-blended with distinct RenderPriority (fill above
+    /// track) so draw order is explicit — coplanar opaque quads with the depth
+    /// test off z-fight into just their edges (RenderPriority is ignored for
+    /// opaque materials).</summary>
     private MeshInstance3D MakeBar(float width, float height, float y, Color fill, out StandardMaterial3D fillMat)
     {
         var bg = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
             Position = new Vector3(0.0f, y, -0.001f),
-            MaterialOverride = FlatMat(BarBg),
+            MaterialOverride = FlatMat(BarBg, priority: 40),
         };
         AddChild(bg);
 
-        fillMat = FlatMat(fill);
+        fillMat = FlatMat(fill, priority: 41);
         var fillNode = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
@@ -82,12 +89,17 @@ public sealed partial class Hud : Node3D
         return fillNode;
     }
 
-    private static StandardMaterial3D FlatMat(Color c) => new()
+    private static StandardMaterial3D FlatMat(Color c, int priority) => new()
     {
         AlbedoColor = c,
         ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        // Alpha blend + no depth write so RenderPriority orders the coplanar
+        // quads; NoDepthTest keeps the HUD on top of the arena.
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
         NoDepthTest = true,
+        RenderPriority = priority,
     };
 
     public void Update(in Sim.TickResult result, in Sim.PlayerSnap player)
