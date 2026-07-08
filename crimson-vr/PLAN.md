@@ -608,9 +608,10 @@ playtest pending.** New frontend code in `crimson-vr/godot/src/`:
   late-game survival entity counts (use `replay benchmark`-style stress
   seeds); draw calls within budget (< ~50 for world layers).
 
-**Status (2026-07-08): slice 1 done — real static sprites, correct facing,**
-**native-matched z-stacking; in-headset validated (PCVR).** Assets come from the
-user's Crimsonland Classic install (see §6 GOG note), extracted with `crimson
+**Status (2026-07-08): M3 substantially complete, validated in-headset (PCVR);**
+**fidelity gaps audited below. The per-slice notes that follow are the**
+**historical build log (see also git history + code comments).** Assets come from
+the user's Crimsonland Classic install (see §6 GOG note), extracted with `crimson
 extract`. `crimson-vr/tools/bake_assets.py` stages the 8x8 sheets into
 `godot/assets/sprites/` (gitignored) + a JSON manifest (per entity type: sheet,
 frame, pivot, art-facing `offset_deg`, draw `priority`). `Diorama.cs` loads the
@@ -720,36 +721,53 @@ no asset) flat under each creature/player, at the lowest RenderPriority so every
 sprite sits on top. Build clean; headless boot runs the shadow/tilt path with no
 exceptions. Tilt angle + shadow size/opacity are first-pass — tune in-headset.
 
-**In-headset findings (2026-07-08 PCVR) — not-yet-implemented / to tune:**
-- **Creature death + corpses.** Killed creatures currently show their walk frame
-  briefly then vanish. The reference fades + swaps to a corpse frame when
-  `lifecycle_stage < 0` (negative-phase fallback in `creature_render_type`) and
-  paints persistent corpse decals from `bodyset.png` (`fx_queue`). `CreatureSnap`
-  already carries `lifecycle_stage` — the renderer just ignores it. A "death +
-  corpse" slice: fade/corpse-frame on lifecycle, then bodyset decals.
-- **Creature overlays (freeze ice-block, energizer tint, etc.).** The frozen
-  ice-block over a creature is a `draw_creature_overlays` pass, not implemented;
-  freeze *particles* (freeze_shard/shatter EffectIds) do show via 6b. A
-  creature-overlay slice covers freeze/energizer/hit-flash tints.
-- **Sprite-vs-hitbox scale.** Bullets pass through zombie limbs and only hit the
-  body. The hitbox is faithful (sim-driven), but our creature `SizeScale` = 2.4
-  draws sprites ~2.4× the reference proportion (reference world-width ≈
-  `creature.size`, i.e. `size_scale = size/64`), exaggerating limbs past the hit
-  radius. Reducing SizeScale toward ~1.0 would match the hitbox + be
-  proportionally accurate, but makes creatures notably smaller — a look decision.
-- **Bullet origin.** Bullets spawn at the player's centre (sim spawn point), not
-  the gun muzzle; a small aim-direction offset on the projectile origin would
-  align them. Low priority.
-- **Effect scale.** Muzzle flash / explosions / blood all render but are subtle;
-  a dedicated effects-scale tuning pass wanted. Gibs not obviously visible.
+**Fidelity vs the original — audit (2026-07-08, after in-headset review).**
 
-**Remaining M3 slices:** creature death + corpses (above; uses `lifecycle_stage`,
-no ABI change); creature overlays (above); (a) combined atlas + single-mesh (true
-per-instance depth sort — low priority); faithful per-weapon projectile rendering
-(registry port); (d) terrain + decals (needs an ABI terrain seed/tile field);
-(h) id-based snapshot matching (above); music (loose Ogg, game-tune trigger);
-off-arena spawn-margin edge treatment (§6); effect-scale tuning + sprite-hitbox
-scale (above); player leg animation (needs a `move_phase` ABI field).
+*Faithful:* creature/player facing, animation frame selection, draw/z-order,
+sprite↔hitbox size (fixed — `SizeScale` 1.0 = reference proportion; creatures use
+the reference clamp `64*clamp(size/64, 0.25, 2.0)`), audio routing, sprite-effect
+particles.
+
+*Intentional VR adaptations (deviate by design, not bugs):* tabletop diorama +
+vertical-projection controls; VR-native HUD; soft ground drop-shadows (the
+original uses an offset-silhouette "darken" pass); positional audio (original SFX
+are non-positional); snapshot interpolation (render at headset refresh); the 2.5D
+back-tilt was tried and rejected (flat reads better, `SpriteTiltDegrees = 0`).
+
+*Gaps — need an ABI change (append-only field + re-run the M1 gate):*
+- **Creature color/tint** — `CreatureSnap` carries no color, so creatures render
+  flat: no per-variant tints, energizer-blue, XP reddening, or **hit-flash**
+  (white flash on hit). Highest-impact visual gap after death animation.
+- **Player legs** — torso only; legs + leg animation need a `move_phase` field.
+- **Terrain** — flat quad; no terrain texture and no blood/scorch ground decals
+  (needs a terrain seed + a decal event stream).
+- **Other effect pools** — only `EffectPool` is streamed; the flamethrower/
+  bubblegun `ParticlePool` + `SpriteEffectPool` are not.
+
+*Gaps — frontend only:*
+- **Death animation + corpses** — `lifecycle_stage` is in the snapshot but ignored
+  (creatures pop out); the reference fades + swaps to a corpse frame
+  (negative-phase fallback in `creature_render_type`) then paints `bodyset.png`
+  corpse decals.
+- **Creature overlays** — freeze ice-block, monster-vision, poison/plague, aura
+  (`draw_creature_overlays`). Freeze *particles* already show via 6b.
+- **Projectiles/secondaries** — per-type glow streaks, not the faithful per-weapon
+  render (`render/projectile_draw/`: bullet trails, plasma tail/head/aura, beams,
+  sharpshooter laser).
+- **Bonuses** — colored quads; `bonuses.png` staged but unused (no bonus icons).
+- **Muzzle flash / explosions** — procedural additive glows, not the sprite-based
+  flashes; they also read subtle (an effects-scale tuning pass is wanted; gibs
+  faint).
+- **Bullet origin** — spawns at the player's centre (sim spawn point), not the
+  gun muzzle. Low priority.
+
+**Remaining M3 slices (recommended order):** (1) creature **death + corpses**
+(frontend, high impact, uses `lifecycle_stage`); (2) creature **color/tint +
+hit-flash** (ABI); (3) **terrain + blood decals** (ABI). Then, lower impact:
+creature overlays; faithful projectile-registry render; bonus icons; muzzle/
+explosion sprites + effect-scale pass; music (loose-Ogg game-tune trigger);
+off-arena spawn-margin edge treatment (§6); other effect pools; combined-atlas
+single-mesh (true per-instance sort); id-based snapshot matching; player legs.
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
