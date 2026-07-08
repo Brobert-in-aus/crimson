@@ -350,6 +350,17 @@ Notes:
 
 ## 6. Presentation (2.5D)
 
+> **Known issue — off-arena spawn margin (found in M3 in-headset, 2026-07-08).**
+> Survival creatures spawn **40 game units outside** the terrain bounds
+> (`rand_survival_spawn_pos`: edge = `-40` or `terrain+40`) and walk in. The flat
+> game's camera crops that margin so it's never seen; the VR diorama shows the
+> whole world plane, so clusters visibly pop in *outside* the table and run onto
+> it. Needs an elegant arena-edge treatment (e.g. a fade/vignette band or a
+> raised rim that masks the spawn ring, or gently over-sizing the terrain quad
+> past the playfield so the margin reads as "off-table" rather than floating).
+> Presentation-only (no sim change — spawn positions must stay exact for parity).
+> Defer to a later M3 polish pass or M4.
+
 - **Terrain**: flat quad with the generated terrain texture; decals (blood,
   scorch) painted into a `SubViewport` decal layer composited over it —
   driven by the ABI decal event stream.
