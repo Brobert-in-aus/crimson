@@ -310,9 +310,12 @@ Notes:
   `L` (and arena distance/height) is derived to fit that reach with margin —
   the seated analogue of the play-area-fit rule above. Persisted per user like
   scale/height. Until then M2 ships the fixed 0.4 m default.
-- Height `h`: default 0.75 m (desk height), adjustable 0.4–1.4 m; a "recenter"
-  action places the arena centered in front of the current head pose at the
-  configured height and snaps yaw to face the player.
+- Height `h`: recenter places the arena a comfortable **drop below the current
+  head pose** (M2 default 0.5 m, floored at a 0.35 m minimum below the head) and
+  snaps yaw to face the player. **Tracking head height on every recenter is what
+  resets the vertical** — an earlier fixed world height (0.75 m) left a *standing*
+  player with the table far below them (M2 in-headset finding, 2026-07). The drop
+  (and a min-below-head clamp) become tunables in the M4 arena-customisation tool.
 - Seated and standing both work by construction (arena is world-anchored;
   posture just changes viewing angle — the "isometric" look). Reach, however,
   differs — see the seated calibration note above.

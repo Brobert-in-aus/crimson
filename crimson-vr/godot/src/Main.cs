@@ -24,6 +24,12 @@ public partial class Main : Node3D
     // headset finding, 2026-07: centre at 0.6 m put the far half out of reach.)
     private const float ArenaNearEdgeMeters = 0.10f;
     private const float ArenaDistanceMeters = ArenaNearEdgeMeters + ArenaSideMeters * 0.5f;
+    // Vertical placement: the arena sits this far below the head pose, refreshed
+    // on every recenter (so a standing player isn't left with the table far
+    // below). MinVerticalDrop is the closest under the head it may sit. Both
+    // become tunables in the M4 arena-customisation tool (PLAN §5).
+    private const float VerticalDropMeters = 0.5f;
+    private const float MinVerticalDropMeters = 0.35f;
     private const int SimTicksPerSecond = 60;
 
     private const float TriggerThreshold = 0.5f;
@@ -385,9 +391,13 @@ public partial class Main : Node3D
 
     private void RecenterArena()
     {
-        // Put the arena on the floor plane at ArenaDistance in front of the head,
-        // at ArenaHeight, yawed to face the player. Forward is flattened to
-        // horizontal so table tilt never follows head pitch.
+        // Place the arena ArenaDistance in front of the head and a comfortable
+        // drop BELOW the current head pose, yawed to face the player. Tracking
+        // head height (rather than a fixed world height) is what makes recenter
+        // reset the vertical too, so a standing player doesn't get the table far
+        // below them. Forward is flattened to horizontal so table tilt never
+        // follows head pitch. (Height becomes a tunable in the M4 arena-
+        // customisation tool — PLAN §5.)
         Vector3 headPos = _camera.GlobalPosition;
         Vector3 forward = -_camera.GlobalTransform.Basis.Z;
         forward.Y = 0.0f;
@@ -398,7 +408,9 @@ public partial class Main : Node3D
         forward = forward.Normalized();
 
         Vector3 pos = headPos + forward * ArenaDistanceMeters;
-        pos.Y = ArenaHeightMeters;
+        // At least MinVerticalDropMeters below the head; never below the floor.
+        float drop = Mathf.Max(VerticalDropMeters, MinVerticalDropMeters);
+        pos.Y = Mathf.Max(headPos.Y - drop, 0.05f);
         float yaw = Mathf.Atan2(forward.X, forward.Z);
         _arenaRoot.GlobalTransform = new Transform3D(Basis.FromEuler(new Vector3(0, yaw, 0)), pos);
     }
