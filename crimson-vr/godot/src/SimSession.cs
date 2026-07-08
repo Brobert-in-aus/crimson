@@ -58,6 +58,43 @@ public readonly ref struct SnapshotView
 }
 
 /// <summary>
+/// A zero-copy view over one packed audio-events payload (crimson_host_audio_events,
+/// see Sim.AudioHeader). Spans alias the owning session's audio buffer, valid
+/// until the next <see cref="SimSession.CaptureAudio"/> call.
+/// </summary>
+public readonly ref struct AudioEventsView
+{
+    public readonly Sim.AudioHeader Header;
+    private readonly ReadOnlySpan<byte> _buf;
+    private readonly int _shotsOff;
+    private readonly int _reloadsOff;
+    private readonly int _hitsOff;
+    private readonly int _sfxOff;
+
+    public AudioEventsView(ReadOnlySpan<byte> buf)
+    {
+        Header = MemoryMarshal.Read<Sim.AudioHeader>(buf);
+        _buf = buf;
+        int off = Unsafe.SizeOf<Sim.AudioHeader>();
+        _shotsOff = off;
+        off += (int)Header.ShotCount * Unsafe.SizeOf<Sim.ShotAudioSnap>();
+        _reloadsOff = off;
+        off += (int)Header.ReloadCount * sizeof(int);
+        _hitsOff = off;
+        off += (int)Header.HitCount * Unsafe.SizeOf<Sim.HitAudioSnap>();
+        _sfxOff = off;
+    }
+
+    public ReadOnlySpan<Sim.ShotAudioSnap> Shots => Cast<Sim.ShotAudioSnap>(_shotsOff, Header.ShotCount);
+    public ReadOnlySpan<int> Reloads => Cast<int>(_reloadsOff, Header.ReloadCount);
+    public ReadOnlySpan<Sim.HitAudioSnap> Hits => Cast<Sim.HitAudioSnap>(_hitsOff, Header.HitCount);
+    public ReadOnlySpan<int> Sfx => Cast<int>(_sfxOff, Header.SfxCount);
+
+    private ReadOnlySpan<T> Cast<T>(int offset, uint count) where T : struct
+        => MemoryMarshal.Cast<byte, T>(_buf.Slice(offset, (int)count * Unsafe.SizeOf<T>()));
+}
+
+/// <summary>
 /// Owns one live simulation handle and drives it at the sim tick rate. Wraps
 /// the raw P/Invoke surface in Sim.cs with buffer management: ticks take a
 /// single-player <see cref="Sim.HostInput"/>, and <see cref="CaptureSnapshot"/>
@@ -69,6 +106,7 @@ public sealed class SimSession : IDisposable
     private readonly string _configJson;
     private readonly byte[][] _bufs = new byte[2][];
     private int _curSlot = -1;
+    private byte[] _audioBuf = new byte[4096];
 
     public ulong Handle { get; private set; }
     public Sim.TickResult LastResult { get; private set; }
@@ -113,6 +151,27 @@ public sealed class SimSession : IDisposable
         }
         _curSlot = slot;
         return new SnapshotView(buf.AsSpan(0, (int)len));
+    }
+
+    /// <summary>Drain the audio events accumulated during the last tick. The
+    /// returned view is valid until the next CaptureAudio call. Grows the
+    /// backing buffer on demand (the count varies with on-screen activity).</summary>
+    public AudioEventsView CaptureAudio()
+    {
+        uint len = (uint)_audioBuf.Length;
+        int rc = Sim.AudioEvents(Handle, _audioBuf, ref len);
+        if (rc != Sim.Ok)
+        {
+            // Buffer too small: len now holds the required size. Grow and retry.
+            _audioBuf = new byte[len];
+            len = (uint)_audioBuf.Length;
+            rc = Sim.AudioEvents(Handle, _audioBuf, ref len);
+            if (rc != Sim.Ok)
+            {
+                throw new InvalidOperationException($"audio events failed ({rc}): {Sim.LastError()}");
+            }
+        }
+        return new AudioEventsView(_audioBuf.AsSpan(0, (int)len));
     }
 
     /// <summary>Tear down and recreate the session with the same config.</summary>

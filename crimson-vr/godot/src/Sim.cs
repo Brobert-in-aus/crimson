@@ -156,6 +156,36 @@ public static partial class Sim
         public int Amount;
     }
 
+    // Audio events drained per tick (crimson_host_audio_events). Header then
+    // packed arrays: ShotAudioSnap[], reload weapon ids (i32[]), HitAudioSnap[],
+    // sfx ids (i32[] = @intFromEnum(SfxId), i.e. native sfx index).
+    [StructLayout(LayoutKind.Sequential)]
+    public struct AudioHeader
+    {
+        public uint Version;
+        public uint Flags;
+        public uint ShotCount;
+        public uint ReloadCount;
+        public uint HitCount;
+        public uint SfxCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ShotAudioSnap
+    {
+        public int WeaponId;
+        public uint FireBulletsActive;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HitAudioSnap
+    {
+        public uint ShockHit;
+        public int BulletHitRoll;  // -1 = none (this hit triggered the game tune)
+        public int GameTuneRoll;   // -1 = none
+        public uint TriggerGameTune;
+    }
+
     static Sim()
     {
         NativeLibrary.SetDllImportResolver(Assembly.GetExecutingAssembly(), ResolveNative);

@@ -638,13 +638,30 @@ custom-data path with no exceptions. Player stays a static torso frame (leg anim
 needs a `move_phase` ABI field — deferred). GPU shader compile still pending
 in-headset/PCVR confirmation (headless uses the dummy renderer).
 
+**Slice 3 done (2026-07-08): positional SFX.** The host-ABI audio events
+(`crimson_host_audio_events`, drained each tick via `SimSession.CaptureAudio` →
+`AudioEventsView`) now play through `AudioBank` — a pool of spatialized
+`AudioStreamPlayer3D` anchored under `ArenaRoot` so sound comes from the
+tabletop. Routing mirrors `audio_router.py`: shot events map weapon_id→fire
+sound (or Fire-Bullets + Plasma-Minigun when active), reload events
+weapon_id→reload sound, hit events play shock/bullet-hit (ABI supplies the
+resolved roll), loose sfx events are native sfx ids. Mappings come from a baked
+`assets/audio/audio_manifest.json` (`bake_assets.py` now also stages the 70
+distinct Oggs + emits the manifest); the sfx-id list is index-aligned to the Zig
+`SfxId` enum (`@intFromEnum`), which matches Python `SFX_NATIVE_ORDER`. No
+per-event position exists in the ABI (the original SFX aren't positional), so
+shots/reload emit at the player and everything else at arena centre — subtle
+across 0.4 m, but sound comes from the table not the head. `dotnet build` clean;
+oggs import cleanly; headless boot routes audio with no exceptions. **Sound
+output pending in-headset/PCVR confirmation.** Music (game-tune trigger) is
+deferred — the hit-event game-tune path is recognized but plays nothing yet.
+
 **Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
 now done per-type; a combined atlas would add true per-instance depth sorting —
 low priority); (c) projectile/effect sprites; (d) terrain + decals (needs an ABI
-terrain seed/tile field); (e) positional audio + music (73 sfx Oggs extracted,
-`crimson_host_audio_events` already exposed); (f) HUD; (g) 2.5D tilt + drop
-shadows; (h) id-based snapshot matching (above); plus player leg animation
-(needs a `move_phase` ABI field).
+terrain seed/tile field); (f) HUD; (g) 2.5D tilt + drop shadows; (h) id-based
+snapshot matching (above); music (loose Ogg, game-tune trigger); plus player leg
+animation (needs a `move_phase` ABI field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings

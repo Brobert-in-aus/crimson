@@ -53,6 +53,7 @@ public partial class Main : Node3D
 
     private SimSession? _sim;
     private Diorama _diorama = null!;
+    private AudioBank _audio = null!;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -89,6 +90,12 @@ public partial class Main : Node3D
         _diorama = new Diorama();
         _arenaRoot.AddChild(_diorama);
         _diorama.Configure(ArenaSideMeters, GameWorldSize);
+
+        // Audio is anchored under ArenaRoot so its players sit at the tabletop
+        // (positions are arena-local meters, like the diorama).
+        _audio = new AudioBank();
+        _arenaRoot.AddChild(_audio);
+        _audio.Configure(ArenaSideMeters, GameWorldSize);
 
         try
         {
@@ -267,6 +274,10 @@ public partial class Main : Node3D
             _playerGame = new Vector2(p.X, p.Y);
         }
         _diorama.PushSnapshot(snap);
+
+        // Play the audio this tick emitted, positioned relative to the player.
+        AudioEventsView audio = _sim.CaptureAudio();
+        _audio.Route(audio, _playerGame);
 
         UpdateStatus(result);
     }
