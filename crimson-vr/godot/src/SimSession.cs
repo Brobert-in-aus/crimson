@@ -119,6 +119,16 @@ public sealed class SimSession : IDisposable
 
     public SimSession(string configJson)
     {
+        // Fail loudly on a native lib whose snapshot/struct layout differs from
+        // what this build decodes (a mixed win-x64 DLL / arm64 .so), rather than
+        // silently mis-reading packed structs (the magic doesn't catch this).
+        uint abi = Sim.AbiVersion();
+        if (abi != Sim.ExpectedAbiVersion)
+        {
+            throw new InvalidOperationException(
+                $"crimson_host ABI mismatch: lib is v{abi}, frontend expects v{Sim.ExpectedAbiVersion}. Rebuild the native lib (tools/build_libcrimson.ps1).");
+        }
+
         _configJson = configJson;
         Handle = Sim.SessionCreate(configJson);
         uint max = Sim.SnapshotMaxSize();

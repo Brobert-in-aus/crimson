@@ -18,6 +18,12 @@ public static partial class Sim
     public const uint SnapshotMagic = 0x31525643;
     public const int Ok = 0;
 
+    // Layout version this frontend was built against (crimson_host.h
+    // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
+    // revisions, so a stale native lib would be silently mis-decoded; the session
+    // driver checks this against crimson_host_abi_version() at startup.
+    public const uint ExpectedAbiVersion = 2;
+
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
     {

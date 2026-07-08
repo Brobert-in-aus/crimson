@@ -468,11 +468,15 @@ public sealed partial class Diorama : Node3D
             float h = Mathf.Max(p.HalfHeight * 2.0f * p.Scale * k, 0.001f);
             Vector3 pos = Mapper.GameToArenaLocal(new Vector2(p.X, p.Y), _arenaSideMeters, _worldSize)
                 + new Vector3(0.0f, 0.007f, 0.0f);
-            // Flat on the plane, spun by the effect's rotation. The quad's width
-            // and height are basis columns 0 and 1 (its local X/Y); the normal is
-            // column 2, left unscaled.
-            Basis basis = new Basis(Vector3.Up, p.Rotation) * FlatBasis;
-            basis = basis.Scaled(new Vector3(w, h, 1.0f));
+            // Flat on the plane, spun by the effect's rotation. Build the scaled
+            // columns directly (local X = width, Y = height, Z = up): Basis.Scaled
+            // scales world rows, which would distort a rotated non-uniform quad.
+            float c = Mathf.Cos(p.Rotation);
+            float s = Mathf.Sin(p.Rotation);
+            var basis = new Basis(
+                new Vector3(c, 0.0f, s) * w,
+                new Vector3(-s, 0.0f, c) * h,
+                new Vector3(0.0f, 1.0f, 0.0f));
             _particles.SetInstanceTransform(n, new Transform3D(basis, pos));
             _particles.SetInstanceColor(n, new Color(p.R, p.G, p.B, p.A));
             _particles.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
