@@ -383,6 +383,18 @@ wizard** before public release (see M6). Uses the existing extractors
    (GOG copy; the extractors already accept `--assets-dir path/to/game_dir`).
    During private development only, the upstream first-launch PAQ download is
    an acceptable convenience.
+
+   > **Getting Crimsonland Classic (GOG).** This project needs the *classic*
+   > 1.9.93 assets (`crimson.paq`, `sfx.paq`, grim engine) — **not** the 2014 HD
+   > remake that GOG sells as "Crimsonland" (that ships `data.pak`/Galaxy and is
+   > incompatible). The classic is included as a **bonus** with the GOG purchase.
+   > User steps: **buy Crimsonland on GOG → in GOG Galaxy open the game → Extras
+   > tab → download & install "Crimsonland Classic".** It installs alongside the
+   > HD remake (e.g. `…/Crimsonland Classic/`) with the `.paq` files the import
+   > wizard reads. (Verified 2026-07: `crimson.paq` + `sfx.paq` present; music is
+   > loose Ogg in a `music/` folder, no `music.paq`.) The import UI must spell
+   > this out, because owning "Crimsonland" on GOG does **not** by itself give the
+   > user the right files — see the M6 release note.
 2. Extract PAQs → PNGs (already supported, JAZ→PNG with alpha).
 3. Pack into atlases + a JSON manifest (sprite name → atlas, uv rect, pivot),
    consumed by both the C# renderer and kept diffable in git (manifest only;
@@ -619,6 +631,14 @@ Nothing ships publicly until this milestone is done.
   requests all-files access (fine for sideloaded apps), detects them, and
   imports. No companion desktop app. Extraction/atlas-bake runs locally (§6).
   Clear messaging when assets are absent.
+  - **The wizard MUST tell the user how to obtain the right files**, because the
+    default GOG "Crimsonland" is the incompatible HD remake (§6): *buy
+    Crimsonland on GOG → GOG Galaxy → the game → **Extras** tab → download &
+    install "Crimsonland Classic" → point the wizard at that folder's `.paq`
+    files.* Detect and reject an HD-remake folder (`data.pak`/Galaxy) with a
+    message pointing at the Extras step, rather than a generic "no assets" error.
+    This GOG-version confusion is the single most likely first-run failure, so
+    the copy for it is a release requirement, not a nicety.
 - **Audit the repo and build outputs** for asset-derived content: committed
   fixtures, screenshots in docs, atlas manifests, test data. Anything derived
   from original art/audio is removed or regenerated-on-device.
