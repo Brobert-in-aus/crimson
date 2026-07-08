@@ -597,6 +597,40 @@ playtest pending.** New frontend code in `crimson-vr/godot/src/`:
   late-game survival entity counts (use `replay benchmark`-style stress
   seeds); draw calls within budget (< ~50 for world layers).
 
+**Status (2026-07-08): slice 1 done — real static sprites, correct facing,**
+**native-matched z-stacking; in-headset validated (PCVR).** Assets come from the
+user's Crimsonland Classic install (see §6 GOG note), extracted with `crimson
+extract`. `crimson-vr/tools/bake_assets.py` stages the 8x8 sheets into
+`godot/assets/sprites/` (gitignored) + a JSON manifest (per entity type: sheet,
+frame, pivot, art-facing `offset_deg`, draw `priority`). `Diorama.cs` loads the
+manifest and draws:
+- One `MultiMeshInstance3D` per creature type (each bound to its sheet, static
+  frame via UV offset); player from `trooper.png` frame 16 (torso; `bodyset` is
+  corpse decals). Colored-quad fallback when assets are absent.
+- **Facing:** sim heading θ → direction `(sin θ, −cos θ)`
+  (`math_parity.heading_to_direction_f32`); the sprite basis is built directly
+  from that forward (no `RotY` handedness flip), plus a per-sheet `offset_deg`
+  for the art's baked facing (creatures −90°, player 0). Validated against a
+  toggleable debug facing-needle (`DebugFacing`).
+- **Z-stacking = the original's model.** No per-instance depth sort; a fixed
+  painter's order by layer/type via material `RenderPriority` (alpha-blended,
+  depth-write off, so draw order alone decides — no z-fighting, no physical
+  height hack). Creature type order matches native
+  `_NATIVE_CREATURE_SPRITE_DRAW_ORDER` (zombie<spider1<spider2<alien<lizard),
+  then player < projectiles/effects < bonuses/UI. Within a type it's stable
+  index order (as the native pool order is). See
+  `src/crimson/render/world/draw.py`.
+- Projectiles/secondaries/bonuses are still colored quads.
+
+**Remaining M3 slices:** (a) **combined atlas + per-instance UV shader** (one
+mesh, per-instance custom-data UV) — unlocks animation AND, if ever wanted, true
+per-instance sorting; (b) **animation** (`anim_phase`→frame: 8x8, long-strip vs
+ping-pong, per-type mirror — `src/crimson/creatures/anim.py`; player
+legs=`move_phase`, torso=+16) on that path; (c) projectile/effect sprites;
+(d) terrain + decals (needs an ABI terrain seed/tile field); (e) positional
+audio + music (73 sfx Oggs extracted); (f) HUD; (g) 2.5D tilt + drop shadows;
+(h) id-based snapshot matching (above).
+
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
   (§5 rules incl. play-area fit + override, and the **seated reach-envelope

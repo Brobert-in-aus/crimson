@@ -37,6 +37,21 @@ CREATURE_SHEETS: dict[int, str] = {
 }
 CREATURE_GRID = 8  # 8x8 atlas (creature_render_type)
 
+# Draw-order priority per type (higher = drawn on top), matching the original's
+# fixed creature draw order (_NATIVE_CREATURE_SPRITE_DRAW_ORDER, bottom->top):
+# ZOMBIE, SPIDER_SP1, SPIDER_SP2, ALIEN, LIZARD. The game does no per-instance
+# Y-sort; within a type it's pool order. Trooper isn't in the native list, so it
+# gets a mid value.
+CREATURE_PRIORITY: dict[int, int] = {
+    0: 6,   # zombie (bottom)
+    3: 7,   # spider_sp1
+    4: 8,   # spider_sp2
+    5: 9,   # trooper (not in native pass)
+    2: 9,   # alien
+    1: 10,  # lizard (top)
+}
+PLAYER_PRIORITY = 15  # above creatures, below projectiles/bonuses (native pass order)
+
 # Sheets to stage: (source-relative-path, dest-name).
 GAME = "crimson/game"
 
@@ -67,8 +82,15 @@ def main() -> None:
             name: {"size": size, "grid": CREATURE_GRID if name in CREATURE_SHEETS.values() else None}
             for name, size in staged.items()
         },
+        # offset_deg corrects each sheet's baked art facing relative to the sim
+        # heading. Creature sheets are drawn 90 deg CW of the trooper torso, so
+        # rotate them -90 (validated in-headset against the debug needle).
         "creatures": {
-            str(type_id): {"sheet": sheet, "grid": CREATURE_GRID, "frame": 0, "pivot": [0.5, 0.5]}
+            str(type_id): {
+                "sheet": sheet, "grid": CREATURE_GRID, "frame": 0,
+                "pivot": [0.5, 0.5], "offset_deg": -90.0,
+                "priority": CREATURE_PRIORITY.get(type_id, 8),
+            }
             for type_id, sheet in CREATURE_SHEETS.items()
             if sheet in staged
         },
@@ -76,7 +98,10 @@ def main() -> None:
         # creature (src/crimson/render/world/trooper.py). torso_frame = leg_frame
         # + 16; static torso pose is frame 16, rotated by aim direction. (bodyset
         # is corpse decals, not the living player.)
-        "player": {"sheet": "trooper.png", "grid": 8, "frame": 16, "pivot": [0.5, 0.5]}
+        "player": {
+            "sheet": "trooper.png", "grid": 8, "frame": 16, "pivot": [0.5, 0.5],
+            "offset_deg": 0.0, "priority": PLAYER_PRIORITY,
+        }
         if "trooper.png" in staged
         else None,
     }

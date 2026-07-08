@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Godot;
 
 namespace CrimsonVR;
@@ -38,6 +39,7 @@ public sealed partial class Diorama : Node3D
         public int CurrCount;
         public float Lift;
         public float SizeScale;
+        public float HeadingOffset; // radians; corrects a sheet's baked art facing
 
         public Layer(int capacity)
         {
@@ -71,23 +73,18 @@ public sealed partial class Diorama : Node3D
     private const string SpriteDir = "res://assets/sprites/";
 
     // Sim heading convention (math_parity.heading_to_direction_f32): a heading
-    // theta points in game direction (sin theta, -cos theta). Extra offset to
-    // correct the sprite art's built-in facing if a sheet isn't drawn "up";
-    // tuned in-headset, 0 until a sheet needs it.
-    private const float SpriteHeadingOffset = 0.0f;
+    // theta points in game direction (sin theta, -cos theta). Each sheet's
+    // built-in art facing is corrected per-layer via Layer.HeadingOffset (from
+    // the manifest's offset_deg), since sheets aren't all drawn the same way.
 
     // Debug: draw a magenta needle from each sprite entity along its raw heading,
     // to calibrate the sprite-art vs heading relationship in-headset. Off now
     // that facing is validated correct (needle points along the raw forward,
     // which is 90 deg off the sprite art's baked facing — expected). Flip on to
     // recalibrate a new sheet.
-    private const bool DebugFacing = false;
+    private static readonly bool DebugFacing = false;
     private const int NeedleCap = 8192;
 
-    // Per-instance vertical stagger by game-Y: spreads coplanar sprites across a
-    // thin band so overlapping quads don't z-fight, and orders them front-to-back
-    // (larger game-Y = nearer the south edge = drawn on top).
-    private const float DepthBandMeters = 0.02f;
 
     private float _arenaSideMeters;
     private float _worldSize;
@@ -110,10 +107,12 @@ public sealed partial class Diorama : Node3D
 
         SpriteManifest? manifest = LoadManifest();
 
-        // Player: bodyset sprite if available, else white quad.
+        // Player: bodyset sprite if available, else white quad. Priorities below
+        // set draw order (higher = on top): bonuses under, then creatures (by
+        // type), effects/projectiles above, player on top.
         _players = manifest?.player is { } pd
             ? BuildSpriteLayer(PlayerCap, pd, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 2.6f)
-            : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 2.2f);
+            : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 2.2f, renderPriority: 15);
 
         // One creature layer per type so each can bind its own sheet texture.
         if (manifest?.creatures is { } creatures)
@@ -128,11 +127,12 @@ public sealed partial class Diorama : Node3D
             }
         }
         // Fallback for unmapped creature types (e.g. bosses) so nothing vanishes.
-        _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.0f);
+        _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.0f, renderPriority: 8);
 
-        _projectiles = BuildColorLayer(ProjectileCap, new Color(1.0f, 0.9f, 0.3f), lift: 0.006f, sizeScale: 6.0f);
-        _secondaries = BuildColorLayer(SecondaryCap, new Color(1.0f, 0.55f, 0.15f), lift: 0.006f, sizeScale: 8.0f);
-        _bonuses = BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift: 0.006f, sizeScale: 14.0f);
+        // Native pass order (top of the stack): player < projectiles/effects < bonuses/UI.
+        _projectiles = BuildColorLayer(ProjectileCap, new Color(1.0f, 0.9f, 0.3f), lift: 0.006f, sizeScale: 6.0f, renderPriority: 20);
+        _secondaries = BuildColorLayer(SecondaryCap, new Color(1.0f, 0.55f, 0.15f), lift: 0.006f, sizeScale: 8.0f, renderPriority: 20);
+        _bonuses = BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift: 0.006f, sizeScale: 14.0f, renderPriority: 25);
 
         if (DebugFacing)
         {
@@ -156,13 +156,19 @@ public sealed partial class Diorama : Node3D
         }
     }
 
-    private Layer BuildColorLayer(int capacity, Color color, float lift, float sizeScale)
+    private Layer BuildColorLayer(int capacity, Color color, float lift, float sizeScale, int renderPriority = 8)
     {
         var material = new StandardMaterial3D
         {
             AlbedoColor = color,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            // Sprites are a flat 2.5D layer: blend + no depth write so draw order
+            // (RenderPriority) fully controls layering — no z-fighting, no
+            // physical height needed. Depth test stays on so terrain occludes.
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority = renderPriority,
         };
         return BuildLayer(capacity, material, lift, sizeScale);
     }
@@ -187,12 +193,17 @@ public sealed partial class Diorama : Node3D
             Uv1Scale = new Vector3(1.0f / grid, 1.0f / grid, 1.0f),
             Uv1Offset = new Vector3((float)col / grid, (float)row / grid, 0.0f),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.AlphaScissor,
-            AlphaScissorThreshold = 0.5f,
+            // Alpha blend + no depth write so RenderPriority controls layering
+            // (see BuildColorLayer). Nearest keeps sprite pixels crisp.
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority = desc.priority,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
-        return BuildLayer(capacity, material, lift, sizeScale);
+        Layer layer = BuildLayer(capacity, material, lift, sizeScale);
+        layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
+        return layer;
     }
 
     private Layer BuildLayer(int capacity, Material material, float lift, float sizeScale)
@@ -293,16 +304,16 @@ public sealed partial class Diorama : Node3D
             }
 
             Vector3 arena = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize);
-            // Vertical stagger by game-Y kills coplanar z-fighting and orders
-            // overlapping sprites front-to-back.
-            float depth = (game.Y / _worldSize) * DepthBandMeters;
-            Vector3 pos = arena + new Vector3(0.0f, layer.Lift + depth, 0.0f);
+            // Flat on the plane at a constant per-layer lift; layering is by draw
+            // order (RenderPriority), not physical height.
+            Vector3 pos = arena + new Vector3(0.0f, layer.Lift, 0.0f);
             float meters = Mathf.Max(sizeGame * k * layer.SizeScale, 0.002f);
             Basis basis;
             if (sprite)
             {
-                // Face the sim direction directly (no RotY handedness flip).
-                basis = FlatFacingBasis(ForwardFromHeading(angle + SpriteHeadingOffset), meters);
+                // Face the sim direction directly (no RotY handedness flip),
+                // plus the sheet's art-facing correction.
+                basis = FlatFacingBasis(ForwardFromHeading(angle + layer.HeadingOffset), meters);
             }
             else
             {
@@ -368,6 +379,11 @@ public sealed partial class Diorama : Node3D
         public int grid { get; set; } = 1;
         public int frame { get; set; }
         public float[] pivot { get; set; } = { 0.5f, 0.5f };
+
+        [JsonPropertyName("offset_deg")]
+        public float offsetDeg { get; set; }
+
+        public int priority { get; set; } = 8;
     }
 
     private sealed class SpriteManifest
