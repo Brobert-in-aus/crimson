@@ -35,6 +35,29 @@ $inject = Join-Path $PSScriptRoot 'inject_native_and_sign.ps1'
 
 if (-not (Test-Path $Godot)) { throw "Godot not found: $Godot" }
 if (-not (Test-Path $inject)) { throw "inject script not found: $inject" }
+
+# Preflight everything the post-export steps need, so a missing keystore / tool /
+# native lib / vendors plugin fails now instead of after the multi-minute export.
+$jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+$preflight = [ordered]@{
+    'arm64 native lib (build_libcrimson.ps1 -android)' = (Join-Path $proj 'native\android-arm64\libcrimson_host.so')
+    'OpenXR Vendors plugin (fetch_vendors_plugin.ps1)' = (Join-Path $proj 'addons\godotopenxrvendors')
+    'JDK 17'                                           = $jdk
+    'Android build-tools 35 (zipalign/apksigner)'      = (Join-Path $env:LOCALAPPDATA 'Android\Sdk\build-tools\35.0.0')
+    'debug keystore'                                   = (Join-Path $env:USERPROFILE '.android\debug.keystore')
+}
+foreach ($item in $preflight.GetEnumerator()) {
+    if (-not $item.Value -or -not (Test-Path $item.Value)) {
+        throw "preflight failed: missing $($item.Key): $($item.Value)"
+    }
+}
+if ($Install) {
+    $adbPre = (Get-Command adb -ErrorAction SilentlyContinue).Source
+    if (-not $adbPre) { $adbPre = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
+    if (-not (Test-Path $adbPre)) { throw "preflight failed: -Install requested but adb not found (Android platform-tools)" }
+}
+
 New-Item -ItemType Directory -Force (Split-Path $apk) | Out-Null
 
 # A Godot editor open on this project would hold the OpenXR vendors plugin DLL
@@ -65,6 +88,15 @@ function Get-ExportLog {
     return ($t -replace "\x1b\[[0-9;]*m", '')
 }
 
+function Stop-ProcessTree {
+    # Kill a process and ONLY its descendants, by PID (taskkill /T) — never
+    # unrelated Godot/Java processes by name/timestamp. taskkill /T is the PS 5.1
+    # -safe equivalent of .NET Process.Kill($true) (which is PS7-only). The gradle
+    # daemon detaches, so it is not a child and build caching is unaffected.
+    param([int]$Id)
+    & taskkill.exe /PID $Id /T /F 2>$null | Out-Null
+}
+
 # Poll for the export-complete marker; Godot won't exit on its own (see header).
 $deadline = (Get-Date).AddSeconds($ExportTimeoutSec)
 $printed = 0
@@ -89,15 +121,29 @@ while ($true) {
     if ((Get-Date) -gt $deadline) { break }
 }
 
-if (-not $done) {
-    if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
-    throw "export did not complete within ${ExportTimeoutSec}s (see $errLog)"
-}
+# Godot may have flushed the marker as it exited; re-read once before deciding.
+if (-not $done -and ((Get-ExportLog) -match '\[ DONE \]\s*export')) { $done = $true }
 
-# Export finished writing the APK; terminate the hung Godot process.
-if (-not $p.HasExited) {
-    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-    Write-Host "==> Export done; terminated the (hung) Godot headless process." -ForegroundColor DarkGray
+if ($done) {
+    # Marker seen: the APK is written and Godot typically hangs in teardown — end it.
+    if (-not $p.HasExited) {
+        Stop-ProcessTree $p.Id
+        Write-Host "==> Export done; terminated the (hung) Godot process tree." -ForegroundColor DarkGray
+    }
+}
+elseif ($p.HasExited) {
+    # Exited WITHOUT the marker: distinguish a real failure from a rare clean-but-
+    # markerless exit (don't mislabel an early non-zero exit as a timeout).
+    $code = $p.ExitCode
+    if ($code -ne 0) { throw "Godot export exited with code $code before completing (see $errLog)." }
+    if (-not (Test-Path $apk)) { throw "Godot export exited (code 0) without producing an APK (see $errLog)." }
+    Write-Warning "Godot export exited cleanly without the '[ DONE ] export' marker; APK exists, continuing."
+}
+else {
+    # Still running at the safety ceiling.
+    Stop-ProcessTree $p.Id
+    if (-not (Test-Path $apk)) { throw "export hit the ${ExportTimeoutSec}s ceiling with no APK (see $errLog)." }
+    Write-Warning "export hit the ${ExportTimeoutSec}s ceiling but the APK exists; continuing (raise -ExportTimeoutSec if this recurs)."
 }
 if (-not (Test-Path $apk)) { throw "export reported done but APK missing: $apk" }
 $apkMb = [math]::Round((Get-Item $apk).Length / 1MB, 1)
@@ -112,9 +158,7 @@ if ($LASTEXITCODE -ne 0) { throw "inject/sign failed ($LASTEXITCODE)" }
 # a flat app (missing OpenXR loader/vendor) or a dlopen failure (missing native
 # lib). A cheap "jar tf" listing vs the required VR + native entries.
 Write-Host "==> Verifying APK payload..." -ForegroundColor Cyan
-$jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
-    Select-Object -First 1 -ExpandProperty FullName
-$jar = if ($jdk) { Join-Path $jdk 'bin\jar.exe' } else { 'jar' }
+$jar = Join-Path $jdk 'bin\jar.exe'   # $jdk resolved + preflighted above
 $entries = & $jar tf $questApk 2>$null
 $required = @(
     'classes.dex',                               # .NET/managed runtime present
