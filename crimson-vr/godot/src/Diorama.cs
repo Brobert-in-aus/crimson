@@ -119,12 +119,13 @@ public sealed partial class Diorama : Node3D
     private static readonly bool DebugFacing = false;
     private const int NeedleCap = 8192;
 
-    // 2.5D presentation (PLAN §6). Creature/player sprites lie flat on the plane
-    // (top-down art), tilted back toward the seated player so they read as
-    // "standing" from a low viewing angle without breaking when walking around.
-    // The tilt is a fixed arena-frame lean (heading-independent normal), toward
-    // the player's near edge (-z; see RecenterArena). 0 = flat. Tune in-headset.
-    private const float SpriteTiltDegrees = 22.0f;
+    // 2.5D presentation (PLAN §6). A fixed back-tilt was tried (leaning sprites
+    // toward the player so they read as "standing"), but in-headset it looked
+    // worse AND lifted sprites off the plane while projectiles stay at ground
+    // level, so bullets appeared to emit from below the creature (2026-07-08
+    // finding). Flat reads correctly — the drop shadows do the grounding. Kept as
+    // a tunable (0 = flat) in case a different scheme is revisited.
+    private const float SpriteTiltDegrees = 0.0f;
 
     // Drop shadows: a soft dark blob on the plane under each creature/player to
     // ground them. One shared MultiMesh (circular, so no heading needed).
@@ -222,9 +223,12 @@ public sealed partial class Diorama : Node3D
         _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.0f, renderPriority: 8);
 
         // Native pass order (top of the stack): player < projectiles/effects < bonuses/UI.
-        // Projectiles/secondaries: additive per-type-tinted glow streaks.
-        _projectiles = BuildStreakLayer(ProjectileCap, lift: 0.006f, sizeScale: 5.0f, renderPriority: 20);
-        _secondaries = BuildStreakLayer(SecondaryCap, lift: 0.006f, sizeScale: 7.0f, renderPriority: 20);
+        // Projectiles/secondaries: additive per-type-tinted glow streaks. Lifted to
+        // the PLAYER's plane (0.012, above the creature plane at 0.008) so bullets
+        // emerge from the shooter, not from the lower creature plane (in-headset
+        // finding: the player reads on a higher plane, which is wanted).
+        _projectiles = BuildStreakLayer(ProjectileCap, lift: 0.012f, sizeScale: 5.0f, renderPriority: 20);
+        _secondaries = BuildStreakLayer(SecondaryCap, lift: 0.012f, sizeScale: 7.0f, renderPriority: 20);
         _bonuses = BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift: 0.006f, sizeScale: 14.0f, renderPriority: 25);
 
         BuildShadows();
@@ -654,7 +658,7 @@ public sealed partial class Diorama : Node3D
             // Just ahead of the player along aim; sized by flash strength.
             Vector3 dir = ForwardFromHeading(m.Heading);
             Vector3 arena = Mapper.GameToArenaLocal(m.Game, _arenaSideMeters, _worldSize)
-                + dir * (m.SizeGame * k * 1.6f) + new Vector3(0.0f, 0.02f, 0.0f);
+                + dir * (m.SizeGame * k * 1.6f) + new Vector3(0.0f, 0.012f, 0.0f);
             float s = Mathf.Max(m.SizeGame * k * 2.2f * m.Alpha, 0.002f);
             var color = new Color(1.0f, 0.85f, 0.5f, m.Alpha);
             AddFx(arena, s, color);
@@ -663,7 +667,7 @@ public sealed partial class Diorama : Node3D
         {
             Explosion e = _explosionsCap[i];
             Vector3 arena = Mapper.GameToArenaLocal(e.Game, _arenaSideMeters, _worldSize)
-                + new Vector3(0.0f, 0.02f, 0.0f);
+                + new Vector3(0.0f, 0.012f, 0.0f);
             float s = Mathf.Max(e.Scale * k * 2.0f, 0.004f);
             // Fade out over the detonation's life (T rising 0->1).
             float a = Mathf.Clamp(1.0f - e.T, 0.0f, 1.0f);
