@@ -35,6 +35,7 @@ public sealed partial class Diorama : Node3D
         public float SizeGame;
         public float AnimPhase; // creatures only; drives per-instance frame
         public uint Flags;      // creatures only; anim strip/mirror/shock bits
+        public int TypeId;      // projectiles/secondaries only; per-type glow tint
     }
 
     private sealed class Layer
@@ -56,6 +57,10 @@ public sealed partial class Diorama : Node3D
         public int BaseFrame;
         public bool MirrorLong;
 
+        // Streak layers (projectiles/secondaries): additive glow elongated along
+        // travel, tinted per type via MultiMesh instance colors.
+        public bool Streak;
+
         public Layer(int capacity)
         {
             Prev = new Ent[capacity];
@@ -69,7 +74,7 @@ public sealed partial class Diorama : Node3D
             CurrCount = 0;
         }
 
-        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0)
+        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0, int typeId = 0)
         {
             if (CurrCount >= Curr.Length)
             {
@@ -82,6 +87,7 @@ public sealed partial class Diorama : Node3D
                 SizeGame = sizeGame,
                 AnimPhase = animPhase,
                 Flags = flags,
+                TypeId = typeId,
             };
         }
     }
@@ -134,6 +140,37 @@ public sealed partial class Diorama : Node3D
     private MultiMesh _shadows = null!;
     private int _shadowCount;
 
+    // Effects (slice 6a): additive glow bursts for muzzle flashes (player
+    // MuzzleFlashAlpha) and explosions (secondary detonation). Captured at tick
+    // time in PushSnapshot, drawn each frame in Interpolate. True sim particle
+    // pools (blood/gibs) need an ABI stream — slice 6b.
+    private struct Muzzle { public Vector2 Game; public float Heading; public float Alpha; public float SizeGame; }
+    private struct Explosion { public Vector2 Game; public float Scale; public float T; }
+    private readonly Muzzle[] _muzzles = new Muzzle[PlayerCap];
+    private int _muzzleCount;
+    private readonly Explosion[] _explosionsCap = new Explosion[512];
+    private int _explosionCapCount;
+    private MultiMesh _fx = null!;
+    private int _fxCount;
+    private const int FxCap = 2048;
+
+    // Per-type projectile glow tint (known_proj_rgb, projectile_render_registry.py).
+    // Colors only (not asset-derived); default is the tan bullet glow.
+    private static readonly Color ProjTintDefault = new(240f / 255f, 220f / 255f, 160f / 255f);
+    private static readonly Dictionary<int, Color> ProjTints = new()
+    {
+        // ProjectileTemplateId -> rgb (KNOWN_PROJ_RGB_BY_TYPE_ID).
+        { 21, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_RIFLE (blue)
+        { 22, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_MINIGUN
+        { 23, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_CANNON
+        { 45, new Color(1.0f, 170f / 255f, 90f / 255f) },    // FIRE_BULLETS (orange)
+        { 24, new Color(160f / 255f, 1.0f, 170f / 255f) },   // SHRINKIFIER (green)
+        { 25, new Color(240f / 255f, 120f / 255f, 1.0f) },   // BLADE_GUN (magenta)
+    };
+
+    private static Color ProjTint(int typeId)
+        => ProjTints.TryGetValue(typeId, out Color c) ? c : ProjTintDefault;
+
     private static readonly Basis FlatBasis = Basis.FromEuler(new Vector3(-Mathf.Pi / 2.0f, 0.0f, 0.0f));
 
     // Fixed back-tilt applied to sprite bases (about arena X so the lean is the
@@ -173,11 +210,13 @@ public sealed partial class Diorama : Node3D
         _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 2.0f, renderPriority: 8);
 
         // Native pass order (top of the stack): player < projectiles/effects < bonuses/UI.
-        _projectiles = BuildColorLayer(ProjectileCap, new Color(1.0f, 0.9f, 0.3f), lift: 0.006f, sizeScale: 6.0f, renderPriority: 20);
-        _secondaries = BuildColorLayer(SecondaryCap, new Color(1.0f, 0.55f, 0.15f), lift: 0.006f, sizeScale: 8.0f, renderPriority: 20);
+        // Projectiles/secondaries: additive per-type-tinted glow streaks.
+        _projectiles = BuildStreakLayer(ProjectileCap, lift: 0.006f, sizeScale: 5.0f, renderPriority: 20);
+        _secondaries = BuildStreakLayer(SecondaryCap, lift: 0.006f, sizeScale: 7.0f, renderPriority: 20);
         _bonuses = BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift: 0.006f, sizeScale: 14.0f, renderPriority: 25);
 
         BuildShadows();
+        BuildFx();
 
         if (DebugFacing)
         {
@@ -275,12 +314,13 @@ public sealed partial class Diorama : Node3D
         return layer;
     }
 
-    private Layer BuildLayer(int capacity, Material material, float lift, float sizeScale, bool useCustomData = false)
+    private Layer BuildLayer(int capacity, Material material, float lift, float sizeScale, bool useCustomData = false, bool useColors = false)
     {
         var mesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
             UseCustomData = useCustomData,
+            UseColors = useColors,
             Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
             InstanceCount = capacity,
             VisibleInstanceCount = 0,
@@ -288,6 +328,46 @@ public sealed partial class Diorama : Node3D
         var node = new MultiMeshInstance3D { Multimesh = mesh, MaterialOverride = material };
         AddChild(node);
         return new Layer(capacity) { Mesh = mesh, Lift = lift, SizeScale = sizeScale };
+    }
+
+    /// <summary>Additive glow material tinted per-instance (vertex colors) with a
+    /// soft round falloff — shared by the projectile streaks and the fx bursts.</summary>
+    private ImageTexture? _softCircleTex;
+
+    private StandardMaterial3D AdditiveGlowMaterial(int renderPriority) => new()
+    {
+        AlbedoTexture = _softCircleTex ??= MakeSoftCircleTexture(64),
+        VertexColorUseAsAlbedo = true,
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+        DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+        RenderPriority = renderPriority,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+    };
+
+    /// <summary>Additive glow streak layer (projectiles/secondaries): a soft blob
+    /// elongated along travel, tinted per instance by projectile type.</summary>
+    private Layer BuildStreakLayer(int capacity, float lift, float sizeScale, int renderPriority)
+    {
+        Layer layer = BuildLayer(capacity, AdditiveGlowMaterial(renderPriority), lift, sizeScale, useColors: true);
+        layer.Streak = true;
+        return layer;
+    }
+
+    /// <summary>One shared additive MultiMesh for transient fx bursts (muzzle
+    /// flashes, explosions), tinted per instance.</summary>
+    private void BuildFx()
+    {
+        _fx = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = FxCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _fx, MaterialOverride = AdditiveGlowMaterial(22) });
     }
 
     /// <summary>One shared MultiMesh of soft round blobs drawn flat on the plane
@@ -361,10 +441,22 @@ public sealed partial class Diorama : Node3D
     public void PushSnapshot(in SnapshotView view)
     {
         _players.BeginPush();
+        _muzzleCount = 0;
         foreach (Sim.PlayerSnap p in view.Players)
         {
             // Player torso (trooper.png frame 16) is aimed, so rotate by aim.
             _players.Add(new Vector2(p.X, p.Y), p.AimHeading, p.Size);
+            // Muzzle flash at the gun, along aim, while it's firing.
+            if (p.MuzzleFlashAlpha > 0.01f && _muzzleCount < _muzzles.Length)
+            {
+                _muzzles[_muzzleCount++] = new Muzzle
+                {
+                    Game = new Vector2(p.X, p.Y),
+                    Heading = p.AimHeading,
+                    Alpha = p.MuzzleFlashAlpha,
+                    SizeGame = p.Size,
+                };
+            }
         }
 
         foreach (Layer layer in _creatureLayers.Values)
@@ -381,13 +473,24 @@ public sealed partial class Diorama : Node3D
         _projectiles.BeginPush();
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
         {
-            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f);
+            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, typeId: pr.TypeId);
         }
 
         _secondaries.BeginPush();
+        _explosionCapCount = 0;
         foreach (Sim.SecondarySnap s in view.Secondaries)
         {
-            _secondaries.Add(new Vector2(s.X, s.Y), s.Angle, 1.0f);
+            _secondaries.Add(new Vector2(s.X, s.Y), s.Angle, 1.0f, typeId: s.TypeId);
+            // Detonating secondaries (rockets/grenades) burst into an explosion.
+            if (s.DetonationT > 0.0f && _explosionCapCount < _explosionsCap.Length)
+            {
+                _explosionsCap[_explosionCapCount++] = new Explosion
+                {
+                    Game = new Vector2(s.X, s.Y),
+                    Scale = s.DetonationScale,
+                    T = s.DetonationT,
+                };
+            }
         }
 
         _bonuses.BeginPush();
@@ -414,10 +517,55 @@ public sealed partial class Diorama : Node3D
         InterpolateLayer(_secondaries, frac, sprite: false);
         InterpolateLayer(_bonuses, frac, sprite: false);
         _shadows.VisibleInstanceCount = _shadowCount;
+        EmitFx();
         if (_needles != null)
         {
             _needles.VisibleInstanceCount = _needleCount;
         }
+    }
+
+    /// <summary>Draw the captured muzzle-flash and explosion bursts into the
+    /// shared additive fx mesh (positions are tick-captured; these are transient
+    /// so they aren't interpolated).</summary>
+    private void EmitFx()
+    {
+        float k = _arenaSideMeters / _worldSize;
+        _fxCount = 0;
+        for (int i = 0; i < _muzzleCount; i++)
+        {
+            Muzzle m = _muzzles[i];
+            // Just ahead of the player along aim; sized by flash strength.
+            Vector3 dir = ForwardFromHeading(m.Heading);
+            Vector3 arena = Mapper.GameToArenaLocal(m.Game, _arenaSideMeters, _worldSize)
+                + dir * (m.SizeGame * k * 1.6f) + new Vector3(0.0f, 0.02f, 0.0f);
+            float s = Mathf.Max(m.SizeGame * k * 2.2f * m.Alpha, 0.002f);
+            var color = new Color(1.0f, 0.85f, 0.5f, m.Alpha);
+            AddFx(arena, s, color);
+        }
+        for (int i = 0; i < _explosionCapCount; i++)
+        {
+            Explosion e = _explosionsCap[i];
+            Vector3 arena = Mapper.GameToArenaLocal(e.Game, _arenaSideMeters, _worldSize)
+                + new Vector3(0.0f, 0.02f, 0.0f);
+            float s = Mathf.Max(e.Scale * k * 2.0f, 0.004f);
+            // Fade out over the detonation's life (T rising 0->1).
+            float a = Mathf.Clamp(1.0f - e.T, 0.0f, 1.0f);
+            var color = new Color(1.0f, 0.6f, 0.25f, a);
+            AddFx(arena, s, color);
+        }
+        _fx.VisibleInstanceCount = _fxCount;
+    }
+
+    private void AddFx(Vector3 pos, float size, Color color)
+    {
+        if (_fxCount >= FxCap)
+        {
+            return;
+        }
+        Basis basis = FlatBasis.Scaled(new Vector3(size, size, size));
+        _fx.SetInstanceColor(_fxCount, color);
+        _fx.SetInstanceTransform(_fxCount, new Transform3D(basis, pos));
+        _fxCount++;
     }
 
     private void InterpolateLayer(Layer layer, float frac, bool sprite, bool castShadow = false)
@@ -460,6 +608,14 @@ public sealed partial class Diorama : Node3D
                 // (2.5D). Raise the centre so the tilted base stays near the plane.
                 basis = SpriteTilt * FlatFacingBasis(ForwardFromHeading(angle + layer.HeadingOffset), meters);
                 pos.Y += meters * 0.5f * SpriteTiltSin;
+            }
+            else if (layer.Streak)
+            {
+                // Additive glow elongated along travel (flat on the plane), tinted
+                // per projectile type. Orientation via the creature heading
+                // convention (validate in-headset; flip if streaks read sideways).
+                basis = StreakBasis(ForwardFromHeading(angle), length: meters * 2.6f, width: meters);
+                layer.Mesh.SetInstanceColor(i, ProjTint(cur.TypeId));
             }
             else
             {
@@ -522,6 +678,15 @@ public sealed partial class Diorama : Node3D
             new Vector3(0.0f, 1.0f, 0.0f));
         return b.Scaled(new Vector3(meters, meters, meters));
     }
+
+    /// <summary>Flat quad basis lying on the plane, elongated <paramref name="length"/>
+    /// along <paramref name="forward"/> (travel) and <paramref name="width"/> across —
+    /// a projectile streak.</summary>
+    private static Basis StreakBasis(Vector3 forward, float length, float width)
+        => new Basis(
+            new Vector3(-forward.Z, 0.0f, forward.X) * width,
+            forward * length,
+            new Vector3(0.0f, 1.0f, 0.0f));
 
     /// <summary>Debug: a magenta needle from <paramref name="arena"/> along the
     /// raw heading direction, so we can confirm sprite facing against it.</summary>

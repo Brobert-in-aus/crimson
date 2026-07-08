@@ -675,14 +675,29 @@ and a `HP / LV / FOES` line. No sim/ABI change. `dotnet build` clean; headless
 boot updates the HUD with no exceptions. Placement/tilt are first-pass, to be
 tuned in-headset.
 
-**Projectile/effect sprites — scoped out for now.** The desktop projectile
-renderer is a large multi-file dispatch (`render/projectile_draw/`:
-beam/bullet/plasma/special/rocket + secondary detonation/rocket, additive bullet
-trails, per-type plasma tail/head/aura segment configs, `KNOWN_PROJ_FRAMES` +
-`known_proj_rgb` tints). A faithful port is a milestone-sized effort, not a
-clean slice, and a quick "tint the quads" version mostly renders the default tan.
-Deferred until it can be done properly (likely alongside the combined-atlas
-single-mesh path). Projectiles/secondaries/bonuses stay colored quads meanwhile.
+**Slice 6a done (2026-07-08): projectile glow + muzzle/explosion fx.**
+Projectiles and secondaries now render as additive glow **streaks** (a soft blob
+elongated along travel via `StreakBasis`, oriented by the creature-heading
+convention), **tinted per weapon type** by `known_proj_rgb`
+(`ProjTints`: ion=blue, fire=orange, shrink=green, blade=magenta, else tan) via
+MultiMesh instance colors. Two transient fx, captured at tick time and drawn into
+a shared additive mesh: **muzzle flash** at the player's gun along aim (from
+`PlayerSnap.MuzzleFlashAlpha`) and **explosions** at detonating secondaries (from
+`SecondarySnap.detonation_t/scale`). No ABI change (all from existing snapshot
+fields). Build clean; headless boot runs the streak/fx path with no exceptions.
+Streak orientation + fx sizes are first-pass — tune in-headset (flip
+`StreakBasis` forward if streaks read sideways).
+
+The faithful per-weapon projectile rendering (the `render/projectile_draw/`
+registry: beam/plasma tail-head-aura segments, bullet-trail textures) is a bigger
+job left for later; the glow-streak captures the essential look meanwhile.
+
+**Slice 6b — effect/particle pools (needs ABI).** The real particle systems
+(blood, gibs, sparks) live in `crimson-zig` runtime pools (`effects.zig`
+`EffectPool` w/ `effect_id`→atlas, `SpriteEffectPool`; `particles.zig`
+`ParticlePool`) but aren't in the snapshot. Exposing them is an append-only ABI
+snapshot array + C# decode + effect-atlas (particles.png) bake + **M1 gate re-run**
++ native-lib rebuilds (win-x64 + arm64). A proper ABI slice, deferred.
 
 **Slice 5 done (2026-07-08): 2.5D tilt + drop shadows.** Creature/player sprites
 get a fixed back-tilt (`SpriteTilt`, default 22°, tunable) applied about the arena
@@ -696,11 +711,11 @@ exceptions. Tilt angle + shadow size/opacity are first-pass — tune in-headset.
 
 **Remaining M3 slices:** (a) **combined atlas + single-mesh** (per-instance UV is
 now done per-type; a combined atlas would add true per-instance depth sorting —
-low priority); (c) projectile/effect sprites (see above — large); (d) terrain +
-decals (needs an ABI terrain seed/tile field); (h) id-based snapshot matching
-(above); music (loose Ogg, game-tune trigger); the off-arena spawn-margin edge
-treatment (§6 known issue); plus player leg animation (needs a `move_phase` ABI
-field).
+low priority); slice 6b effect/particle pools (needs ABI, above); faithful
+per-weapon projectile rendering (registry port); (d) terrain + decals (needs an
+ABI terrain seed/tile field); (h) id-based snapshot matching (above); music
+(loose Ogg, game-tune trigger); the off-arena spawn-margin edge treatment (§6
+known issue); plus player leg animation (needs a `move_phase` ABI field).
 
 ### M4 — Interaction polish
 - Perk menu in VR, pause menu, arena placement/recenter/scale settings
