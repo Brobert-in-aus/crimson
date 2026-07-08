@@ -236,6 +236,49 @@ test "abi audio events decode after ticking" {
     try std.testing.expect(saw_shot);
 }
 
+test "abi snapshot exposes sprite-effect particles" {
+    const allocator = std.testing.allocator;
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    const buf = try allocator.alloc(u8, exports.snapshotMaxSize());
+    defer allocator.free(buf);
+
+    // Firing at creatures spawns sprite effects (bullet casings, blood), so over
+    // a firing run the effect pool must be non-empty at some point and decode to
+    // sane values. Pins that the ABI v2 particle stream actually carries data.
+    var max_particles: u32 = 0;
+    var checked_entry = false;
+    for (0..900) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+
+        var len: u32 = @intCast(buf.len);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, buf.ptr, &len));
+
+        var header: exports.SnapshotHeader = undefined;
+        @memcpy(std.mem.asBytes(&header), buf[0..@sizeOf(exports.SnapshotHeader)]);
+        if (header.particle_count > max_particles) max_particles = header.particle_count;
+
+        if (header.particle_count > 0 and !checked_entry) {
+            // First ParticleSnap sits after all the preceding entity arrays.
+            const off = @sizeOf(exports.SnapshotHeader) +
+                @sizeOf(exports.PlayerSnap) * header.player_count +
+                @sizeOf(exports.CreatureSnap) * header.creature_count +
+                @sizeOf(exports.ProjectileSnap) * header.projectile_count +
+                @sizeOf(exports.SecondarySnap) * header.secondary_count +
+                @sizeOf(exports.BonusSnap) * header.bonus_count;
+            var p: exports.ParticleSnap = undefined;
+            @memcpy(std.mem.asBytes(&p), buf[off..][0..@sizeOf(exports.ParticleSnap)]);
+            try std.testing.expect(p.flags != 0 and p.age >= 0.0);
+            try std.testing.expect(p.effect_id >= 0 and p.effect_id <= 0x12);
+            checked_entry = true;
+        }
+    }
+    try std.testing.expect(max_particles > 0);
+    try std.testing.expect(checked_entry);
+}
+
 test "abi rejects invalid handles and configs" {
     var result: exports.CrimsonHostTickResult = undefined;
     const inputs = [_]exports.CrimsonHostInput{scriptedInput(0)};
