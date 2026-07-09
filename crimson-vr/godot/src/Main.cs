@@ -56,7 +56,7 @@ public partial class Main : Node3D
     // ui_cursor = move-hand pointer (staged by bake_assets.py; null -> plain quad).
     private Texture2D? _aimTex;
     private Texture2D? _cursorTex;
-    private const float ReticleSizeMeters = 0.05f; // first-pass; tune in-headset
+    private const float ReticleSizeMeters = 0.02f; // ~creature-sized on the 0.4m arena
 
     private SimSession? _sim;
     private Diorama _diorama = null!;
@@ -96,7 +96,12 @@ public partial class Main : Node3D
     // sits in the player's real room. Forcing Skybox keeps the VR void; forcing
     // Passthrough warns and falls back if unsupported. (A settings toggle is M4.)
     public enum DisplayMode { Auto, Skybox, Passthrough }
-    private DisplayMode _displayMode = DisplayMode.Auto;
+    // Default to Skybox for now. Auto-passthrough on Quest 3 (ALPHA_BLEND +
+    // transparent viewport) currently leaves the app compositing transparent —
+    // the shell/room and system controllers stay visible and the scene never
+    // presents, so it's opt-in only until the export-side passthrough feature is
+    // verified end-to-end on-device. Skybox is the known-good opaque path.
+    private DisplayMode _displayMode = DisplayMode.Skybox;
     private XRInterface? _xrInterface;
     private WorldEnvironment _worldEnv = null!;
     private bool _passthroughActive;
@@ -398,8 +403,11 @@ public partial class Main : Node3D
     // Reticle = a flat textured quad on the play plane (the torus ring was
     // redundant with the vertical guide line, so it's gone). The cursor/target
     // texture is set per-frame by hand role in UpdateHandVisual; AlbedoColor tints
-    // it and carries the over-arena / trigger brighten. NoDepthTest keeps it on
-    // top like a cursor.
+    // it and carries the over-arena / trigger brighten. The diorama is coplanar
+    // and ordered by RenderPriority (creatures start at 6, terrain at 1), so the
+    // reticle sits just above the ground/decals but BELOW creatures (priority 4)
+    // — it reads as painted on the arena floor and enemies pass over it, rather
+    // than floating on top of everything.
     private static Node3D MakeReticle(Color color)
         => new MeshInstance3D
         {
@@ -412,7 +420,7 @@ public partial class Main : Node3D
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
                 NoDepthTest = true,
-                RenderPriority = 50,
+                RenderPriority = 4,
             },
         };
 
