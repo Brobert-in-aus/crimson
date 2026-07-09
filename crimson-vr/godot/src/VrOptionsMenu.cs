@@ -37,7 +37,8 @@ public sealed partial class VrOptionsMenu : Node3D
         float s, int sfx, int music, int detail, bool infoTexts,
         Texture2D? panelTex, Texture2D? rectOn, Texture2D? rectOff, Texture2D? checkOn, Texture2D? checkOff)
     {
-        Position = new Vector3(0.0f, s * 0.95f, 0.0f);
+        // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
+        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         float wp = s * 0.62f;

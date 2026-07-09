@@ -1220,6 +1220,15 @@ public sealed partial class Diorama : Node3D
             {
                 basis = (new Basis(Vector3.Up, angle) * FlatBasis).Scaled(new Vector3(meters, meters, meters));
             }
+            // Death staging: the moment a creature starts dying (lifecycle_stage
+            // drops below 16) drop it to ground level so its death frames + fade
+            // play flat on the arena, aligned with the terrain corpse stamp —
+            // otherwise the dying sprite fades at the raised enemy lift while the
+            // corpse stamps at ground, reading as two vertically-separated bodies.
+            if (cur.LifecycleStage < 16.0f)
+            {
+                pos.Y = CorpseLift;
+            }
             layer.Mesh.SetInstanceTransform(i, new Transform3D(basis, pos));
 
             if (layer.Animated)

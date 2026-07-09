@@ -46,7 +46,12 @@ public sealed partial class MainMenu : Node3D
         // (RecenterArena yaws the arena so a 180 deg yaw faces the near/player
         // side; the small back-lean tips the top away). Vertical Label3D/quad
         // content reads upright under this transform.
-        Position = new Vector3(0.0f, s * 0.85f, 0.0f);
+        // Shared menu anchor: elevated above the arena and pushed back to ~3/4 of
+        // the way to the far edge (arena-local z spans -s/2..+s/2). Every menu uses
+        // this exact transform so all their items share ONE plane — poking Back on
+        // one and having another appear can't carry the finger into a button at a
+        // different depth (the instant-fire cause). Keep in sync across menus.
+        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         // The crimson logo up top (ui_signCrimson is 512x128 -> 4:1).

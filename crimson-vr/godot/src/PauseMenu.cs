@@ -53,7 +53,8 @@ public sealed partial class PauseMenu : Node3D
         // perk menu): Resume / Settings / Quit stacked vertically.
         _panel = new Node3D
         {
-            Position = new Vector3(0.0f, s * 0.8f, 0.0f),
+            // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
+            Position = new Vector3(0.0f, s * 0.85f, s * 0.25f),
             RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f),
             Visible = false,
         };

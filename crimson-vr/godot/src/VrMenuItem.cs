@@ -25,6 +25,8 @@ public sealed partial class VrMenuItem : Node3D
     private const float AtlasH = 256.0f;
     private const float LabelRectW = 122.0f;
     private const float LabelRectH = 32.0f;
+    // Plate centre within the ui_menuItem art (rail left, plate right; measured).
+    private const float PlateCentreUv = 0.766f;
     // The hand-marker sphere (this radius) is the collider — matches VrButton.
     private const float PokeRadius = 0.02f;
 
@@ -99,7 +101,9 @@ public sealed partial class VrMenuItem : Node3D
             var label = new MeshInstance3D
             {
                 Mesh = new QuadMesh { Size = new Vector2(labelW, labelH) },
-                Position = new Vector3(0.0f, 0.0f, 0.002f),
+                // ui_menuItem is a rail on the left + the button plate on the right
+                // (plate centre ~UV 0.766); sit the label on the plate, not the rail.
+                Position = new Vector3((PlateCentreUv - 0.5f) * width, 0.0f, 0.002f),
                 MaterialOverride = _labelMat,
             };
             _group.AddChild(label);

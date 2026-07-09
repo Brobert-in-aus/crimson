@@ -34,7 +34,8 @@ public sealed partial class SettingsMenu : Node3D
         _swapState = handSwap;
         _debugState = debug;
 
-        Position = new Vector3(0.0f, s * 0.85f, 0.0f);
+        // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
+        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         float bw = s * 0.7f;
