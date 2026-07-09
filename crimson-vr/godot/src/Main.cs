@@ -73,6 +73,8 @@ public partial class Main : Node3D
     private readonly UserSettings _settings = new();
     private ValidationChecklist _checklist = null!;
     private bool _checklistOpen;
+    private MainMenu _mainMenu = null!;
+    private bool _settingsFromMenu; // settings opened from the main menu (not pause)
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -200,24 +202,35 @@ public partial class Main : Node3D
         }
         SetDebug(_settings.Debug); // apply the saved debug state to the diorama
 
-        // First-run prompt: hold the sim until the player accepts (or calibrates,
-        // which is a later slice, so it just proceeds with the default for now).
-        // Returning players (first run recorded) skip straight to play.
+        // First-run prompt (accept/calibrate) is superseded by the main menu as the
+        // boot screen — the menu is now the first thing the player sees, and seated
+        // calibration is its own later slice (PLAN §5). Keep the node built for that
+        // future integration but always skip it so it never gates the sim.
         _startPrompt = new StartPrompt();
         _arenaRoot.AddChild(_startPrompt);
         _startPrompt.Build(ArenaSideMeters);
         _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
-        _startPrompt.OnAccept += () => { _settings.FirstRunDone = true; _settings.Save(); };
-        if (_settings.FirstRunDone)
-        {
-            _startPrompt.Skip();
-        }
+        _startPrompt.Skip();
 
         // Highscore name entry (virtual keyboard) on death.
         _keyboard = new VirtualKeyboard();
         _arenaRoot.AddChild(_keyboard);
         _keyboard.Build(ArenaSideMeters);
         _keyboard.OnSubmit += RestartGame;
+
+        // Main menu (boot screen): the original Crimsonland menu art, floating and
+        // pokeable, over the terrain diorama. Holds the sim until PLAY is poked.
+        _mainMenu = new MainMenu();
+        _arenaRoot.AddChild(_mainMenu);
+        _mainMenu.Build(
+            ArenaSideMeters,
+            LoadReticleTex("ui_signCrimson.png"),
+            LoadReticleTex("ui_menuItem.png"),
+            LoadReticleTex("ui_itemTexts.png"));
+        _mainMenu.OnPlay += StartGame;
+        _mainMenu.OnOptions += OpenSettingsFromMenu;
+        _mainMenu.OnStatistics += () => GD.Print("CrimsonVR: statistics screen is a later slice");
+        _mainMenu.OnQuit += () => GetTree().Quit();
 
         try
         {
@@ -234,6 +247,39 @@ public partial class Main : Node3D
             GD.PushError($"CrimsonVR: sim session create failed: {e.Message}");
             _sim = null;
         }
+
+        // Boot into the main menu: show it and hide the gameplay chrome until PLAY.
+        _mainMenu.Open();
+        SetGameplayVisible(false);
+    }
+
+    /// <summary>Show/hide the in-arena gameplay chrome (HUD, reticles, pause
+    /// toggle) — hidden while the main menu owns the screen, shown during play.</summary>
+    private void SetGameplayVisible(bool visible)
+    {
+        _hud.Visible = visible;
+        _pauseMenu.Visible = visible;
+        _leftReticle.Visible = visible;
+        _rightReticle.Visible = visible;
+        _leftGuide.Visible = visible;
+        _rightGuide.Visible = visible;
+    }
+
+    /// <summary>Leave the main menu and begin play.</summary>
+    private void StartGame()
+    {
+        _mainMenu.Close();
+        SetGameplayVisible(true);
+    }
+
+    /// <summary>Open settings from the main menu (rather than the pause panel): the
+    /// menu hides while settings shows, and Back returns to the menu.</summary>
+    private void OpenSettingsFromMenu()
+    {
+        _settingsOpen = true;
+        _settingsFromMenu = true;
+        _mainMenu.Close();
+        _settingsMenu.SetShown(true);
     }
 
     private void InitializeXr()
@@ -457,6 +503,12 @@ public partial class Main : Node3D
             return;
         }
 
+        // The main menu is the boot screen: hold the sim until PLAY is poked.
+        if (_mainMenu.IsOpen)
+        {
+            return;
+        }
+
         // First-run prompt holds the sim until the player accepts.
         if (_startPrompt.Pending)
         {
@@ -589,8 +641,22 @@ public partial class Main : Node3D
     public override void _Process(double delta)
     {
         HandleRecenter();
-        UpdateHandVisual(_leftHand, _leftReticle, _leftGuide, isMoveHand: !_handSwap);
-        UpdateHandVisual(_rightHand, _rightReticle, _rightGuide, isMoveHand: _handSwap);
+
+        // While the main menu (or settings opened from it) owns the screen, the
+        // aim/move reticles are off — the hands are poking menu items, not aiming.
+        bool menuOwnsScreen = _mainMenu.IsOpen || (_settingsFromMenu && _settingsOpen);
+        if (menuOwnsScreen)
+        {
+            _leftReticle.Visible = false;
+            _rightReticle.Visible = false;
+            _leftGuide.Visible = false;
+            _rightGuide.Visible = false;
+        }
+        else
+        {
+            UpdateHandVisual(_leftHand, _leftReticle, _leftGuide, isMoveHand: !_handSwap);
+            UpdateHandVisual(_rightHand, _rightReticle, _rightGuide, isMoveHand: _handSwap);
+        }
 
         if (_sim != null)
         {
@@ -633,6 +699,19 @@ public partial class Main : Node3D
         probes[1] = MakeProbe(_rightHand);
         ReadOnlySpan<HandProbe> p = probes;
 
+        // Main menu owns the screen while open: poke its items, or the settings
+        // overlay when it was opened from the menu. Gameplay menus stay dormant.
+        if (_mainMenu.IsOpen)
+        {
+            _mainMenu.PollPoke(p);
+            return;
+        }
+        if (_settingsFromMenu && _settingsOpen)
+        {
+            _settingsMenu.PollPoke(p);
+            return;
+        }
+
         if (_startPrompt.Pending)
         {
             _startPrompt.PollPoke(p);
@@ -664,10 +743,12 @@ public partial class Main : Node3D
         }
 
         // The settings/checklist overlays are only valid while paused (e.g. the
-        // pause toggle was poked off underneath one); reconcile.
+        // pause toggle was poked off underneath one); reconcile. Settings opened
+        // from the main menu (not the pause panel) are exempt — they live outside
+        // the paused state.
         if (!_pauseMenu.IsPaused)
         {
-            if (_settingsOpen)
+            if (_settingsOpen && !_settingsFromMenu)
             {
                 CloseSettings();
             }
@@ -694,6 +775,12 @@ public partial class Main : Node3D
     {
         _settingsOpen = false;
         _settingsMenu.SetShown(false);
+        if (_settingsFromMenu)
+        {
+            _settingsFromMenu = false;
+            _mainMenu.Open();
+            return;
+        }
         if (_pauseMenu.IsPaused)
         {
             _pauseMenu.SetPanelVisible(true);

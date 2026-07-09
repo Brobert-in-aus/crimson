@@ -198,9 +198,11 @@ def main() -> None:
         with Image.open(src) as im:
             staged[name] = list(im.size)
 
-    # UI reticle textures live under crimson/ui/. ui_aim = the aim-hand crosshair,
-    # ui_cursor = the move-hand pointer (VR reticles project onto the play plane).
-    for name in ("ui_aim.png", "ui_cursor.png"):
+    # UI textures live under crimson/ui/. ui_aim = the aim-hand crosshair,
+    # ui_cursor = the move-hand pointer (VR reticles project onto the play plane);
+    # ui_signCrimson/ui_menuItem/ui_itemTexts are the original main-menu art the VR
+    # main menu reuses (logo, item plate, and the label atlas respectively).
+    for name in ("ui_aim.png", "ui_cursor.png", "ui_signCrimson.png", "ui_menuItem.png", "ui_itemTexts.png"):
         src = assets_dir / UI / name
         if not src.exists():
             print(f"WARN missing ui sheet: {src}")
