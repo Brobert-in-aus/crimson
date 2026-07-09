@@ -65,8 +65,12 @@ public partial class Main : Node3D
     private PerkMenu _perkMenu = null!;
     private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
     private PauseMenu _pauseMenu = null!;
-    private SettingsMenu _settingsMenu = null!;
-    private bool _settingsOpen;
+    // Options screen (mirrors the base game) + the VR Settings submenu it opens.
+    private VrOptionsMenu _optionsMenu = null!;
+    private SettingsMenu _settingsMenu = null!; // VR Settings submenu (hand/dead-zone/debug)
+    private bool _optionsOpen;
+    private bool _vrSettingsOpen;
+    private bool _optionsFromMenu; // options opened from the main menu (vs the pause menu)
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
     private VirtualKeyboard _keyboard = null!;
@@ -74,11 +78,11 @@ public partial class Main : Node3D
     private ValidationChecklist _checklist = null!;
     private bool _checklistOpen;
     private MainMenu _mainMenu = null!;
-    private bool _settingsFromMenu; // settings opened from the main menu (not pause)
 
-    /// <summary>The menu flow (main menu, or settings opened from it) owns the
-    /// screen: the sim must not tick and gameplay input must not reach the game.</summary>
-    private bool MenuOwnsScreen => _mainMenu.IsOpen || (_settingsFromMenu && _settingsOpen);
+    /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
+    /// from it) owns the screen: the sim must not tick and gameplay input must not
+    /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
+    private bool MenuOwnsScreen => _mainMenu.IsOpen || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -170,13 +174,29 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_pauseMenu);
         _pauseMenu.Build(ArenaSideMeters);
         _pauseMenu.OnQuit += () => GetTree().Quit();
-        _pauseMenu.OnSettings += OpenSettings;
+        _pauseMenu.OnSettings += () => OpenOptions(fromMenu: false);
 
-        // Settings (MVP): hand-swap + dead-zone, opened from the pause menu.
+        // Options screen (mirrors the base game): audio + graphics-detail sliders,
+        // UI-info-texts toggle, and a VR Settings submenu. Opened from the main
+        // menu or the pause menu; values applied live + persisted.
+        _optionsMenu = new VrOptionsMenu();
+        _arenaRoot.AddChild(_optionsMenu);
+        _optionsMenu.Build(
+            ArenaSideMeters, _settings.SfxVolume, _settings.MusicVolume, _settings.GraphicsDetail, _settings.UiInfoTexts,
+            LoadReticleTex("ui_menuPanel.png"), LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"),
+            LoadReticleTex("ui_checkOn.png"), LoadReticleTex("ui_checkOff.png"));
+        _optionsMenu.OnBack += CloseOptions;
+        _optionsMenu.OnVrSettings += OpenVrSettings;
+        _optionsMenu.OnSfxChanged += v => { _settings.SfxVolume = v; _audio.SetSfxVolume(v); _settings.Save(); };
+        _optionsMenu.OnMusicChanged += v => { _settings.MusicVolume = v; _audio.SetMusicVolume(v); _settings.Save(); };
+        _optionsMenu.OnDetailChanged += v => { _settings.GraphicsDetail = v; _diorama.SetGraphicsDetail(v); _settings.Save(); };
+        _optionsMenu.OnInfoTextsChanged += v => { _settings.UiInfoTexts = v; _settings.Save(); };
+
+        // VR Settings submenu (opened from Options): hand-swap + dead-zone + debug.
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug);
-        _settingsMenu.OnBack += CloseSettings;
+        _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
@@ -232,7 +252,7 @@ public partial class Main : Node3D
             LoadReticleTex("ui_menuItem.png"),
             LoadReticleTex("ui_itemTexts.png"));
         _mainMenu.OnPlay += StartGame;
-        _mainMenu.OnOptions += OpenSettingsFromMenu;
+        _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
         _mainMenu.OnStatistics += () => GD.Print("CrimsonVR: statistics screen is a later slice");
         _mainMenu.OnQuit += () => GetTree().Quit();
 
@@ -253,9 +273,16 @@ public partial class Main : Node3D
             _sim = null;
         }
 
-        // Boot into the main menu: show it and hide the gameplay chrome until PLAY.
+        // Apply the persisted Options settings now the sim/diorama/audio exist.
+        _audio.SetSfxVolume(_settings.SfxVolume);
+        _audio.SetMusicVolume(_settings.MusicVolume);
+        _diorama.SetGraphicsDetail(_settings.GraphicsDetail);
+
+        // Boot into the main menu: show it, hide the gameplay chrome until PLAY,
+        // and play the menu theme (like the base game).
         _mainMenu.Open();
         SetGameplayVisible(false);
+        _audio.PlayMusic("crimson_theme");
     }
 
     /// <summary>Show/hide the in-arena gameplay chrome (HUD, reticles, pause
@@ -270,21 +297,63 @@ public partial class Main : Node3D
         _rightGuide.Visible = visible;
     }
 
-    /// <summary>Leave the main menu and begin play.</summary>
+    /// <summary>Leave the main menu and begin play (switch to the in-game track).</summary>
     private void StartGame()
     {
         _mainMenu.Close();
         SetGameplayVisible(true);
+        _audio.PlayMusic("gt1_ingame");
     }
 
-    /// <summary>Open settings from the main menu (rather than the pause panel): the
-    /// menu hides while settings shows, and Back returns to the menu.</summary>
-    private void OpenSettingsFromMenu()
+    // ---- Options / VR Settings navigation ----
+    // Options is the entry (from the main menu OR the pause menu); VR Settings is a
+    // submenu of Options. From the main menu the sim is gated by MenuOwnsScreen;
+    // from the pause menu it's gated by IsPaused. Backs unwind to the caller.
+
+    private void OpenOptions(bool fromMenu)
     {
-        _settingsOpen = true;
-        _settingsFromMenu = true;
-        _mainMenu.Close();
+        _optionsFromMenu = fromMenu;
+        _optionsOpen = true;
+        if (fromMenu)
+        {
+            _mainMenu.Close();
+        }
+        else
+        {
+            _pauseMenu.SetPanelVisible(false);
+        }
+        _optionsMenu.SetShown(true);
+    }
+
+    private void CloseOptions()
+    {
+        _optionsOpen = false;
+        _optionsMenu.SetShown(false);
+        if (_optionsFromMenu)
+        {
+            _optionsFromMenu = false;
+            _mainMenu.Open();
+        }
+        else if (_pauseMenu.IsPaused)
+        {
+            _pauseMenu.SetPanelVisible(true);
+        }
+    }
+
+    private void OpenVrSettings()
+    {
+        _optionsOpen = false;
+        _vrSettingsOpen = true;
+        _optionsMenu.SetShown(false);
         _settingsMenu.SetShown(true);
+    }
+
+    private void CloseVrSettings()
+    {
+        _vrSettingsOpen = false;
+        _settingsMenu.SetShown(false);
+        _optionsOpen = true;
+        _optionsMenu.SetShown(true);
     }
 
     private void InitializeXr()
@@ -740,16 +809,25 @@ public partial class Main : Node3D
         probes[1] = MakeProbe(_rightHand);
         ReadOnlySpan<HandProbe> p = probes;
 
-        // Main menu owns the screen while open: poke its items, or the settings
-        // overlay when it was opened from the menu. Gameplay menus stay dormant.
+        // Main menu owns the screen while open: poke its items. Gameplay menus stay
+        // dormant.
         if (_mainMenu.IsOpen)
         {
             _mainMenu.PollPoke(p);
             return;
         }
-        if (_settingsFromMenu && _settingsOpen)
+        // Options / VR Settings opened from the main menu (sim gated by
+        // MenuOwnsScreen): poke whichever is showing.
+        if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen))
         {
-            _settingsMenu.PollPoke(p);
+            if (_vrSettingsOpen)
+            {
+                _settingsMenu.PollPoke(p);
+            }
+            else
+            {
+                _optionsMenu.PollPoke(p);
+            }
             return;
         }
 
@@ -765,7 +843,11 @@ public partial class Main : Node3D
         }
 
         _pauseMenu.PollPoke(p);
-        if (_pauseMenu.IsPaused && _settingsOpen)
+        if (_pauseMenu.IsPaused && _optionsOpen)
+        {
+            _optionsMenu.PollPoke(p);
+        }
+        if (_pauseMenu.IsPaused && _vrSettingsOpen)
         {
             _settingsMenu.PollPoke(p);
         }
@@ -783,15 +865,17 @@ public partial class Main : Node3D
             }
         }
 
-        // The settings/checklist overlays are only valid while paused (e.g. the
-        // pause toggle was poked off underneath one); reconcile. Settings opened
-        // from the main menu (not the pause panel) are exempt — they live outside
+        // The pause-menu overlays (options + checklist opened from pause) are only
+        // valid while paused (e.g. the pause toggle was poked off underneath one);
+        // reconcile. Options opened from the MAIN MENU is exempt — it lives outside
         // the paused state.
-        if (!_pauseMenu.IsPaused)
+        if (!_pauseMenu.IsPaused && !_optionsFromMenu)
         {
-            if (_settingsOpen && !_settingsFromMenu)
+            if (_optionsOpen || _vrSettingsOpen)
             {
-                CloseSettings();
+                _vrSettingsOpen = false;
+                _settingsMenu.SetShown(false);
+                CloseOptions();
             }
             if (_checklistOpen)
             {
@@ -804,29 +888,6 @@ public partial class Main : Node3D
         => hand.GetHasTrackingData()
             ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold)
             : default;
-
-    private void OpenSettings()
-    {
-        _settingsOpen = true;
-        _pauseMenu.SetPanelVisible(false);
-        _settingsMenu.SetShown(true);
-    }
-
-    private void CloseSettings()
-    {
-        _settingsOpen = false;
-        _settingsMenu.SetShown(false);
-        if (_settingsFromMenu)
-        {
-            _settingsFromMenu = false;
-            _mainMenu.Open();
-            return;
-        }
-        if (_pauseMenu.IsPaused)
-        {
-            _pauseMenu.SetPanelVisible(true);
-        }
-    }
 
     private void OpenChecklist()
     {

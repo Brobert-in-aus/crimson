@@ -44,9 +44,9 @@ public sealed partial class SettingsMenu : Node3D
 
         var title = new Label3D
         {
-            Text = "Settings",
+            Text = "VR Settings",
             FontSize = 120,
-            PixelSize = s / 260.0f,
+            PixelSize = s / 700.0f,
             Modulate = new Color(0.9f, 0.9f, 0.95f),
             Position = new Vector3(0.0f, y, 0.0f),
             NoDepthTest = true,
@@ -67,7 +67,7 @@ public sealed partial class SettingsMenu : Node3D
         {
             Text = DeadZoneText(deadZone),
             FontSize = 90,
-            PixelSize = s / 320.0f,
+            PixelSize = s / 700.0f,
             Modulate = new Color(0.85f, 0.85f, 0.9f),
             Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
             NoDepthTest = true,

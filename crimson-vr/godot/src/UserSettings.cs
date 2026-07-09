@@ -25,6 +25,13 @@ public sealed class UserSettings
     public float DeadZone = VrInput.DefaultDeadZoneGameUnits;
     public bool FirstRunDone;
     public bool Debug;
+
+    // Original Options settings (mirrors the base game). Volumes 0-10, graphics
+    // detail 1-5, info-texts toggle — same scales as the desktop Options screen.
+    public int SfxVolume = 10;
+    public int MusicVolume = 10;
+    public int GraphicsDetail = 5;
+    public bool UiInfoTexts = true;
     public readonly List<HighscoreEntry> Highscores = new();
     // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
     public readonly Dictionary<string, int> Checklist = new();
@@ -40,6 +47,10 @@ public sealed class UserSettings
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
         Debug = cf.GetValue("dev", "debug", Debug).AsBool();
+        SfxVolume = cf.GetValue("audio", "sfx_volume", SfxVolume).AsInt32();
+        MusicVolume = cf.GetValue("audio", "music_volume", MusicVolume).AsInt32();
+        GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
+        UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
 
         Highscores.Clear();
         string hs = cf.GetValue("game", "highscores", string.Empty).AsString();
@@ -87,6 +98,10 @@ public sealed class UserSettings
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
+        cf.SetValue("game", "ui_info_texts", UiInfoTexts);
+        cf.SetValue("audio", "sfx_volume", SfxVolume);
+        cf.SetValue("audio", "music_volume", MusicVolume);
+        cf.SetValue("video", "graphics_detail", GraphicsDetail);
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
         cf.Save(ConfigPath);

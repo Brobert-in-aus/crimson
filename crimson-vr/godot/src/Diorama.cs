@@ -145,6 +145,26 @@ public sealed partial class Diorama : Node3D
     /// <summary>Toggle debug overlays (the magenta creature facing needle).</summary>
     public void SetDebug(bool on) => _debug = on;
 
+    // Graphics-detail nodes toggled by the Options slider (1-5): low detail drops
+    // the soft drop-shadows and the sprite-effect particles (the heaviest overdraw)
+    // like the base game's detail preset thins the eye-candy.
+    private MultiMeshInstance3D? _shadowNode;
+    private MultiMeshInstance3D? _particleNode;
+
+    /// <summary>Apply the Options graphics-detail level (1-5): shadows at >=3,
+    /// particles at >=2. A coarse but faithful "less eye-candy at low detail".</summary>
+    public void SetGraphicsDetail(int level)
+    {
+        if (_shadowNode != null)
+        {
+            _shadowNode.Visible = level >= 3;
+        }
+        if (_particleNode != null)
+        {
+            _particleNode.Visible = level >= 2;
+        }
+    }
+
     // 2.5D presentation (PLAN §6). A fixed back-tilt was tried (leaning sprites
     // toward the player so they read as "standing"), but in-headset it looked
     // worse AND lifted sprites off the plane while projectiles stay at ground
@@ -529,7 +549,8 @@ public sealed partial class Diorama : Node3D
             InstanceCount = ParticleCap,
             VisibleInstanceCount = 0,
         };
-        AddChild(new MultiMeshInstance3D { Multimesh = _particles, MaterialOverride = material });
+        _particleNode = new MultiMeshInstance3D { Multimesh = _particles, MaterialOverride = material };
+        AddChild(_particleNode);
 
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
@@ -937,7 +958,8 @@ public sealed partial class Diorama : Node3D
             InstanceCount = ShadowCap,
             VisibleInstanceCount = 0,
         };
-        AddChild(new MultiMeshInstance3D { Multimesh = _shadows, MaterialOverride = material });
+        _shadowNode = new MultiMeshInstance3D { Multimesh = _shadows, MaterialOverride = material };
+        AddChild(_shadowNode);
     }
 
     /// <summary>A radial-gradient blob texture (opaque-ish centre fading to a

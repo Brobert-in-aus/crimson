@@ -46,15 +46,39 @@ public sealed partial class AudioBank : Node3D
     private int _next;
     private bool _ready;
 
+    // Non-positional music (menu theme / in-game), + segmented 0-10 volumes that
+    // mirror the original Options screen. SFX volume rides on the pool players'
+    // VolumeDb; music on the music player's.
+    private AudioStreamPlayer _music = null!;
+    private readonly Dictionary<string, string> _musicTracks = new();
+    private string? _musicTrack;
+    private float _sfxVolumeDb;
+    private float _musicVolumeDb;
+
     public void Configure(float arenaSideMeters, float worldSize)
     {
         _arenaSideMeters = arenaSideMeters;
         _worldSize = worldSize;
 
         AudioManifest? manifest = LoadManifest();
+
+        // Music player (non-positional), set up regardless of SFX so the menu
+        // theme plays even if the sfx manifest is empty. Loops by replaying on
+        // finish. Tracks are resolved by name in PlayMusic.
+        _music = new AudioStreamPlayer();
+        _music.Finished += () => { if (_music.Stream != null) { _music.Play(); } };
+        AddChild(_music);
+        if (manifest?.music is { } tracks)
+        {
+            foreach (KeyValuePair<string, string> kv in tracks)
+            {
+                _musicTracks[kv.Key] = kv.Value;
+            }
+        }
+
         if (manifest?.sfx is not { Length: > 0 } files)
         {
-            return; // no assets -> silent
+            return; // no sfx assets -> silent SFX (music may still play)
         }
 
         // Load each distinct sample once, indexed by native sfx id.
@@ -92,6 +116,7 @@ public sealed partial class AudioBank : Node3D
                 // attenuation would make near sounds boom and far ones vanish).
                 AttenuationModel = AudioStreamPlayer3D.AttenuationModelEnum.Disabled,
                 MaxPolyphony = 1,
+                VolumeDb = _sfxVolumeDb,
             };
             AddChild(p);
             _pool[i] = p;
@@ -160,6 +185,54 @@ public sealed partial class AudioBank : Node3D
         }
     }
 
+    // ---- Volume + music (Options screen) ----
+
+    /// <summary>Segmented 0-10 volume (mirrors the original Options scale). 0 = mute.</summary>
+    private static float VolumeToDb(int level) => level <= 0 ? -80.0f : Mathf.LinearToDb(Mathf.Clamp(level, 0, 10) / 10.0f);
+
+    public void SetSfxVolume(int level)
+    {
+        _sfxVolumeDb = VolumeToDb(level);
+        foreach (AudioStreamPlayer3D p in _pool)
+        {
+            p.VolumeDb = _sfxVolumeDb;
+        }
+    }
+
+    public void SetMusicVolume(int level)
+    {
+        _musicVolumeDb = VolumeToDb(level);
+        if (_music != null)
+        {
+            _music.VolumeDb = _musicVolumeDb;
+        }
+    }
+
+    /// <summary>Play a named music track (looping), e.g. "crimson_theme" (menu) or
+    /// "gt1_ingame" (gameplay). No-ops if the track/asset is absent. Re-selecting
+    /// the current track keeps it playing.</summary>
+    public void PlayMusic(string track)
+    {
+        if (_music == null || _musicTrack == track)
+        {
+            return;
+        }
+        if (!_musicTracks.TryGetValue(track, out string? path) || ResourceLoader.Load<AudioStream>(AudioDir + path) is not AudioStream stream)
+        {
+            return;
+        }
+        _musicTrack = track;
+        _music.Stream = stream;
+        _music.VolumeDb = _musicVolumeDb;
+        _music.Play();
+    }
+
+    public void StopMusic()
+    {
+        _musicTrack = null;
+        _music?.Stop();
+    }
+
     private void Play(int sfxId, Vector3 localPos)
     {
         if (sfxId < 0 || sfxId >= _streams.Length || _streams[sfxId] is not AudioStream stream)
@@ -204,6 +277,9 @@ public sealed partial class AudioBank : Node3D
 
         [JsonPropertyName("plasma_minigun_weapon_id")]
         public int plasma_minigun_weapon_id { get; set; } = -1;
+
+        // Music track name -> ogg path (relative to AudioDir).
+        public Dictionary<string, string>? music { get; set; }
     }
 
     private static AudioManifest? LoadManifest()
