@@ -6,7 +6,8 @@ and what's still missing to reach faithful parity with the base game. The
 work is almost entirely the **presentation + interaction** layer, so most gaps
 below are "not surfaced in VR yet", not "not simulated".
 
-_Last updated: 2026-07-09._
+_Last updated: 2026-07-09 (render-correctness pass: creature auras, particle-glow
+pool, faithful HUD, UI click SFX, perk-select fade)._
 
 ## Implemented in VR
 
@@ -57,7 +58,7 @@ The embedded sim simulates the **whole game**, so these need only VR UI/render:
 | **Credits** | `credits.py` | Missing |
 | **Mods** | `mods.py` | Missing |
 | **Network / co-op** | `network_lobby.py`, `network_session.py` | Missing (out of scope for v1) |
-| **Faithful HUD** | `ui_gameTop`, `ui_ind*`, `ui_num*`, `ui_lifeHeart`, `ui_wicons`, `ui_iconAim` | VR uses **custom** Label3D + bars, not the game's HUD art |
+| ~~**Faithful HUD**~~ | `ui_gameTop`, `ui_ind*`, `ui_lifeHeart`, `ui_wicons` | **Done** (ABI v8) — real HUD art; `ui_num*`/`ui_iconAim` still unused |
 | **On-screen banners** | `ui_textLevelUp`, `ui_textPickAPerk`, `ui_textLevComp`, `ui_textQuest`, `ui_textReaper`, `ui_textWellDone` | Not used |
 | First-run seated **calibration** + **arena scale** UI | (VR-specific) | Deferred slices |
 | Native **.crd replay recorder** | (VR-specific) | Deferred (`notes/replay-recording-plan.md`) |
@@ -68,9 +69,9 @@ The embedded sim simulates the **whole game**, so these need only VR UI/render:
 `gt2_harppen` (alt in-game), `intro` (boot theme), `shortie_monk`.
 → Wire when mode-select / boot sequence land.
 
-**UI SFX (staged, silent in VR):** `UI_BUTTONCLICK`, `UI_PANELCLICK`, `UI_CLINK`,
-`UI_TYPECLICK`, `UI_TYPEENTER`, `UI_BONUS`. The poke buttons and the keyboard make
-no click sound yet. (`UI_LEVELUP` is now used.)
+**UI SFX:** `UI_BUTTONCLICK` (poke buttons), `UI_TYPECLICK`, `UI_TYPEENTER` (VR
+keyboard), and `UI_LEVELUP` are now wired. Still unused: `UI_PANELCLICK`,
+`UI_CLINK`, `UI_BONUS`.
 
 **UI textures in the source assets but NOT staged/used:**
 - HUD: `ui_gameTop`, `ui_indPanel`, `ui_indBullet/Electric/Fire/Life/Rocket`,
@@ -92,14 +93,14 @@ audit. Mapping `src/crimson/render/world/` to the diorama:
 |---|---|---|
 | ground / decals / corpses / shadows | alpha | Yes |
 | creatures (sprites + tint) | alpha | Yes |
-| **creature overlays** (`draw_creature_overlays`): monster-vision aura, plague/poison auras | alpha | **No** — plague/monster-vision auras not drawn |
+| **creature overlays** (`draw_creature_overlays`): monster-vision aura, plague/poison auras | alpha | **Yes now** (ABI v7) — poison/plague/monster-vision auras drawn |
 | projectiles / secondaries (glow streaks) | additive | Yes |
 | `draw_effect_pool` **alpha** pass (flags & 0x40): smoke, casings, blood | alpha | Yes |
 | `draw_effect_pool` **additive** pass (else): ring, flash, shockwave burst | additive | **Yes now** (b5cea3c0) — was dropped |
-| **`draw_particle_pool`** (`state.particles`, separate pool): additive glows/sparks | additive | **No** — this pool is **not exported over the ABI at all** |
+| **`draw_particle_pool`** (`state.particles`, separate pool): additive glows/sparks | additive | **Yes now** (ABI v7) — glow stream exported + rendered |
 | bonus pickups + hover labels | alpha | Partial (icons yes, hover labels no) |
 | aim indicators / gauges / clock | alpha | Custom (VR reticles) |
-| HUD | alpha | Custom (non-faithful) |
+| HUD | alpha | **Faithful now** (ABI v8) — game HUD art (top bar/heart/health/weapon icon/ammo bars/XP panel) |
 
 **What the additive-pass fix actually restored** (all were dark before — only the
 alpha smoke/blood/casings showed): explosion ring + bright flash + shockwave burst
@@ -107,13 +108,13 @@ alpha smoke/blood/casings showed): explosion ring + bright flash + shockwave bur
 damage), and **projectile muzzle/impact flashes** (gauss/plasma/rocket `RING`+`BURST`
 in `projectiles/effects.py`). i.e. the whole "bright, glowy" combat-feedback layer.
 
-**Two render gaps this audit surfaced that remain:**
-1. **`state.particles` pool** (`draw_particle_pool`, additive glows/sparks, ~low
-   alpha) is a *second* particle system distinct from the effect pool, and it is
-   **not exported over the host ABI** — the diorama can't render what it never
-   receives. Needs an ABI addition (a second snapshot stream) like the effect pool.
-2. **Creature overlays** (`draw_creature_overlays`): the plague/poison aura and the
-   monster-vision (perk) aura per infected creature aren't drawn.
+**Two render gaps this audit surfaced — both now CLOSED (ABI v7):**
+1. ~~**`state.particles` pool**~~ — DONE. A `ParticleGlowSnap` stream (+ header
+   `glow_count`) is packed after the effect pool and rendered additively in
+   `RenderGlowPool` (big/normal/bubblegun sub-passes matching `draw_particle_pool`).
+2. ~~**Creature overlays**~~ — DONE. `RenderCreatureOverlays` draws the AURA-frame
+   poison (red, `flags & 0x01`), plague (black, wire bit `0x80000000`), and
+   monster-vision (yellow, header flag) auras with the lifecycle fade.
 
 **Lesson:** a feature/asset parity check misses render-pipeline correctness. Any
 base-game `begin_blend_mode` / draw pass should be explicitly matched in the diorama.
@@ -121,16 +122,21 @@ base-game `begin_blend_mode` / draw pass should be explicitly matched in the dio
 ## Known render gaps / polish backlog (from in-headset testing)
 
 - **Nuke** blast visual ~½ the effective radius (particle-scale work).
-- **Perk-select fade** (fade current set out / next set in for clearer feedback).
-- HUD is non-faithful (see table).
-- Poke buttons + keyboard are silent (wire `UI_BUTTONCLICK` / `UI_TYPECLICK`).
+- ~~Perk-select fade~~ — DONE (each candidate set eases in over ~220ms; VrButton.SetFade).
+- ~~HUD is non-faithful~~ — DONE (faithful HUD art, ABI v8; first-pass layout, tune in-headset).
+- ~~Poke buttons + keyboard silent~~ — DONE (VrButton.OnAnyPress → ui_buttonClick /
+  keyboard ui_typeClick / ui_typeEnter).
 
 ## Suggested next faithful-parity steps (rough order)
 
+Render-correctness + HUD + UI-SFX + perk-fade are DONE (this pass). Remaining:
+
 1. **Game-mode select** screen (Play Game submenu) — highest gameplay value; the
    sim already supports all modes, so it's UI + wiring `game_mode`/`quest_level_key`.
-2. **Faithful HUD** from the game's HUD art (`ui_gameTop`/`ui_ind*`/`ui_num*`).
-3. **Menu/keyboard click SFX** (cheap faithfulness win).
-4. **Statistics** + **Controls** screens.
-5. **Databases** (perk/weapon encyclopedia) — data already in the manifest/sim.
-6. Boot/attract sequence with `intro` music; per-mode music (`crimsonquest`, etc.).
+   (Would also light up the HUD's quest/rush/typo timer + quest panels, already in
+   `hud.py` but VR renders only the Survival subset today.)
+2. **Statistics** + **Controls** screens.
+3. **Databases** (perk/weapon encyclopedia) — data already in the manifest/sim.
+4. Boot/attract sequence with `intro` music; per-mode music (`crimsonquest`, etc.).
+5. HUD follow-ups: bonus-HUD slots + weapon-name popup (need bonus-HUD state over
+   the ABI); the aim-indicator `ui_iconAim`; nuke blast-radius scale.
