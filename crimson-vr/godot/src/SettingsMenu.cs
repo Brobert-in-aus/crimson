@@ -47,7 +47,7 @@ public sealed partial class SettingsMenu : Node3D
         float pitch = s * 0.16f; // > bh, so rows never overlap
         float y = s * 0.42f;     // top-down cursor
 
-        AddTitleBacking(y, s * 0.66f, s * 0.09f);
+        AddTitleBacking(y, "VR Settings", 120.0f, s / 1000.0f);
         var title = new Label3D
         {
             Text = "VR Settings",
@@ -70,9 +70,11 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.OnPress += ToggleHandSwap;
         y -= pitch;
 
-        // Dead-zone: a value label above its slider, with air between them.
-        float dzTitleY = y + s * 0.08f;
-        AddTitleBacking(dzTitleY, s * 0.72f, s * 0.07f);
+        // Dead-zone: a value label above its slider. Sit the label lower (more air
+        // below the Movement toggle above) and pull the next row up a touch (less
+        // gap to the Debug toggle below).
+        float dzTitleY = y + s * 0.04f;
+        AddTitleBacking(dzTitleY, DeadZoneText(deadZone), 90.0f, s / 1200.0f);
         _deadZoneLabel = new Label3D
         {
             Text = DeadZoneText(deadZone),
@@ -90,14 +92,14 @@ public sealed partial class SettingsMenu : Node3D
         AddChild(_deadZone);
         int dzValue = Mathf.Clamp(Mathf.RoundToInt(deadZone / DeadZoneStep), 0, 10);
         _deadZone.Build(s * 0.03f, 0, 10, dzValue, rectOn, rectOff);
-        _deadZone.Position = new Vector3(0.0f, y - s * 0.01f, 0.0f);
+        _deadZone.Position = new Vector3(0.0f, y - s * 0.03f, 0.0f);
         _deadZone.OnValueChanged += v =>
         {
             float units = v * DeadZoneStep;
             _deadZoneLabel.Text = DeadZoneText(units);
             OnDeadZoneChanged?.Invoke(units);
         };
-        y -= pitch;
+        y -= s * 0.13f; // tighter step to the Debug toggle
 
         // Debug-overlay toggle (poke-tip markers + creature facing needle).
         _debug = new VrButton();
@@ -153,9 +155,13 @@ public sealed partial class SettingsMenu : Node3D
         OnDebugChanged?.Invoke(_debugState);
     }
 
-    /// <summary>A dark translucent backing strip behind a title (see VrOptionsMenu).</summary>
-    private void AddTitleBacking(float y, float width, float height)
+    /// <summary>A dark translucent backing strip behind a title, sized from the
+    /// text so the title always fits (see VrOptionsMenu).</summary>
+    private void AddTitleBacking(float y, string text, float fontSize, float pixelSize)
     {
+        float glyph = fontSize * pixelSize;
+        float width = text.Length * glyph * 0.62f + glyph;
+        float height = glyph * 1.5f;
         AddChild(new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },

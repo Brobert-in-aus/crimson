@@ -50,7 +50,7 @@ public sealed partial class VrOptionsMenu : Node3D
         _ = panelTex;
 
         float y = hp * 0.5f - s * 0.05f;
-        AddTitleBacking(s, y, s * 0.6f, s * 0.09f);
+        AddTitleBacking(y, "Options", 110.0f, s / 1100.0f);
         AddChild(new Label3D
         {
             Text = "Options",
@@ -64,7 +64,7 @@ public sealed partial class VrOptionsMenu : Node3D
         });
         y -= s * 0.17f;
 
-        _sfx = AddSliderRow("Sound volume", s, y, 0, 10, sfx, rectOn, rectOff, v => OnSfxChanged?.Invoke(v));
+        _sfx = AddSliderRow("SFX Volume", s, y, 0, 10, sfx, rectOn, rectOff, v => OnSfxChanged?.Invoke(v));
         y -= s * 0.18f;
         _music = AddSliderRow("Music volume", s, y, 0, 10, music, rectOn, rectOff, v => OnMusicChanged?.Invoke(v));
         y -= s * 0.18f;
@@ -100,7 +100,7 @@ public sealed partial class VrOptionsMenu : Node3D
         Texture2D? rectOn, Texture2D? rectOff, Action<int> onChanged)
     {
         float titleY = y + s * 0.08f; // more air between the title and its pips
-        AddTitleBacking(s, titleY, s * 0.56f, s * 0.07f);
+        AddTitleBacking(titleY, label, 72.0f, s / 1500.0f);
         AddChild(new Label3D
         {
             Text = label,
@@ -120,10 +120,13 @@ public sealed partial class VrOptionsMenu : Node3D
         return slider;
     }
 
-    /// <summary>A dark translucent backing strip behind a title so it reads as a
-    /// panel label rather than free-floating text against the terrain.</summary>
-    private void AddTitleBacking(float s, float y, float width, float height)
+    /// <summary>A dark translucent backing strip behind a title, sized from the
+    /// text so the title always fits inside it (was fixed-width and overflowed).</summary>
+    private void AddTitleBacking(float y, string text, float fontSize, float pixelSize)
     {
+        float glyph = fontSize * pixelSize;                 // ~cap height in metres
+        float width = text.Length * glyph * 0.62f + glyph;  // advance*chars + padding
+        float height = glyph * 1.5f;
         AddChild(new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
