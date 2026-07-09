@@ -59,6 +59,7 @@ public sealed partial class AudioBank : Node3D
     private AudioStream? _buttonClickStream;
     private readonly List<AudioStream> _typeClickStreams = new();
     private AudioStream? _typeEnterStream;
+    private AudioStream? _panelClickStream;
     private int _typeClickNext;
 
     public void Configure(float arenaSideMeters, float worldSize)
@@ -92,6 +93,7 @@ public sealed partial class AudioBank : Node3D
         // UI poke cues, loaded by name (mirrors the desktop menu/keyboard sfx).
         _buttonClickStream = LoadUi("ui_buttonClick.ogg");
         _typeEnterStream = LoadUi("ui_typeEnter.ogg");
+        _panelClickStream = LoadUi("ui_panelClick.ogg"); // panel-open cue (UI_PANELCLICK)
         foreach (string name in new[] { "ui_typeClick_01.ogg", "ui_typeClick_02.ogg" })
         {
             if (LoadUi(name) is AudioStream s)
@@ -281,6 +283,7 @@ public sealed partial class AudioBank : Node3D
     public const int UiButton = 0;
     public const int UiType = 1;
     public const int UiEnter = 2;
+    public const int UiPanel = 3; // panel-open cue (base UI_PANELCLICK)
 
     /// <summary>Play a UI poke cue (button click / keyboard type / enter) at the
     /// arena centre. Driven by VrButton.OnAnyPress so every poke button clicks.</summary>
@@ -292,6 +295,7 @@ public sealed partial class AudioBank : Node3D
                 ? _typeClickStreams[_typeClickNext++ % _typeClickStreams.Count]
                 : null,
             UiEnter => _typeEnterStream,
+            UiPanel => _panelClickStream,
             _ => _buttonClickStream,
         };
         if (stream == null || _pool.Length == 0)

@@ -75,6 +75,15 @@ public partial class Main : Node3D
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
     private VirtualKeyboard _keyboard = null!;
+    private GameOverPanel _gameOverPanel = null!;
+    private int _deathTicks;     // pacing counter: death -> results (base death-timer delay)
+    private int _deathRank = int.MaxValue; // 0-based insertion rank of the death score
+
+    // ~1.2 s at 60 Hz between death and the results flow, standing in for the
+    // base game's death VO + death-timer delay before the panel slides in
+    // (player_damage.py). Tune in-headset.
+    private const int DeathPacingTicks = 72;
+    private const int HighscoreTableMax = 10; // UserSettings.AddHighscore cap
     private readonly UserSettings _settings = new();
     private ValidationChecklist _checklist = null!;
     private MainMenu _mainMenu = null!;
@@ -245,11 +254,18 @@ public partial class Main : Node3D
         _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
         _startPrompt.Skip();
 
-        // Highscore name entry (virtual keyboard) on death.
+        // Death flow: highscore name entry (virtual keyboard, when the score
+        // ranks) then the game-over results panel.
         _keyboard = new VirtualKeyboard();
         _arenaRoot.AddChild(_keyboard);
         _keyboard.Build(ArenaSideMeters);
-        _keyboard.OnSubmit += RestartGame;
+        _keyboard.OnSubmit += SubmitHighscoreName;
+
+        _gameOverPanel = new GameOverPanel();
+        _arenaRoot.AddChild(_gameOverPanel);
+        _gameOverPanel.Build(ArenaSideMeters);
+        _gameOverPanel.OnPlayAgain += PlayAgain;
+        _gameOverPanel.OnMainMenu += () => { _gameOverPanel.Dismiss(); ReturnToMenu(); };
 
         // Main menu (boot screen): the original Crimsonland menu art, floating and
         // pokeable, over the terrain diorama. Holds the sim until PLAY is poked.
@@ -321,6 +337,7 @@ public partial class Main : Node3D
     private void ReturnToMenu()
     {
         _keyboard.Dismiss();
+        _gameOverPanel.Dismiss();
         _perkMenu.ForceHide(); // don't leave perk cards floating over the main menu
         _pauseMenu.ForceResume();
         _sim?.Restart();
@@ -536,7 +553,7 @@ public partial class Main : Node3D
             || _pauseMenu.IsPaused
             || _perkMenu.Active
             || _startPrompt.Pending
-            || (_sim != null && _sim.GameOver && _keyboard.Active);
+            || (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active));
         if (_handMarkers[0] != null)
         {
             _handMarkers[0].Visible = pokeUi;
@@ -698,16 +715,40 @@ public partial class Main : Node3D
             return;
         }
 
-        // Death handling: show the highscore keyboard, then restart on submit
-        // (Enter with an empty name skips). Frozen until then.
+        // Death handling (base game_over.py flow): a short pacing delay over the
+        // frozen world, then name entry (only when the score ranks, like the base
+        // top-100 gate — ours is the local top-10), then the results panel with
+        // Play Again / Main Menu. Sim frozen throughout.
         if (_sim.GameOver)
         {
-            if (!_keyboard.Active)
+            if (_keyboard.Active || _gameOverPanel.Active)
             {
-                _keyboard.Show(_sim.LastResult.PlayerExperience);
+                return;
+            }
+            // A pause opened just before death keeps the screen until resolved
+            // (Resume resumes the death flow; Quit already routes to the menu).
+            if (_pauseMenu.IsPaused)
+            {
+                return;
+            }
+            _deathTicks++;
+            if (_deathTicks >= DeathPacingTicks)
+            {
+                int score = _sim.LastResult.PlayerExperience;
+                _deathRank = HighscoreRank(score);
+                _audio.PlayUi(AudioBank.UiPanel);
+                if (_deathRank < HighscoreTableMax)
+                {
+                    _keyboard.Show(score);
+                }
+                else
+                {
+                    _gameOverPanel.Show(_sim.LastResult, _deathRank);
+                }
             }
             return;
         }
+        _deathTicks = 0;
 
         // Paused: freeze the sim (stop advancing). _Process still renders the last
         // frame and polls the pause panel so Resume/Quit work.
@@ -936,6 +977,11 @@ public partial class Main : Node3D
             _keyboard.PollPoke(p);
             return;
         }
+        if (_sim != null && _sim.GameOver && _gameOverPanel.Active)
+        {
+            _gameOverPanel.PollPoke(p);
+            return;
+        }
 
         _pauseMenu.PollPoke(p);
         if (_pauseMenu.IsPaused && _optionsOpen)
@@ -999,8 +1045,24 @@ public partial class Main : Node3D
         }
     }
 
-    /// <summary>Record the highscore name (empty = skip) and start a fresh run.</summary>
-    private void RestartGame(string name)
+    /// <summary>0-based insertion rank of a score in the local highscore table
+    /// (existing entries win ties, matching rank_index in the base game).</summary>
+    private int HighscoreRank(int score)
+    {
+        int rank = 0;
+        foreach (HighscoreEntry e in _settings.Highscores)
+        {
+            if (e.Score >= score)
+            {
+                rank++;
+            }
+        }
+        return rank;
+    }
+
+    /// <summary>Keyboard phase done: record the name (empty = skip saving, like
+    /// the base game's blank-name guard) and move on to the results panel.</summary>
+    private void SubmitHighscoreName(string name)
     {
         if (_sim == null)
         {
@@ -1013,6 +1075,17 @@ public partial class Main : Node3D
         }
         GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
         _keyboard.Dismiss();
+        _gameOverPanel.Show(_sim.LastResult, _deathRank);
+    }
+
+    /// <summary>Results panel "Play Again": start a fresh run immediately.</summary>
+    private void PlayAgain()
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+        _gameOverPanel.Dismiss();
         _sim.Restart();
         _diorama.ResetTerrainFx();
         _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);

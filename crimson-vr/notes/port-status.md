@@ -51,9 +51,19 @@ tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
   base `ui_menuPanel` perk list (sponsor line + tighter rows under Perk
   Expert/Master, neon hover items). Intentional VR substitution; noted so the
   banner isn't counted twice as "unused art".
-- **Highscore entry** (in-VR virtual keyboard) on death — but see the
-  **game-over screen gap** below: entry exists, the results screen around it
-  does not.
+- **Game-over / results screen** (2026-07-09, ABI v10): death → ~1.2 s pacing
+  delay (stand-in for the base death VO + death-timer) → highscore name entry
+  on the virtual keyboard **only when the score ranks** (base top-100 gate;
+  ours is the local top-10) → results panel with the `ui_textReaper` banner,
+  score, rank ordinal, game time as mm:ss + the animated
+  `ui_clockTable`/`ui_clockPointer` gauge (6°/s), most-used weapon icon
+  (`ui_wicons`) + display name (weapons table baked into the sprite manifest),
+  frags, hit %, and Play Again / Main Menu buttons; `UI_PANELCLICK` cue on
+  open. Fidelity caveats: no ease-out slide-in / world alpha-fade, no
+  High-scores button (browser screen doesn't exist yet), local top-10 not
+  top-100, no hover tooltips, keyboard replaces inline text entry (by design).
+  Kill count + most-used weapon crossed the ABI in **v10**
+  (`creature_kill_count`, `most_used_weapon_id` in the tick result).
 - **Arena recenter** — left `menu_button` / right `ax_button` reposition + re-yaw
   the tabletop, plus initial auto-place (`Main.cs:1076-1122`). **[audit]**
   (was undocumented).
@@ -140,7 +150,7 @@ them. Revisit only if the interaction model changes.
 
 | Area | Base-game source | Status in VR |
 |---|---|---|
-| **Game-over / results screen** **[audit]** | `screens/results/game_over.py` | **Missing — biggest flow gap.** Base: two-phase panel (top-100 name entry → score card with `ui_textReaper`/`ui_textWellDone` banner, score/rank, animated `ui_clockTable`+`ui_clockPointer` game-time gauge, most-used-weapon icon, frags, hit-%, Play Again / High scores / Main Menu), ease-out-cubic slide-in over the frozen, alpha-faded world. VR jumps death → keyboard → silent restart (`Main.cs:701-710,1003-1019`); the player never sees score/rank and can't reach the menu from death. All needed art is already staged/available. |
+| **Game-over / results screen** **[audit]** | `screens/results/game_over.py` | **DONE 2026-07-09** (see Implemented; ABI v10). Remaining fidelity deltas: slide-in/world-fade animation, High scores button (blocked on the browser screen), top-100 table, hover tooltips. |
 | **Quest results** **[audit]** | `screens/quest_views/quest_results.py`, `quests/results.py:25-192` | Missing. Animated time breakdown (base time counts up, life + unpicked-perk bonuses tick in 1s steps w/ `UI_CLINK_01`), Well-Done banner, unlock-reveal (weapon/perk), Play Again / Play Next / High Scores / Main Menu; 5.10 routes to end-note. |
 | **Quest failed** **[audit]** | `screens/quest_views/quest_failed.py:47-419` | Missing. Reaper banner, retry-count-dependent taunt lines, score preview, Play Again / Play Another / Main Menu. |
 | **End-note (game ending)** **[audit]** | `screens/quest_views/end_note.py:38-297` | Missing. Post-5.10 victory screen; hardcore-vs-normal body text (Splitter Gun / Typo unlock). |
@@ -174,8 +184,9 @@ them. Revisit only if the interaction model changes.
   no deliberate fade.
 - **Death sequence pacing** — death VO, a death-timer delay, then the game-over
   panel slides in (`player_damage.py:93-127`); special-death paths (Final
-  Revenge, Jinxed/Fatal-Lottery style) feed the same flow. VR shows the keyboard
-  immediately.
+  Revenge, Jinxed/Fatal-Lottery style) feed the same flow. **Partially closed
+  2026-07-09**: VR now waits ~1.2 s before the death flow; death VO + panel
+  slide-in still absent.
 
 ## HUD parity (element-level) **[audit — re-scoped]**
 
@@ -306,9 +317,9 @@ unused), `intro` (boot logos — unused), `shortie_monk` (**Statistics screen**
 music — unused).
 
 **UI SFX:** wired — `UI_BUTTONCLICK`, `UI_TYPECLICK_01/02`, `UI_TYPEENTER`,
-`UI_LEVELUP`. Unused (screen-only, screens not in VR) — `UI_PANELCLICK` (panel
-open cue), `UI_CLINK_01` (quest-results ticks + AlienZooKeeper), `QUESTHIT`
-(quest-objective hit). → **Correction:** `UI_BONUS` was mislisted as unused —
+`UI_LEVELUP`, `UI_PANELCLICK` (game-over panel open, 2026-07-09). Unused
+(screen-only, screens not in VR) — `UI_CLINK_01` (quest-results ticks +
+AlienZooKeeper), `QUESTHIT` (quest-objective hit). → **Correction:** `UI_BONUS` was mislisted as unused —
 it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
 `presentation_step.py:410`) and **already plays in VR** via the loose-SFX stream.
 
@@ -319,10 +330,11 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
   `ui_num1..5`, `ui_lifeHeart`†, `ui_wicons`† (†now used by the ABI-v8 HUD),
   `ui_iconAim`.
 - Banners: `ui_textLevelUp`, `ui_textPickAPerk`, `ui_textLevComp`, `ui_textQuest`,
-  `ui_textReaper`, `ui_textWellDone`, `ui_textControls`.
-- Controls/widgets: `ui_button_64/82/128/145x32`, `ui_dropDownOn/Off`, `ui_arrow`,
-  `ui_clockTable`, `ui_clockPointer` (needed by game-over gauge + reload gauge +
-  quest/rush clocks).
+  `ui_textControls` (`ui_textReaper`† now used by the game-over panel;
+  `ui_textWellDone`† staged for quest results).
+- Controls/widgets: `ui_button_64/82/128/145x32`, `ui_dropDownOn/Off`, `ui_arrow`
+  (`ui_clockTable`†/`ui_clockPointer`† now used by the game-over gauge; still
+  wanted by the reload gauge + quest/rush clocks).
 - `ui_menuPanel` is staged but currently unused (dropped the full-screen panel;
   note the missing results screens all use the classic 3-slice panel renderer,
   `ui/menu_panel.py` — porting any of them implies a VR panel treatment).
@@ -344,10 +356,10 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
 
 ## Suggested next faithful-parity steps (rough order)
 
-1. **Game-over / results screen** — highest value-per-effort **[moved up by
-   audit]**: Survival-only, no new modes needed, all art staged; today a player
-   can't see their score or return to the menu from death. Includes the death-
-   sequence pacing (delay + world fade) and rank display.
+1. ~~**Game-over / results screen**~~ — **DONE 2026-07-09** (ABI v10; see
+   Implemented). Follow-ups fold into other items: High-scores button → the
+   high-scores browser (item 6), world-fade + slide-in → cosmetic polish
+   (item 8).
 2. **Game-mode select** (two-level: modes + quest stage/level select) — the sim
    supports all modes; needs `game_mode`/`quest_level_key` wiring, per-mode
    highscore tables, quest results/failed screens, and **unlock-progression

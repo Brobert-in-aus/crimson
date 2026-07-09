@@ -160,6 +160,21 @@ def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | No
     return out
 
 
+def weapon_table() -> dict[str, dict]:
+    """weapon_id -> {name, icon_index} (WEAPON_BY_ID), for the game-over score
+    card's most-used-weapon row (icon from ui_wicons, 8x8 grid, frame =
+    icon_index*2 spanning two cells — same layout the HUD uses)."""
+    from src.crimson.weapons import WEAPON_BY_ID, weapon_display_name
+
+    return {
+        str(int(wid)): {
+            "name": weapon_display_name(wid, preserve_bugs=False),
+            "icon_index": int(meta.icon_index),
+        }
+        for wid, meta in WEAPON_BY_ID.items()
+    }
+
+
 def perk_names() -> dict[str, str]:
     """perk_id -> display name (PERK_BY_ID), for the VR perk-menu card labels."""
     from src.crimson.perks.ids import PERK_BY_ID
@@ -219,6 +234,9 @@ def main() -> None:
         # info panel, weapon-icon atlas (8x8), and per-class ammo-bar sprites.
         "ui_gameTop.png", "ui_lifeHeart.png", "ui_indLife.png", "ui_indPanel.png", "ui_wicons.png",
         "ui_indBullet.png", "ui_indFire.png", "ui_indRocket.png", "ui_indElectric.png",
+        # Game-over / results screen art (screens/results/game_over.py): the
+        # Reaper / Well Done banners and the analog game-time gauge.
+        "ui_textReaper.png", "ui_textWellDone.png", "ui_clockTable.png", "ui_clockPointer.png",
     ):
         src = assets_dir / UI / name
         if not src.exists():
@@ -303,6 +321,9 @@ def main() -> None:
         "perks": perk_names(),
         # Perk id -> description for the VR perk-menu '?' press-and-hold popups.
         "perk_descriptions": perk_descriptions(),
+        # Weapon id -> display name + ui_wicons icon index, for the game-over
+        # score card's most-used-weapon row (ABI v10 most_used_weapon_id).
+        "weapons": weapon_table(),
     }
 
     manifest_path = out_dir / "sprite_manifest.json"

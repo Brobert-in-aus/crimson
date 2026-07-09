@@ -127,6 +127,8 @@ pub const FrameUpdate = struct {
     elapsed_ms_sim: i64,
     shots_fired: i32,
     shots_hit: i32,
+    creature_kill_count: i32,
+    most_used_weapon_id: i32,
     audio: FrameAudioEvents,
     terrain_fx: terrain_fx_mod.TerrainFxBatch,
 };
@@ -504,6 +506,19 @@ pub const LiveRunner = struct {
                 };
             },
         };
+        // Most-used weapon for the game-over score card: argmax of player 0's
+        // per-weapon shot counts, matching most_used_weapon_id_for_player
+        // (weapon_runtime/assign.py) — index 0 (UNUSED) is skipped, ties keep
+        // the first index, and the current weapon is the nothing-fired fallback.
+        const most_used_weapon_id: i32 = blk: {
+            const counts = &self.session.state.weapon_shots_fired[0];
+            var best: usize = 1;
+            for (counts[1..], 1..) |count, idx| {
+                if (count > counts[best]) best = idx;
+            }
+            if (counts[best] > 0) break :blk @intCast(best);
+            break :blk run_summary.player_weapon_id;
+        };
         return .{
             .ticks_advanced = ticks_advanced,
             .paused_for_perk_pick = paused_for_perk_pick,
@@ -517,6 +532,8 @@ pub const LiveRunner = struct {
             .elapsed_ms_sim = run_summary.elapsed_ms_sim,
             .shots_fired = shot_counts.fired,
             .shots_hit = shot_counts.hit,
+            .creature_kill_count = self.session.creatures.kill_count,
+            .most_used_weapon_id = most_used_weapon_id,
             .audio = audio,
             .terrain_fx = terrain_fx,
         };

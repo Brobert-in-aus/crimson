@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 9u
+#define CRIMSON_HOST_ABI_VERSION 10u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -101,6 +101,11 @@ typedef struct crimson_host_tick_result {
     int32_t shots_hit;
     uint32_t elapsed_ms_sim_lo; /* low/high halves of an int64 ms counter */
     uint32_t elapsed_ms_sim_hi;
+    /* ABI v10 (append-only): game-over score-card stats. Most-used weapon is
+     * the argmax of player 0's per-weapon shot counts (current weapon when
+     * nothing was fired), matching weapon_runtime/assign.py. */
+    int32_t creature_kill_count;
+    int32_t most_used_weapon_id;
 } crimson_host_tick_result;
 
 /* Snapshot payload layout (packed, in order):

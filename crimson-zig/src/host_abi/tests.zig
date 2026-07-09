@@ -55,8 +55,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v9" {
-    try std.testing.expectEqual(@as(u32, 9), exports.crimson_host_abi_version());
+test "abi version reports v10" {
+    try std.testing.expectEqual(@as(u32, 10), exports.crimson_host_abi_version());
 }
 
 test "abi verify passthrough matches native verifier byte for byte" {
@@ -277,6 +277,23 @@ test "abi snapshot exposes sprite-effect particles" {
     }
     try std.testing.expect(max_particles > 0);
     try std.testing.expect(checked_entry);
+}
+
+test "abi tick result carries kill count and most-used weapon" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    // Over a scripted firing run creatures die, so the ABI v10 stats must show
+    // kills, and the most-used weapon must be the weapon that did the firing
+    // (the run never swaps weapons, so it matches the current weapon id).
+    var result: exports.CrimsonHostTickResult = undefined;
+    for (0..900) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, &result));
+    }
+    try std.testing.expect(result.creature_kill_count > 0);
+    try std.testing.expect(result.shots_fired > 0);
+    try std.testing.expectEqual(result.player_weapon_id, result.most_used_weapon_id);
 }
 
 test "abi creature snapshot carries tint and hit flash" {

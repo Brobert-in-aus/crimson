@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 9;
+pub const abi_version: u32 = 10;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -74,6 +74,12 @@ pub const CrimsonHostTickResult = extern struct {
     shots_hit: i32,
     elapsed_ms_sim_lo: u32,
     elapsed_ms_sim_hi: u32,
+    // Total creatures killed this run (creatures.kill_count) and the weapon the
+    // local player fired the most (weapon_shots_fired argmax, current weapon
+    // when nothing was fired) — the game-over score card's Frags + most-used
+    // weapon row. Append-only (ABI v10).
+    creature_kill_count: i32,
+    most_used_weapon_id: i32,
 };
 
 pub const SnapshotHeader = extern struct {
@@ -583,6 +589,8 @@ pub export fn crimson_host_session_tick(
             .shots_hit = update.shots_hit,
             .elapsed_ms_sim_lo = @truncate(elapsed_bits),
             .elapsed_ms_sim_hi = @truncate(elapsed_bits >> 32),
+            .creature_kill_count = update.creature_kill_count,
+            .most_used_weapon_id = update.most_used_weapon_id,
         };
     }
     return ok;
