@@ -123,6 +123,32 @@ pub inline fn weaponIconIndex(weapon_id: WeaponId) i32 {
     return weapon_icon_index.get(weapon_id);
 }
 
+// HUD ammo-bar class (mirrors weapons.py `ammo_class`), selecting the per-shot
+// bar texture: 0 = bullet, 1 = fire, 2 = rocket, 4 = electric. Presentation-only;
+// weapons with no ammo class (None) default to 0 (bullet), matching the native
+// hud `_weapon_ammo_class` fallback.
+pub const weapon_ammo_class = std.EnumArray(WeaponId, i32).initDefault(0, .{
+    .flamethrower = 1,
+    .rocket_launcher = 2,
+    .seeker_rockets = 2,
+    .blow_torch = 1,
+    .hr_flamer = 1,
+    .mini_rocket_swarmers = 2,
+    .rocket_minigun = 2,
+    .pulse_gun = 3,
+    .ion_rifle = 4,
+    .ion_minigun = 4,
+    .ion_cannon = 4,
+    .evil_scythe = 4,
+    .ion_shotgun = 4,
+    .flameburst = 4,
+    .raygun = 4,
+});
+
+pub inline fn weaponAmmoClass(weapon_id: WeaponId) i32 {
+    return weapon_ammo_class.get(weapon_id);
+}
+
 pub inline fn weaponIdToInt(weapon_id: WeaponId) i32 {
     return @intFromEnum(weapon_id);
 }

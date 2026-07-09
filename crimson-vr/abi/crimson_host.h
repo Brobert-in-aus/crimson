@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 7u
+#define CRIMSON_HOST_ABI_VERSION 8u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -158,6 +158,8 @@ typedef struct crimson_host_player_snap {
     float reload_timer_max;
     int32_t experience;
     int32_t level;
+    int32_t weapon_icon_index; /* ABI v8+; ui_wicons atlas index (HUD weapon icon) */
+    int32_t weapon_ammo_class; /* ABI v8+; 0 bullet / 1 fire / 2 rocket / 4 electric */
 } crimson_host_player_snap;
 
 typedef struct crimson_host_creature_snap {

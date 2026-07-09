@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 7;
+pub const abi_version: u32 = 8;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -129,6 +129,11 @@ pub const PlayerSnap = extern struct {
     reload_timer_max: f32,
     experience: i32,
     level: i32,
+    // Static per-weapon HUD data for the faithful HUD (ABI v8): the ui_wicons
+    // atlas icon index and the ammo-bar class (0 bullet / 1 fire / 2 rocket /
+    // 4 electric). Presentation-only. Append-only.
+    weapon_icon_index: i32,
+    weapon_ammo_class: i32,
 };
 
 pub const CreatureSnap = extern struct {
@@ -720,6 +725,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .reload_timer_max = player.weapon.reload_timer_max,
             .experience = player.experience,
             .level = player.level,
+            .weapon_icon_index = crimson_zig.weapon_data.weaponIconIndex(player.weapon.weapon_id),
+            .weapon_ammo_class = crimson_zig.weapon_data.weaponAmmoClass(player.weapon.weapon_id),
         });
     }
     for (box.runner.session.creatures.entries) |entry| {

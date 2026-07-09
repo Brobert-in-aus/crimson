@@ -215,6 +215,10 @@ def main() -> None:
         "ui_signCrimson.png", "ui_menuItem.png", "ui_itemTexts.png",
         # Options screen art: panel bg, segmented-slider cells, checkbox states.
         "ui_menuPanel.png", "ui_rectOn.png", "ui_rectOff.png", "ui_checkOn.png", "ui_checkOff.png",
+        # Faithful in-game HUD art (ui/hud.py): top bar, pulsing heart, health bar,
+        # info panel, weapon-icon atlas (8x8), and per-class ammo-bar sprites.
+        "ui_gameTop.png", "ui_lifeHeart.png", "ui_indLife.png", "ui_indPanel.png", "ui_wicons.png",
+        "ui_indBullet.png", "ui_indFire.png", "ui_indRocket.png", "ui_indElectric.png",
     ):
         src = assets_dir / UI / name
         if not src.exists():
