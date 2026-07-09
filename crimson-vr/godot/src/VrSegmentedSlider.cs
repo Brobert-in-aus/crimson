@@ -33,9 +33,17 @@ public sealed partial class VrSegmentedSlider : Node3D
     private float _halfH;
     private float _stripHalfW;
 
+    // Ignore pokes for a settle window after the menu is shown (matches the buttons'
+    // guard), so a finger arriving as the panel appears can't nudge the value.
+    private ulong _readyAtMs;
+    private const ulong ShowCooldownMs = 350;
+
     public event Action<int>? OnValueChanged;
 
     public int Value => _value;
+
+    /// <summary>Start the settle window (call when the menu is shown/hidden).</summary>
+    public void ResetPress() => _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
 
     public void Build(float cellWidth, int min, int max, int value, Texture2D? onTex, Texture2D? offTex)
     {
@@ -106,6 +114,10 @@ public sealed partial class VrSegmentedSlider : Node3D
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
+        if (Time.GetTicksMsec() < _readyAtMs)
+        {
+            return; // settle window after the menu appears
+        }
         foreach (HandProbe h in probes)
         {
             if (!h.Valid)

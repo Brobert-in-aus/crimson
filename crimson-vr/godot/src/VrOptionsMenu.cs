@@ -62,7 +62,7 @@ public sealed partial class VrOptionsMenu : Node3D
             Position = new Vector3(0.0f, y, 0.002f),
             NoDepthTest = true,
         });
-        y -= s * 0.17f;
+        y -= s * 0.2f; // clear the title backing before the first row
 
         _sfx = AddSliderRow("SFX Volume", s, y, 0, 10, sfx, rectOn, rectOff, v => OnSfxChanged?.Invoke(v));
         y -= s * 0.18f;
@@ -126,7 +126,7 @@ public sealed partial class VrOptionsMenu : Node3D
     {
         float glyph = fontSize * pixelSize;                 // ~cap height in metres
         float width = text.Length * glyph * 0.62f + glyph;  // advance*chars + padding
-        float height = glyph * 1.5f;
+        float height = glyph * 1.2f;                        // hug the text; don't spill onto neighbours
         AddChild(new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
@@ -150,6 +150,9 @@ public sealed partial class VrOptionsMenu : Node3D
         _vrSettings.ResetPress();
         _back.ResetPress();
         _infoTexts.ResetPress();
+        _sfx.ResetPress();
+        _music.ResetPress();
+        _detail.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)

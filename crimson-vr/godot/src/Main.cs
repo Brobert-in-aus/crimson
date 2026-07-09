@@ -383,7 +383,16 @@ public partial class Main : Node3D
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             _xrActive = true;
             _xrInterface = xr; // BuildEnvironment applies passthrough once the env exists
-            GD.Print("CrimsonVR: OpenXR initialized");
+
+            // The diorama is cheap (flat sprites), so spend the headroom on image
+            // quality: 4x MSAA kills the sprite-edge aliasing, and a >1 render-target
+            // multiplier supersamples the swapchain (sharper than the Quest default).
+            GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
+            if (xr is OpenXRInterface oxr)
+            {
+                oxr.RenderTargetSizeMultiplier = 1.4f;
+            }
+            GD.Print("CrimsonVR: OpenXR initialized (MSAA 4x, render scale 1.4)");
         }
         else
         {

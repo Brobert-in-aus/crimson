@@ -70,10 +70,10 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.OnPress += ToggleHandSwap;
         y -= pitch;
 
-        // Dead-zone: a value label above its slider. Sit the label lower (more air
-        // below the Movement toggle above) and pull the next row up a touch (less
-        // gap to the Debug toggle below).
-        float dzTitleY = y + s * 0.04f;
+        // Dead-zone: a value label above its slider. Enough gap above the pips that
+        // the label's dark backing doesn't overlap them, and air below the Movement
+        // toggle above.
+        float dzTitleY = y + s * 0.06f;
         AddTitleBacking(dzTitleY, DeadZoneText(deadZone), 90.0f, s / 1200.0f);
         _deadZoneLabel = new Label3D
         {
@@ -127,6 +127,7 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.ResetPress();
         _debug.ResetPress();
         _back.ResetPress();
+        _deadZone.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
@@ -161,7 +162,7 @@ public sealed partial class SettingsMenu : Node3D
     {
         float glyph = fontSize * pixelSize;
         float width = text.Length * glyph * 0.62f + glyph;
-        float height = glyph * 1.5f;
+        float height = glyph * 1.2f; // hug the text; don't spill onto neighbours
         AddChild(new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },

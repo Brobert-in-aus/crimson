@@ -551,8 +551,10 @@ public sealed partial class Diorama : Node3D
                 vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
                 vec4 c = texture(sheet, cell);
                 // Premultiplied so the additive add carries the life-fade (col.a) and
-                // the texture shape (c.a) regardless of how blend_add treats ALPHA.
-                ALBEDO = c.rgb * col.rgb * c.a * col.a;
+                // the texture shape (c.a). Square the texture alpha so a soft cell's
+                // low-alpha square edges fade out (bright centre ~unchanged) instead
+                // of adding a faint visible square.
+                ALBEDO = c.rgb * col.rgb * (c.a * c.a) * col.a;
                 ALPHA = 1.0;
             }
             """,
