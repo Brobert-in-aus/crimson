@@ -44,6 +44,10 @@ public sealed partial class VrButton : Node3D
     private float _proud;         // rest depth of the button front (local +Z)
     private float _pressDepth;    // press fires once the front passes this local Z
     private bool _pressed;
+    // The button must be seen RELEASED once before it can fire again. Stops an
+    // instant press when a panel is (re)shown with a fingertip already inside the
+    // button volume (e.g. Back returns to a menu with the hand over Quit).
+    private bool _armed;
 
     private Color _baseColor;
     private Color _pressedColor;
@@ -160,7 +164,11 @@ public sealed partial class VrButton : Node3D
 
         bool nowPressed = inside && z <= _pressDepth;
         _mat.AlbedoColor = nowPressed ? _pressedColor : _baseColor;
-        if (nowPressed && !_pressed)
+        if (!nowPressed)
+        {
+            _armed = true; // released -> may fire on the next press-down edge
+        }
+        else if (_armed && !_pressed)
         {
             OnPress?.Invoke();
         }
@@ -172,6 +180,7 @@ public sealed partial class VrButton : Node3D
     public void ResetPress()
     {
         _pressed = false;
+        _armed = false; // require a release before the next press can fire
         if (_face != null)
         {
             _face.Position = new Vector3(0.0f, 0.0f, _proud);

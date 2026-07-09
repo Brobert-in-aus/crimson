@@ -702,6 +702,11 @@ public sealed partial class Diorama : Node3D
         AddChild(_floor);
     }
 
+    /// <summary>The base terrain-slot texture applied to the arena floor (null
+    /// until <see cref="ApplyTerrainInfo"/> succeeds), so the surrounding world
+    /// floor can share the same ground.</summary>
+    public Texture2D? FloorTexture => _floorMaterial?.AlbedoTexture as Texture2D;
+
     /// <summary>Texture the floor from the session's base terrain slot (ABI
     /// terrain-info). Called once the session exists; leaves the grey fallback if
     /// the terrain sheet isn't baked.</summary>

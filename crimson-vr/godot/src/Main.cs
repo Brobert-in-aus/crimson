@@ -75,6 +75,10 @@ public partial class Main : Node3D
     private bool _checklistOpen;
     private MainMenu _mainMenu = null!;
     private bool _settingsFromMenu; // settings opened from the main menu (not pause)
+
+    /// <summary>The menu flow (main menu, or settings opened from it) owns the
+    /// screen: the sim must not tick and gameplay input must not reach the game.</summary>
+    private bool MenuOwnsScreen => _mainMenu.IsOpen || (_settingsFromMenu && _settingsOpen);
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -240,6 +244,7 @@ public partial class Main : Node3D
             // a follow-up; log it so the plumbing is exercised meanwhile.
             Sim.TerrainInfo t = _sim.TerrainInfo();
             _diorama.ApplyTerrainInfo(t); // texture the arena floor from the base slot
+            BuildWorldFloor(_diorama.FloorTexture); // extend that ground around the player
             GD.Print($"CrimsonVR: terrain slots=({t.Slot0},{t.Slot1},{t.Slot2}) seed={t.TerrainSeed} size={t.TerrainSize}");
         }
         catch (System.Exception e)
@@ -423,7 +428,42 @@ public partial class Main : Node3D
         // The visible ground is the Diorama terrain floor (textured from the base
         // slot, extended past the playfield, greyed by fog). The old brown
         // placeholder plane + rim were removed: they sat on top of the floor
-        // (hiding the terrain and z-fighting its edge).
+        // (hiding the terrain and z-fighting its edge). A larger world floor at
+        // foot level (BuildWorldFloor) extends that same ground around the player.
+    }
+
+    private const float WorldFloorSize = 24.0f;   // metres; fog hides the edge
+    private const float WorldFloorTiles = 24.0f;  // ~1 m per terrain tile
+    private const float WorldFloorY = 0.0f;       // XR tracking floor (foot level)
+    private MeshInstance3D? _worldFloor;
+
+    /// <summary>Extend the arena's ground out around the player: a large plane at
+    /// foot level textured with the same terrain sheet as the diorama floor. With
+    /// the grey skybox fog it reads as the player standing in the same arena the
+    /// diorama sits in front of. World-space (a child of Main, not the recentered
+    /// ArenaRoot) so it stays put. Dimmed a touch so the closer diorama still
+    /// reads as the focus. No-ops if the terrain texture isn't available.</summary>
+    private void BuildWorldFloor(Texture2D? terrainTex)
+    {
+        if (_worldFloor != null)
+        {
+            return;
+        }
+        var mat = new StandardMaterial3D
+        {
+            AlbedoTexture = terrainTex,
+            AlbedoColor = terrainTex != null ? new Color(0.6f, 0.6f, 0.62f) : new Color(0.22f, 0.22f, 0.25f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+            Uv1Scale = new Vector3(WorldFloorTiles, WorldFloorTiles, 1.0f),
+        };
+        _worldFloor = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(WorldFloorSize, WorldFloorSize) },
+            MaterialOverride = mat,
+            Position = new Vector3(0.0f, WorldFloorY, 0.0f),
+        };
+        AddChild(_worldFloor);
     }
 
     private void BuildReticles()
@@ -503,8 +543,10 @@ public partial class Main : Node3D
             return;
         }
 
-        // The main menu is the boot screen: hold the sim until PLAY is poked.
-        if (_mainMenu.IsOpen)
+        // The main menu owns the screen at boot (and while settings is open from
+        // it): hold the sim so gameplay input (trigger fire, movement) can't leak
+        // through and start play underneath the menu.
+        if (MenuOwnsScreen)
         {
             return;
         }
@@ -644,8 +686,7 @@ public partial class Main : Node3D
 
         // While the main menu (or settings opened from it) owns the screen, the
         // aim/move reticles are off — the hands are poking menu items, not aiming.
-        bool menuOwnsScreen = _mainMenu.IsOpen || (_settingsFromMenu && _settingsOpen);
-        if (menuOwnsScreen)
+        if (MenuOwnsScreen)
         {
             _leftReticle.Visible = false;
             _rightReticle.Visible = false;

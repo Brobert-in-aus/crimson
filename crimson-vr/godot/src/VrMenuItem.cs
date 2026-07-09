@@ -34,6 +34,9 @@ public sealed partial class VrMenuItem : Node3D
     private float _proud;
     private float _pressDepth;
     private bool _pressed;
+    // Must be seen released once before it can fire again — stops an instant press
+    // when the menu is (re)shown with a fingertip already inside the item volume.
+    private bool _armed;
     private bool _enabled = true;
 
     private StandardMaterial3D _plateMat = null!;
@@ -158,7 +161,11 @@ public sealed partial class VrMenuItem : Node3D
         _group.Position = new Vector3(0.0f, 0.0f, z);
 
         bool nowPressed = inside && z <= _pressDepth;
-        if (nowPressed && !_pressed)
+        if (!nowPressed)
+        {
+            _armed = true; // released -> may fire on the next press-down edge
+        }
+        else if (_armed && !_pressed)
         {
             OnPress?.Invoke();
         }
@@ -169,6 +176,7 @@ public sealed partial class VrMenuItem : Node3D
     public void ResetPress()
     {
         _pressed = false;
+        _armed = false; // require a release before the next press can fire
         if (_group != null)
         {
             _group.Position = new Vector3(0.0f, 0.0f, _proud);
