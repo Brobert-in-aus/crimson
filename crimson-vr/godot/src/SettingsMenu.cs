@@ -47,7 +47,7 @@ public sealed partial class SettingsMenu : Node3D
         float pitch = s * 0.16f; // > bh, so rows never overlap
         float y = s * 0.42f;     // top-down cursor
 
-        AddTitleBacking(y, s * 0.5f, s * 0.08f);
+        AddTitleBacking(y, s * 0.66f, s * 0.09f);
         var title = new Label3D
         {
             Text = "VR Settings",
@@ -72,7 +72,7 @@ public sealed partial class SettingsMenu : Node3D
 
         // Dead-zone: a value label above its slider, with air between them.
         float dzTitleY = y + s * 0.08f;
-        AddTitleBacking(dzTitleY, s * 0.42f, s * 0.06f);
+        AddTitleBacking(dzTitleY, s * 0.72f, s * 0.07f);
         _deadZoneLabel = new Label3D
         {
             Text = DeadZoneText(deadZone),

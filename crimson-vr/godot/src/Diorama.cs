@@ -1238,12 +1238,11 @@ public sealed partial class Diorama : Node3D
             }
             else if (layer.UvIndexed)
             {
-                // Textured icons (bonuses): FlatQuadBasis reads upright (texture
-                // top -> +z far edge) from the player's downward view. The plain
-                // FlatBasis below maps texture-top to the near edge -> UPSIDE DOWN,
-                // so it's only for solid-colour fallbacks. See the FLAT-SPRITE
-                // ORIENTATION note on FlatQuadBasis.
-                basis = FlatQuadBasis(angle, meters, meters);
+                // Textured icons (bonuses). FlatQuadBasis is a reflection (negative
+                // determinant), which mirrors the art ("text backwards"); negate the
+                // width to flip it back to a proper, non-mirrored, upright icon
+                // (texture top -> +z far edge from the player's downward view).
+                basis = FlatQuadBasis(angle, -meters, meters);
             }
             else
             {

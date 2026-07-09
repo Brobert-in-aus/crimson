@@ -64,6 +64,7 @@ public partial class Main : Node3D
     private Hud _hud = null!;
     private PerkMenu _perkMenu = null!;
     private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
+    private int _prevPerkPending; // last tick's pending-pick count, for the level-up cue
     private PauseMenu _pauseMenu = null!;
     // Options screen (mirrors the base game) + the VR Settings submenu it opens.
     private VrOptionsMenu _optionsMenu = null!;
@@ -686,6 +687,14 @@ public partial class Main : Node3D
         }
 
         Sim.TickResult result = _sim.Tick(input);
+
+        // Level-up cue: a new pending pick appeared this tick -> play the UI sound.
+        if (result.PerkPendingCount > _prevPerkPending)
+        {
+            _audio.PlayLevelUp();
+        }
+        _prevPerkPending = result.PerkPendingCount;
+
         SnapshotView snap = _sim.CaptureSnapshot();
         float health = _prevHealth;
         bool reloadActive = _prevReloadActive;
@@ -796,8 +805,10 @@ public partial class Main : Node3D
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
         }
         // Level-up button shows beside the arena while a perk pick is pending and
-        // the cards aren't already open (and we're in play, not a menu/pause).
-        _pauseMenu.SetLevelUpVisible(_perkMenu.Pending && !_perkMenu.Active && !_pauseMenu.IsPaused && !MenuOwnsScreen);
+        // the cards aren't already open (and we're in play, not a menu/pause); the
+        // badge shows how many picks have accumulated.
+        int pendingPicks = _sim?.LastResult.PerkPendingCount ?? 0;
+        _pauseMenu.SetLevelUp(_perkMenu.Pending && !_perkMenu.Active && !_pauseMenu.IsPaused && !MenuOwnsScreen, pendingPicks);
 
         // Menus must respond regardless of sim state (so the player can interact
         // and report even if the native lib failed to load).

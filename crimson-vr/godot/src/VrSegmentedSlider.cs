@@ -51,23 +51,42 @@ public sealed partial class VrSegmentedSlider : Node3D
         _halfH = cellH * 0.5f;
         _stripHalfW = _count * cellWidth * 0.5f;
 
-        _cells = new MeshInstance3D[_count];
+        // Two layers per slot: a full row of inactive pips ALWAYS visible at the
+        // back, and an active pip that sits PROUD in front, shown only where the
+        // value reaches. So the inactive set is always the visible baseline and the
+        // active pips read as raised-in-front markers.
+        _cells = new MeshInstance3D[_count]; // active overlays (toggled)
         _cellMats = new StandardMaterial3D[_count];
+        var mesh = new QuadMesh { Size = new Vector2(cellWidth * 0.9f, cellH) };
         for (int i = 0; i < _count; i++)
         {
-            var mat = new StandardMaterial3D
+            float x = -_stripHalfW + (i + 0.5f) * cellWidth;
+
+            var backMat = new StandardMaterial3D
             {
+                AlbedoTexture = offTex,
+                AlbedoColor = new Color(1.0f, 1.0f, 1.0f, 0.55f),
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                RenderPriority = 32,
+                RenderPriority = 31,
+            };
+            AddChild(new MeshInstance3D { Mesh = mesh, Position = new Vector3(x, 0.0f, 0.0f), MaterialOverride = backMat });
+
+            var mat = new StandardMaterial3D
+            {
+                AlbedoTexture = onTex,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+                RenderPriority = 33,
             };
             var cell = new MeshInstance3D
             {
-                Mesh = new QuadMesh { Size = new Vector2(cellWidth * 0.9f, cellH) },
-                // Cell 0 at the left edge of the strip, centred on the node.
-                Position = new Vector3(-_stripHalfW + (i + 0.5f) * cellWidth, 0.0f, 0.0f),
+                Mesh = mesh,
+                Position = new Vector3(x, 0.0f, ActiveProud), // proud in front
                 MaterialOverride = mat,
             };
             _cellMats[i] = mat;
@@ -81,12 +100,7 @@ public sealed partial class VrSegmentedSlider : Node3D
     {
         for (int i = 0; i < _count; i++)
         {
-            bool on = i < _value;
-            _cellMats[i].AlbedoTexture = on ? _onTex : _offTex;
-            _cellMats[i].AlbedoColor = on ? Colors.White : new Color(1.0f, 1.0f, 1.0f, 0.5f);
-            // Active pips sit proud toward the player, inactive pips recessed behind.
-            float x = -_stripHalfW + (i + 0.5f) * _cellW;
-            _cells[i].Position = new Vector3(x, 0.0f, on ? ActiveProud : 0.0f);
+            _cells[i].Visible = i < _value; // active pip shown only where reached
         }
     }
 

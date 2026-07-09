@@ -79,7 +79,7 @@ public sealed partial class PerkMenu : Node3D
             // "?" button below each card: press-and-hold to show the description.
             var help = new VrButton();
             AddChild(help);
-            help.Build(_cardW * 0.35f, arenaSideMeters * 0.08f, "?", new Color(0.35f, 0.4f, 0.55f));
+            help.Build(_cardW * 0.5f, arenaSideMeters * 0.11f, "?", new Color(0.35f, 0.4f, 0.55f));
             help.Visible = false;
             _help[i] = help;
         }
@@ -160,9 +160,9 @@ public sealed partial class PerkMenu : Node3D
                 int pid = PerkChoice(snap.Header, i);
                 _cardPerk[i] = pid;
                 _cards[i].SetText(_perkNames.TryGetValue(pid, out string? n) ? n : $"Perk {pid}");
-                // "?" sits just below its card.
+                // "?" sits below its card, with a clear gap from the card button.
                 _help[i].Visible = true;
-                _help[i].Position = new Vector3(cx, -(cardH * 0.5f + _arenaSide * 0.06f), 0.0f);
+                _help[i].Position = new Vector3(cx, -(cardH * 0.5f + _arenaSide * 0.12f), 0.0f);
             }
             else
             {

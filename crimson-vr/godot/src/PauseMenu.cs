@@ -19,6 +19,7 @@ public sealed partial class PauseMenu : Node3D
 {
     private VrButton _toggle = null!;
     private VrButton _levelUp = null!;
+    private Label3D _levelUpBadge = null!;
     private Node3D _panel = null!;
     private VrButton _resume = null!;
     private VrButton _settings = null!;
@@ -59,6 +60,22 @@ public sealed partial class PauseMenu : Node3D
         _levelUp.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
         _levelUp.OnPress += () => OnLevelUp?.Invoke();
         _levelUp.Visible = false;
+
+        // Accumulated level-up counter, flat beside the button (shows "xN" for N>1).
+        _levelUpBadge = new Label3D
+        {
+            Text = string.Empty,
+            FontSize = 130,
+            PixelSize = s / 650.0f,
+            Modulate = new Color(1.0f, 0.9f, 0.3f),
+            OutlineSize = 28,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
+            Position = new Vector3(s * 0.9f + s * 0.14f, 0.04f, -s * 0.12f),
+            RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f),
+            NoDepthTest = true,
+            Visible = false,
+        };
+        AddChild(_levelUpBadge);
 
         // Pause panel above the arena, facing the player (same anchor style as the
         // perk menu): Resume / Settings / Quit stacked vertically.
@@ -127,14 +144,17 @@ public sealed partial class PauseMenu : Node3D
         }
     }
 
-    /// <summary>Show/hide the level-up button (shown while a perk pick is pending).</summary>
-    public void SetLevelUpVisible(bool visible)
+    /// <summary>Show/hide the level-up button (shown while a perk pick is pending)
+    /// and its accumulated-count badge ("xN" for more than one pending pick).</summary>
+    public void SetLevelUp(bool visible, int count)
     {
         if (_levelUp.Visible != visible)
         {
             _levelUp.Visible = visible;
             _levelUp.ResetPress();
         }
+        _levelUpBadge.Visible = visible && count > 1;
+        _levelUpBadge.Text = count > 1 ? $"x{count}" : string.Empty;
     }
 
     /// <summary>Show/hide the pause panel without changing the paused state — used

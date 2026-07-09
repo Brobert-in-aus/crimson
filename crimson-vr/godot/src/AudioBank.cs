@@ -54,6 +54,7 @@ public sealed partial class AudioBank : Node3D
     private string? _musicTrack;
     private float _sfxVolumeDb;
     private float _musicVolumeDb;
+    private AudioStream? _levelUpStream; // one-shot UI cue on level up
 
     public void Configure(float arenaSideMeters, float worldSize)
     {
@@ -74,6 +75,13 @@ public sealed partial class AudioBank : Node3D
             {
                 _musicTracks[kv.Key] = kv.Value;
             }
+        }
+
+        // UI level-up cue, loaded by name (robust to sfx-id ordering).
+        const string levelUpPath = AudioDir + "ui_levelUp.ogg";
+        if (ResourceLoader.Exists(levelUpPath))
+        {
+            _levelUpStream = ResourceLoader.Load<AudioStream>(levelUpPath);
         }
 
         if (manifest?.sfx is not { Length: > 0 } files)
@@ -231,6 +239,20 @@ public sealed partial class AudioBank : Node3D
     {
         _musicTrack = null;
         _music?.Stop();
+    }
+
+    /// <summary>Play the level-up UI cue (non-positional-ish, at the arena centre).</summary>
+    public void PlayLevelUp()
+    {
+        if (_levelUpStream == null || _pool.Length == 0)
+        {
+            return;
+        }
+        AudioStreamPlayer3D p = _pool[_next];
+        _next = (_next + 1) % _pool.Length;
+        p.Stream = _levelUpStream;
+        p.Position = Vector3.Zero;
+        p.Play();
     }
 
     private void Play(int sfxId, Vector3 localPos)

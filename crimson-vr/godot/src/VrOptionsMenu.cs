@@ -50,7 +50,7 @@ public sealed partial class VrOptionsMenu : Node3D
         _ = panelTex;
 
         float y = hp * 0.5f - s * 0.05f;
-        AddTitleBacking(s, y, s * 0.44f, s * 0.075f);
+        AddTitleBacking(s, y, s * 0.6f, s * 0.09f);
         AddChild(new Label3D
         {
             Text = "Options",
@@ -100,7 +100,7 @@ public sealed partial class VrOptionsMenu : Node3D
         Texture2D? rectOn, Texture2D? rectOff, Action<int> onChanged)
     {
         float titleY = y + s * 0.08f; // more air between the title and its pips
-        AddTitleBacking(s, titleY, s * 0.4f, s * 0.06f);
+        AddTitleBacking(s, titleY, s * 0.56f, s * 0.07f);
         AddChild(new Label3D
         {
             Text = label,
