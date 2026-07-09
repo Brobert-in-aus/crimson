@@ -120,6 +120,10 @@ public sealed partial class Diorama : Node3D
 
     private const int PlayerCap = 4;
     private const int CreatureCapPerType = 1024;
+    // Below this projectile speed (game units/step) a bullet is treated as
+    // stopped/lodged and dropped to the ground (a moving bullet's base speed is
+    // ~1.5); tune against the ABI v6 velocity.
+    private const float StoppedProjectileSpeed = 0.4f;
     private const int ProjectileCap = 8192;
     private const int SecondaryCap = 2048;
     private const int BonusCap = 256;
@@ -1046,7 +1050,12 @@ public sealed partial class Diorama : Node3D
         _projectiles.BeginPush();
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
         {
-            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, typeId: pr.TypeId);
+            // Carry the projectile speed (ABI v6) in AnimPhase — unused for streak
+            // layers — so InterpolateLayer can drop a stopped/lodged bullet to the
+            // ground with the corpse instead of leaving it floating at the projectile
+            // plane.
+            float speed = Mathf.Sqrt(pr.Vx * pr.Vx + pr.Vy * pr.Vy);
+            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: speed, typeId: pr.TypeId);
         }
 
         _secondaries.BeginPush();
@@ -1226,6 +1235,13 @@ public sealed partial class Diorama : Node3D
             // otherwise the dying sprite fades at the raised enemy lift while the
             // corpse stamps at ground, reading as two vertically-separated bodies.
             if (cur.LifecycleStage < 16.0f)
+            {
+                pos.Y = CorpseLift;
+            }
+            // A stopped/lodged bullet (speed ~0, carried in AnimPhase for streak
+            // layers) drops to the ground too, so it settles onto the corpse rather
+            // than floating at the projectile plane after its target dies.
+            if (layer.Streak && cur.AnimPhase < StoppedProjectileSpeed)
             {
                 pos.Y = CorpseLift;
             }

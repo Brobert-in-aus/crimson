@@ -68,14 +68,17 @@ public sealed partial class ValidationChecklist : Node3D
     /// <summary>Raised when an item's state changes (id, newState) so the owner
     /// can persist it.</summary>
     public event Action<string, int>? OnItemChanged;
-    public event Action? OnClose;
 
     public void Build(float arenaSideMeters, Dictionary<string, int> results)
     {
         _results = results;
         float s = arenaSideMeters;
-        Position = new Vector3(0.0f, s * 0.7f, 0.0f);
-        RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
+        // Stand off to the player's RIGHT (arena-local +x), turned 90 deg so it
+        // faces the player when they look right — always visible, out of the way of
+        // the play area, with room for the full list. (Tune yaw sign in-headset if
+        // it ends up on the wrong side.)
+        Position = new Vector3(s * 1.25f, s * 0.55f, 0.0f);
+        RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
 
         var title = new Label3D
         {
@@ -118,7 +121,9 @@ public sealed partial class ValidationChecklist : Node3D
         };
         AddChild(_pageLabel);
         _next = MakeCtrl("Next >", bw, rh, s * 0.28f, ctrlY, () => ChangePage(1));
-        _close = MakeCtrl("Close", bw, rh, 0.0f, ctrlY - (rh + gap), () => OnClose?.Invoke(), new Color(0.6f, 0.6f, 0.66f));
+        // Always-visible panel: the old Close is now a Log button (dumps the full
+        // results to logcat on demand).
+        _close = MakeCtrl("Log", bw, rh, 0.0f, ctrlY - (rh + gap), LogResults, new Color(0.6f, 0.6f, 0.66f));
 
         Visible = false;
     }

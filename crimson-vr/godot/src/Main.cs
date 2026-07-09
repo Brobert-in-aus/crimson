@@ -76,7 +76,6 @@ public partial class Main : Node3D
     private VirtualKeyboard _keyboard = null!;
     private readonly UserSettings _settings = new();
     private ValidationChecklist _checklist = null!;
-    private bool _checklistOpen;
     private MainMenu _mainMenu = null!;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
@@ -175,6 +174,8 @@ public partial class Main : Node3D
         _pauseMenu.Build(ArenaSideMeters);
         _pauseMenu.OnQuit += () => GetTree().Quit();
         _pauseMenu.OnSettings += () => OpenOptions(fromMenu: false);
+        // Level-up button (shown while a perk pick is pending) reveals the perk cards.
+        _pauseMenu.OnLevelUp += () => _perkMenu.Open();
 
         // Options screen (mirrors the base game): audio + graphics-detail sliders,
         // UI-info-texts toggle, and a VR Settings submenu. Opened from the main
@@ -202,13 +203,13 @@ public partial class Main : Node3D
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
 
-        // Validation checklist (opened from the pause menu), results persisted.
+        // Validation checklist: a standing panel 90 deg to the RIGHT of the arena,
+        // always visible so it can be ticked off in any game state, results persisted.
         _checklist = new ValidationChecklist();
         _arenaRoot.AddChild(_checklist);
         _checklist.Build(ArenaSideMeters, _settings.Checklist);
         _checklist.OnItemChanged += (id, state) => { _settings.Checklist[id] = state; _settings.Save(); };
-        _checklist.OnClose += CloseChecklist;
-        _pauseMenu.OnChecklist += OpenChecklist;
+        _checklist.SetShown(true);
 
         // Debug poke-tip markers (world-space); shown only in debug mode.
         for (int i = 0; i < _pokeMarkers.Length; i++)
@@ -775,6 +776,10 @@ public partial class Main : Node3D
         {
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
         }
+        // Level-up button shows beside the arena while a perk pick is pending and
+        // the cards aren't already open (and we're in play, not a menu/pause).
+        _pauseMenu.SetLevelUpVisible(_perkMenu.Pending && !_perkMenu.Active && !_pauseMenu.IsPaused && !MenuOwnsScreen);
+
         // Menus must respond regardless of sim state (so the player can interact
         // and report even if the native lib failed to load).
         PollMenuPoke();
@@ -811,6 +816,10 @@ public partial class Main : Node3D
         probes[0] = MakeProbe(_leftHand);
         probes[1] = MakeProbe(_rightHand);
         ReadOnlySpan<HandProbe> p = probes;
+
+        // The validation checklist stands off to the right of the arena and is always
+        // pokeable, in any game state (menu, gameplay, paused) — poll it first.
+        _checklist.PollPoke(p);
 
         // Main menu owns the screen while open: poke its items. Gameplay menus stay
         // dormant.
@@ -854,10 +863,6 @@ public partial class Main : Node3D
         {
             _settingsMenu.PollPoke(p);
         }
-        if (_pauseMenu.IsPaused && _checklistOpen)
-        {
-            _checklist.PollPoke(p);
-        }
         // Perk cards only while a pick is pending AND the pause menu isn't up (they
         // share the space; the pause panel takes precedence). While paused the sim
         // is frozen so Update won't run — hide the cards explicitly.
@@ -888,10 +893,6 @@ public partial class Main : Node3D
                 _settingsMenu.SetShown(false);
                 CloseOptions();
             }
-            if (_checklistOpen)
-            {
-                CloseChecklist();
-            }
         }
     }
 
@@ -899,24 +900,6 @@ public partial class Main : Node3D
         => hand.GetHasTrackingData()
             ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold)
             : default;
-
-    private void OpenChecklist()
-    {
-        _checklistOpen = true;
-        _pauseMenu.SetPanelVisible(false);
-        _checklist.SetShown(true);
-    }
-
-    private void CloseChecklist()
-    {
-        _checklistOpen = false;
-        _checklist.LogResults(); // dump a full summary to logcat on close
-        _checklist.SetShown(false);
-        if (_pauseMenu.IsPaused)
-        {
-            _pauseMenu.SetPanelVisible(true);
-        }
-    }
 
     private void SetDebug(bool on)
     {

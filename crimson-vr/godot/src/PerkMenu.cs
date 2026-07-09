@@ -29,8 +29,17 @@ public sealed partial class PerkMenu : Node3D
     /// it into the next tick's perk_choice_index and clears it. -1 = nothing.</summary>
     public int Chosen = -1;
 
-    /// <summary>True while the perk pick is showing (Main pauses the sim).</summary>
-    public bool Active { get; private set; }
+    private bool _opened; // cards revealed (via the level-up button)
+
+    /// <summary>True while a perk pick is available (Main pauses the sim + shows the
+    /// level-up button). The cards themselves only appear once <see cref="Open"/>.</summary>
+    public bool Pending { get; private set; }
+
+    /// <summary>True while the cards are shown and pollable (Pending AND opened).</summary>
+    public bool Active => Pending && _opened;
+
+    /// <summary>Reveal the cards (from the level-up button).</summary>
+    public void Open() => _opened = true;
 
     public void Build(float arenaSideMeters)
     {
@@ -64,7 +73,11 @@ public sealed partial class PerkMenu : Node3D
     public void Update(in SnapshotView snap)
     {
         int count = Mathf.Min((int)snap.Header.PerkChoiceCount, _cards.Length);
-        Active = snap.Header.PerkPendingCount > 0 && count > 0;
+        Pending = snap.Header.PerkPendingCount > 0 && count > 0;
+        if (!Pending)
+        {
+            _opened = false; // pick consumed -> reset for the next level-up
+        }
         Visible = Active;
         if (!Active)
         {

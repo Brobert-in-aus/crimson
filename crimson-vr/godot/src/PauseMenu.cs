@@ -18,17 +18,17 @@ namespace CrimsonVR;
 public sealed partial class PauseMenu : Node3D
 {
     private VrButton _toggle = null!;
+    private VrButton _levelUp = null!;
     private Node3D _panel = null!;
     private VrButton _resume = null!;
     private VrButton _settings = null!;
-    private VrButton _checklist = null!;
     private VrButton _quit = null!;
 
     public bool IsPaused { get; private set; }
 
     public event Action? OnQuit;
     public event Action? OnSettings;
-    public event Action? OnChecklist;
+    public event Action? OnLevelUp;
 
     public void Build(float arenaSideMeters)
     {
@@ -49,6 +49,17 @@ public sealed partial class PauseMenu : Node3D
         _toggle.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
         _toggle.OnPress += TogglePause;
 
+        // Level-up button: flat like the pause toggle, just inboard of it (toward
+        // the far edge). Shown only while a perk pick is pending; poking it opens
+        // the perk menu (rather than the cards auto-appearing).
+        _levelUp = new VrButton();
+        AddChild(_levelUp);
+        _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: s * 0.03f, plate: true);
+        _levelUp.Position = new Vector3(s * 0.9f, 0.02f, -s * 0.12f);
+        _levelUp.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
+        _levelUp.OnPress += () => OnLevelUp?.Invoke();
+        _levelUp.Visible = false;
+
         // Pause panel above the arena, facing the player (same anchor style as the
         // perk menu): Resume / Settings / Quit stacked vertically.
         _panel = new Node3D
@@ -65,11 +76,9 @@ public sealed partial class PauseMenu : Node3D
         float gap = s * 0.05f;
         _resume = MakeButton(_panel, "Resume", new Color(0.4f, 0.8f, 0.45f), bw, bh, 0, gap);
         _settings = MakeButton(_panel, "Settings", new Color(0.5f, 0.6f, 0.85f), bw, bh, 1, gap);
-        _checklist = MakeButton(_panel, "Checklist", new Color(0.6f, 0.55f, 0.8f), bw, bh, 2, gap);
-        _quit = MakeButton(_panel, "Quit", new Color(0.85f, 0.35f, 0.3f), bw, bh, 3, gap);
+        _quit = MakeButton(_panel, "Quit", new Color(0.85f, 0.35f, 0.3f), bw, bh, 2, gap);
         _resume.OnPress += () => SetPaused(false);
         _settings.OnPress += () => OnSettings?.Invoke();
-        _checklist.OnPress += () => OnChecklist?.Invoke();
         _quit.OnPress += () => OnQuit?.Invoke();
     }
 
@@ -103,12 +112,25 @@ public sealed partial class PauseMenu : Node3D
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
         _toggle.PollPoke(probes);
+        if (_levelUp.Visible)
+        {
+            _levelUp.PollPoke(probes);
+        }
         if (IsPaused && _panel.Visible)
         {
             _resume.PollPoke(probes);
             _settings.PollPoke(probes);
-            _checklist.PollPoke(probes);
             _quit.PollPoke(probes);
+        }
+    }
+
+    /// <summary>Show/hide the level-up button (shown while a perk pick is pending).</summary>
+    public void SetLevelUpVisible(bool visible)
+    {
+        if (_levelUp.Visible != visible)
+        {
+            _levelUp.Visible = visible;
+            _levelUp.ResetPress();
         }
     }
 
