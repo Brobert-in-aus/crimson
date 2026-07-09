@@ -20,10 +20,20 @@ pub fn build(b: *std.Build) void {
     // it is the one artifact that cross-compiles cleanly to Android and other
     // targets. Defined before the desktop/raylib steps so an Android build can
     // early-return without touching raylib (whose build.zig panics on Android).
+    // On Android the .so must link bionic libc: without it the runtime has no
+    // DT_NEEDED libc, an undefined getauxval, and (worse) no bionic-managed TLS,
+    // so the .NET P/Invoke dlopen fails and, once loaded, session init aborts in
+    // bionic pthread. `-Dandroid-libc=<zig-libc-file>` (generated from the NDK by
+    // build_libcrimson.ps1) points Zig at the NDK's bionic. Desktop targets are
+    // unaffected.
+    const android_libc = b.option([]const u8, "android-libc", "Zig libc file pointing at the Android NDK bionic sysroot");
+    const link_android_libc = target.result.abi.isAndroid() and android_libc != null;
+
     const host_abi_module = b.createModule(.{
         .root_source_file = b.path("src/host_abi/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = link_android_libc,
         .imports = &.{
             .{ .name = "crimson_zig", .module = mod },
             .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
@@ -34,6 +44,9 @@ pub fn build(b: *std.Build) void {
         .linkage = .dynamic,
         .root_module = host_abi_module,
     });
+    if (link_android_libc) {
+        host_lib.setLibCFile(.{ .cwd_relative = android_libc.? });
+    }
     const install_host_lib = b.addInstallArtifact(host_lib, .{});
     const host_lib_step = b.step("host-lib", "Build crimson_host C-ABI shared library");
     host_lib_step.dependOn(&install_host_lib.step);

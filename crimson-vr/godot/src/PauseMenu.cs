@@ -41,7 +41,10 @@ public sealed partial class PauseMenu : Node3D
         AddChild(_toggle);
         _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: s * 0.03f);
         _toggle.Position = new Vector3(s * 0.62f, 0.02f, -s * 0.4f);
-        _toggle.RotationDegrees = new Vector3(-90.0f, 0.0f, 0.0f);
+        // Lie flat facing up. The extra 180 about local Z spins the label in-plane
+        // so its top points away from the player (upright when looking down), not
+        // toward them (which read upside down).
+        _toggle.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
         _toggle.OnPress += TogglePause;
 
         // Pause panel above the arena, facing the player (same anchor style as the

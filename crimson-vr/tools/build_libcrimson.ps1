@@ -22,10 +22,36 @@ try {
     # to produce the .so; the NDK is only needed for on-device readelf/robustness
     # work. The .so lands in zig-out/lib (not bin) for non-Windows targets.
     if ($args -contains '-android') {
-        & $zig build host-lib -Dtarget=aarch64-linux-android
+        # The .so must link bionic libc (proper TLS/pthread/getauxval) or it fails
+        # to dlopen / aborts on Quest. Point Zig at the NDK's bionic via a libc file.
+        $ndkRoot = $env:ANDROID_NDK_ROOT
+        if (-not $ndkRoot -or -not (Test-Path $ndkRoot)) {
+            $ndkBase = Join-Path $env:LOCALAPPDATA 'Android\Sdk\ndk'
+            $ndkRoot = (Get-ChildItem -Directory $ndkBase | Sort-Object Name | Select-Object -Last 1).FullName
+        }
+        if (-not $ndkRoot -or -not (Test-Path $ndkRoot)) { throw "Android NDK not found (set ANDROID_NDK_ROOT)" }
+        $sysroot = Join-Path $ndkRoot 'toolchains\llvm\prebuilt\windows-x86_64\sysroot'
+        $api = 29 # matches the export minSdk
+        $crtDir = Join-Path $sysroot "usr\lib\aarch64-linux-android\$api"
+        if (-not (Test-Path $crtDir)) { throw "NDK crt dir not found: $crtDir" }
+        $inc = (Join-Path $sysroot 'usr\include')
+        $libcFile = Join-Path $zigDir 'zig-out\android-libc.txt'
+        New-Item -ItemType Directory -Force (Split-Path $libcFile) | Out-Null
+        # LF line endings only: a trailing CR corrupts the paths Zig parses.
+        $libcLines = @(
+            "include_dir=$inc"
+            "sys_include_dir=$inc"
+            "crt_dir=$crtDir"
+            "msvc_lib_dir="
+            "kernel32_lib_dir="
+            "gcc_dir="
+        )
+        [System.IO.File]::WriteAllText($libcFile, ($libcLines -join "`n") + "`n")
+
+        & $zig build host-lib -Dtarget=aarch64-linux-android "-Dandroid-libc=$libcFile"
         New-Item -ItemType Directory -Force (Join-Path $godotNative 'android-arm64') | Out-Null
         Copy-Item (Join-Path $zigDir 'zig-out\lib\libcrimson_host.so') (Join-Path $godotNative 'android-arm64\') -Force
-        Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64"
+        Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64 (bionic libc via NDK $ndkRoot)"
     }
 }
 finally {

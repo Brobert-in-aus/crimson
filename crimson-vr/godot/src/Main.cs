@@ -369,25 +369,10 @@ public partial class Main : Node3D
         _arenaRoot = new Node3D { Position = new Vector3(0.0f, ArenaHeightMeters, -ArenaDistanceMeters) };
         AddChild(_arenaRoot);
 
-        var surface = new MeshInstance3D
-        {
-            Mesh = new PlaneMesh { Size = new Vector2(ArenaSideMeters, ArenaSideMeters) },
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(0.35f, 0.22f, 0.12f),
-                Roughness = 1.0f,
-            },
-        };
-        _arenaRoot.AddChild(surface);
-
-        // Rim so the playfield edge reads clearly in-headset.
-        var rim = new MeshInstance3D
-        {
-            Mesh = new BoxMesh { Size = new Vector3(ArenaSideMeters + 0.04f, 0.02f, ArenaSideMeters + 0.04f) },
-            Position = new Vector3(0, -0.011f, 0),
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.15f, 0.15f, 0.18f) },
-        };
-        _arenaRoot.AddChild(rim);
+        // The visible ground is the Diorama terrain floor (textured from the base
+        // slot, extended past the playfield, greyed by fog). The old brown
+        // placeholder plane + rim were removed: they sat on top of the floor
+        // (hiding the terrain and z-fighting its edge).
     }
 
     private void BuildReticles()
@@ -602,8 +587,10 @@ public partial class Main : Node3D
         if (_sim != null)
         {
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
-            PollMenuPoke();
         }
+        // Menus must respond regardless of sim state (so the player can interact
+        // and report even if the native lib failed to load).
+        PollMenuPoke();
         if (_debug)
         {
             UpdatePokeMarkers();
