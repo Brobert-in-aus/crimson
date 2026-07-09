@@ -70,8 +70,7 @@ public partial class Main : Node3D
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
     private VirtualKeyboard _keyboard = null!;
-    // Local highscores (name, score); persisted in the settings slice.
-    private readonly List<(string Name, int Score)> _highscores = new();
+    private readonly UserSettings _settings = new();
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
 
     // Hand roles: default left = movement, right = aim/fire (PLAN §1); swap is a
@@ -125,6 +124,11 @@ public partial class Main : Node3D
 
     private void StartSession()
     {
+        // Persisted settings first, so the menus build with the saved values.
+        _settings.Load();
+        _handSwap = _settings.HandSwap;
+        _deadZone = _settings.DeadZone;
+
         _diorama = new Diorama();
         _arenaRoot.AddChild(_diorama);
         _diorama.Configure(ArenaSideMeters, GameWorldSize);
@@ -158,15 +162,21 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone);
         _settingsMenu.OnBack += CloseSettings;
-        _settingsMenu.OnHandSwapChanged += v => _handSwap = v;
-        _settingsMenu.OnDeadZoneChanged += v => _deadZone = v;
+        _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
+        _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
 
         // First-run prompt: hold the sim until the player accepts (or calibrates,
         // which is a later slice, so it just proceeds with the default for now).
+        // Returning players (first run recorded) skip straight to play.
         _startPrompt = new StartPrompt();
         _arenaRoot.AddChild(_startPrompt);
         _startPrompt.Build(ArenaSideMeters);
         _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
+        _startPrompt.OnAccept += () => { _settings.FirstRunDone = true; _settings.Save(); };
+        if (_settings.FirstRunDone)
+        {
+            _startPrompt.Skip();
+        }
 
         // Highscore name entry (virtual keyboard) on death.
         _keyboard = new VirtualKeyboard();
@@ -642,7 +652,7 @@ public partial class Main : Node3D
         int score = _sim.LastResult.PlayerExperience;
         if (!string.IsNullOrEmpty(name))
         {
-            _highscores.Add((name, score));
+            _settings.AddHighscore(name, score);
         }
         GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
         _keyboard.Dismiss();

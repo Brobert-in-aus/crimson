@@ -67,6 +67,14 @@ public sealed partial class StartPrompt : Node3D
         _calibrate.PollPoke(probes);
     }
 
+    /// <summary>Dismiss without prompting (returning player who has already done
+    /// the first run); fires no events.</summary>
+    public void Skip()
+    {
+        Pending = false;
+        Visible = false;
+    }
+
     private void Dismiss(bool calibrate)
     {
         if (!Pending)
