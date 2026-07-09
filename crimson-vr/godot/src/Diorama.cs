@@ -169,6 +169,10 @@ public sealed partial class Diorama : Node3D
         {
             _particleNode.Visible = level >= 2;
         }
+        if (_particleAddNode != null)
+        {
+            _particleAddNode.Visible = level >= 2;
+        }
     }
 
     // 2.5D presentation (PLAN §6). A fixed back-tilt was tried (leaning sprites
@@ -217,7 +221,9 @@ public sealed partial class Diorama : Node3D
     // Sprite-effect pool (slice 6b): blood/gibs/explosions/casings from the ABI
     // particle stream, drawn from particles.png. effect_id -> precomputed UV cell
     // (uv offset + scale) from the bake; per-instance UV + color via the shader.
-    private MultiMesh? _particles;
+    private MultiMesh? _particles;      // alpha-pass effects (flags & 0x40): smoke, decals
+    private MultiMesh? _particlesAdd;   // additive-pass effects: ring, flash, burst
+    private MultiMeshInstance3D? _particleAddNode;
     private readonly Dictionary<int, Vector3> _effectUv = new(); // effect_id -> (offX, offY, scale)
 
     // Freeze overlay (draw_freeze_overlay): while the global freeze bonus is
@@ -521,6 +527,30 @@ public sealed partial class Diorama : Node3D
             """,
     };
 
+    // Additive variant for the non-alpha effect pass (flags & 0x40 == 0): the
+    // explosion ring, bright flash and shockwave bursts, which draw_effect_pool
+    // renders with BLEND_ADDITIVE. Without this only the dark alpha smoke shows.
+    private Shader? _particleShaderAdd;
+    private Shader ParticleShaderAdd => _particleShaderAdd ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
+            uniform sampler2D sheet : source_color, filter_linear;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                // Premultiplied so the additive add carries the life-fade (col.a) and
+                // the texture shape (c.a) regardless of how blend_add treats ALPHA.
+                ALBEDO = c.rgb * col.rgb * c.a * col.a;
+                ALPHA = 1.0;
+            }
+            """,
+    };
+
     /// <summary>Sprite-effect layer: particles.png with per-instance UV+color.
     /// Effects draw after creatures/projectiles in the native order, so this sits
     /// on top (RenderPriority 23). Absent assets -> no particles (still runs).</summary>
@@ -557,6 +587,22 @@ public sealed partial class Diorama : Node3D
         };
         _particleNode = new MultiMeshInstance3D { Multimesh = _particles, MaterialOverride = material };
         AddChild(_particleNode);
+
+        // Additive-pass effects (ring / flash / burst) — same atlas, additive blend,
+        // RenderPriority above the alpha smoke so the flash reads on top.
+        var addMaterial = new ShaderMaterial { Shader = ParticleShaderAdd, RenderPriority = 26 };
+        addMaterial.SetShaderParameter("sheet", tex);
+        _particlesAdd = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = ParticleCap,
+            VisibleInstanceCount = 0,
+        };
+        _particleAddNode = new MultiMeshInstance3D { Multimesh = _particlesAdd, MaterialOverride = addMaterial };
+        AddChild(_particleAddNode);
 
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
@@ -629,17 +675,21 @@ public sealed partial class Diorama : Node3D
             return;
         }
         float k = _arenaSideMeters / _worldSize;
-        int n = 0;
+        int n = 0;     // alpha pass
+        int na = 0;    // additive pass
         foreach (Sim.ParticleSnap p in view.Particles)
         {
-            // Match draw_effect_pool's gate (alpha pass) and skip unknown effects.
-            if ((p.Flags & EffectDrawFlag) == 0 || !_effectUv.TryGetValue(p.EffectId, out Vector3 uv))
+            if (!_effectUv.TryGetValue(p.EffectId, out Vector3 uv))
+            {
+                continue; // unknown effect id -> no UV cell
+            }
+            // draw_effect_pool splits by flag: flags & 0x40 -> alpha (smoke/decals),
+            // else -> additive (ring / bright flash / shockwave burst). Route each
+            // to its own mesh so the additive explosion actually shows.
+            bool alpha = (p.Flags & EffectDrawFlag) != 0;
+            if ((alpha ? n : na) >= ParticleCap)
             {
                 continue;
-            }
-            if (n >= ParticleCap)
-            {
-                break;
             }
             float w = Mathf.Max(p.HalfWidth * 2.0f * p.Scale * k, 0.001f);
             float h = Mathf.Max(p.HalfHeight * 2.0f * p.Scale * k, 0.001f);
@@ -654,12 +704,20 @@ public sealed partial class Diorama : Node3D
                 new Vector3(c, 0.0f, s) * w,
                 new Vector3(-s, 0.0f, c) * h,
                 new Vector3(0.0f, 1.0f, 0.0f));
-            _particles.SetInstanceTransform(n, new Transform3D(basis, pos));
-            _particles.SetInstanceColor(n, new Color(p.R, p.G, p.B, p.A));
-            _particles.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
-            n++;
+            var xform = new Transform3D(basis, pos);
+            var color = new Color(p.R, p.G, p.B, p.A);
+            var custom = new Color(uv.X, uv.Y, uv.Z, 0.0f);
+            MultiMesh mesh = alpha ? _particles : _particlesAdd!;
+            int i = alpha ? n++ : na++;
+            mesh.SetInstanceTransform(i, xform);
+            mesh.SetInstanceColor(i, color);
+            mesh.SetInstanceCustomData(i, custom);
         }
         _particles.VisibleInstanceCount = n;
+        if (_particlesAdd != null)
+        {
+            _particlesAdd.VisibleInstanceCount = na;
+        }
     }
 
     /// <summary>Bonus pickup layer: one textured quad per bonus, per-instance UV
