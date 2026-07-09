@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace CrimsonVR;
@@ -35,7 +36,6 @@ public partial class Main : Node3D
 
     private const float TriggerThreshold = 0.5f;
     private const float GripThreshold = 0.7f;
-    private const int RestartDelayTicks = 120; // ~2 s pause on death before reset
 
     // Survival, seed 1, standard 1024 world at 60 Hz (mirrors HostSessionConfig).
     private const string SurvivalConfig =
@@ -69,8 +69,10 @@ public partial class Main : Node3D
     private bool _settingsOpen;
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
+    private VirtualKeyboard _keyboard = null!;
+    // Local highscores (name, score); persisted in the settings slice.
+    private readonly List<(string Name, int Score)> _highscores = new();
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
-    private int _deadTicks;
 
     // Hand roles: default left = movement, right = aim/fire (PLAN §1); swap is a
     // settings toggle wired in M4. Index 0 = left, 1 = right.
@@ -160,6 +162,12 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_startPrompt);
         _startPrompt.Build(ArenaSideMeters);
         _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
+
+        // Highscore name entry (virtual keyboard) on death.
+        _keyboard = new VirtualKeyboard();
+        _arenaRoot.AddChild(_keyboard);
+        _keyboard.Build(ArenaSideMeters);
+        _keyboard.OnSubmit += RestartGame;
 
         try
         {
@@ -417,16 +425,13 @@ public partial class Main : Node3D
             return;
         }
 
-        // Death handling: hold for a moment, then restart the session (PLAN M2
-        // "death -> restart").
+        // Death handling: show the highscore keyboard, then restart on submit
+        // (Enter with an empty name skips). Frozen until then.
         if (_sim.GameOver)
         {
-            if (++_deadTicks >= RestartDelayTicks)
+            if (!_keyboard.Active)
             {
-                _sim.Restart();
-                _diorama.ResetTerrainFx(); // clear accumulated blood/corpses
-                _deadTicks = 0;
-                _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+                _keyboard.Show(_sim.LastResult.PlayerExperience);
             }
             return;
         }
@@ -534,6 +539,11 @@ public partial class Main : Node3D
             _startPrompt.PollPoke(p);
             return;
         }
+        if (_sim != null && _sim.GameOver && _keyboard.Active)
+        {
+            _keyboard.PollPoke(p);
+            return;
+        }
 
         _pauseMenu.PollPoke(p);
         if (_pauseMenu.IsPaused && _settingsOpen)
@@ -578,6 +588,25 @@ public partial class Main : Node3D
         {
             _pauseMenu.SetPanelVisible(true);
         }
+    }
+
+    /// <summary>Record the highscore name (empty = skip) and start a fresh run.</summary>
+    private void RestartGame(string name)
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+        int score = _sim.LastResult.PlayerExperience;
+        if (!string.IsNullOrEmpty(name))
+        {
+            _highscores.Add((name, score));
+        }
+        GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
+        _keyboard.Dismiss();
+        _sim.Restart();
+        _diorama.ResetTerrainFx();
+        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     }
 
     // A point ~4 cm ahead of the grip (grip -Z faces out the controller front),
