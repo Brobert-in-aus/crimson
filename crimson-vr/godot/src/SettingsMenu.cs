@@ -56,7 +56,7 @@ public sealed partial class SettingsMenu : Node3D
         float bw = s * 0.7f;
         float bh = s * 0.09f;
         float pitch = s * 0.13f;  // button-row step
-        float sPitch = s * 0.15f; // slider-row step (label + pips)
+        float sPitch = s * 0.18f; // into/between slider rows (label sits above the pips)
         float y = s * 0.5f;       // top-down cursor
 
         AddTitleBacking(y, "VR Settings", 120.0f, s / 1000.0f);
@@ -80,7 +80,7 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.Build(bw, bh, HandSwapText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
         _handSwap.Position = new Vector3(0.0f, y, 0.0f);
         _handSwap.OnPress += ToggleHandSwap;
-        y -= pitch;
+        y -= sPitch; // extra clearance so the dead-zone label doesn't touch this button
 
         // Dead-zone slider (label above its pips).
         _deadZoneLabel = MakeSliderLabel(s, DeadZoneText(deadZone), y);
