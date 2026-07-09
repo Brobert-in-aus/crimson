@@ -92,8 +92,13 @@ public sealed partial class GameOverPanel : Node3D
         Visible = false;
     }
 
-    /// <summary>Show the panel raised + pushed back with buttons hidden, leaving
-    /// the keyboard slot in front free for name entry (base phase 0).</summary>
+    /// <summary>Show the panel stacked ABOVE the keyboard with buttons hidden
+    /// (base phase 0). The panel labels are no-depth-test, so mere z-separation
+    /// isn't enough — a first pass pushed the panel back behind the keyboard
+    /// and the score card drew interleaved over the keys (in-headset FAIL).
+    /// Vertical separation instead: the keyboard's top is ~1.6·side (prompt at
+    /// its +0.72 offset), so a 0.8-scaled panel centred at 2.05·side clears it
+    /// entirely; a steeper tilt keeps it readable from the seated viewpoint.</summary>
     public void ShowForNameEntry(in Sim.TickResult result, int rank)
     {
         Show(result, rank);
@@ -102,14 +107,18 @@ public sealed partial class GameOverPanel : Node3D
         {
             b.Visible = false;
         }
-        Position = new Vector3(0.0f, _side * 1.32f, _side * 0.30f);
+        Scale = Vector3.One * 0.8f;
+        Position = new Vector3(0.0f, _side * 2.05f, 0.0f);
+        RotationDegrees = new Vector3(-24.0f, 180.0f, 0.0f);
     }
 
     /// <summary>Name entry done: drop to the standard spot and reveal the
     /// Play Again / Main Menu buttons (base phase 1).</summary>
     public void ShowButtons()
     {
+        Scale = Vector3.One;
         Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
         _buttonsShown = true;
         foreach (VrButton b in _buttons)
         {
@@ -155,7 +164,9 @@ public sealed partial class GameOverPanel : Node3D
         int ratio = fired > 0 ? hit * 100 / fired : 0;
         _hitRatio.Text = $"Hit %: {ratio}%";
 
+        Scale = Vector3.One;
         Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
         _buttonsShown = true;
         foreach (VrButton b in _buttons)
         {
