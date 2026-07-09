@@ -167,6 +167,13 @@ def perk_names() -> dict[str, str]:
     return {str(int(pid)): meta.name for pid, meta in PERK_BY_ID.items()}
 
 
+def perk_descriptions() -> dict[str, str]:
+    """perk_id -> description (PERK_BY_ID), for the VR perk-menu '?' popups."""
+    from src.crimson.perks.ids import PERK_BY_ID
+
+    return {str(int(pid)): meta.description for pid, meta in PERK_BY_ID.items()}
+
+
 def main() -> None:
     assets_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("artifacts/assets")
     out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("crimson-vr/godot/assets/sprites")
@@ -290,6 +297,8 @@ def main() -> None:
         # perk-menu cards. Factual metadata only; no art. The ABI snapshot header
         # sends perk_choices[] as PerkId values, which the frontend labels from this.
         "perks": perk_names(),
+        # Perk id -> description for the VR perk-menu '?' press-and-hold popups.
+        "perk_descriptions": perk_descriptions(),
     }
 
     manifest_path = out_dir / "sprite_manifest.json"

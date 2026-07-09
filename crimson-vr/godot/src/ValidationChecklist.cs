@@ -84,8 +84,10 @@ public sealed partial class ValidationChecklist : Node3D
         {
             Text = "Validation Checklist",
             FontSize = 120,
-            PixelSize = s / 260.0f,
+            PixelSize = s / 1100.0f,
             Modulate = new Color(0.9f, 0.9f, 0.95f),
+            OutlineSize = 24,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, s * 0.42f, 0.0f),
             NoDepthTest = true,
         };

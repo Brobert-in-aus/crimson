@@ -35,14 +35,14 @@ public sealed partial class VirtualKeyboard : Node3D
         Position = new Vector3(0.0f, s * 0.85f, 0.0f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
-        _prompt = MakeLabel("Enter your name", s / 300.0f, new Color(0.85f, 0.85f, 0.9f), new Vector3(0.0f, s * 0.62f, 0.0f));
-        _display = MakeLabel("_", s / 200.0f, new Color(0.95f, 0.9f, 0.45f), new Vector3(0.0f, s * 0.5f, 0.0f));
+        _prompt = MakeLabel("Enter your name", s / 1300.0f, new Color(0.85f, 0.85f, 0.9f), new Vector3(0.0f, s * 0.72f, 0.0f));
+        _display = MakeLabel("_", s / 650.0f, new Color(0.95f, 0.9f, 0.45f), new Vector3(0.0f, s * 0.6f, 0.0f));
 
         float kw = s * 0.11f;
         float kh = s * 0.11f;
         float gap = s * 0.02f;
         float startX = -((Cols * (kw + gap)) - gap) * 0.5f + kw * 0.5f;
-        float rowTop = s * 0.34f;
+        float rowTop = s * 0.46f;
 
         for (int i = 0; i < Letters.Length; i++)
         {

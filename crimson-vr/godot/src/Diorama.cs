@@ -120,10 +120,12 @@ public sealed partial class Diorama : Node3D
 
     private const int PlayerCap = 4;
     private const int CreatureCapPerType = 1024;
-    // Below this projectile speed (game units/step) a bullet is treated as
-    // stopped/lodged and dropped to the ground (a moving bullet's base speed is
-    // ~1.5); tune against the ABI v6 velocity.
-    private const float StoppedProjectileSpeed = 0.4f;
+    // A bullet lodged in a creature that is now dying (dropped to the ground) is
+    // itself dropped to the ground if it sits within this game-space radius of a
+    // dying creature — otherwise it floats at the shooter plane over the corpse.
+    private const float StuckBulletRadiusGame = 34.0f;
+    private readonly Vector2[] _dyingPos = new Vector2[2048];
+    private int _dyingCount;
     private const int ProjectileCap = 8192;
     private const int SecondaryCap = 2048;
     private const int BonusCap = 256;
@@ -1039,23 +1041,39 @@ public sealed partial class Diorama : Node3D
         }
         _creatureFallback.BeginPush();
         _energizerTimer = view.Header.EnergizerTimer;
+        _dyingCount = 0;
         foreach (Sim.CreatureSnap c in view.Creatures)
         {
             Layer target = _creatureLayers.TryGetValue(c.TypeId, out Layer? l) ? l : _creatureFallback;
             target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags,
                 maxHp: c.MaxHp, lifecycleStage: c.LifecycleStage,
                 baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer);
+            // Record dying creatures (dropped to the ground) so stuck bullets on
+            // them can be dropped too.
+            if (c.LifecycleStage < 16.0f && _dyingCount < _dyingPos.Length)
+            {
+                _dyingPos[_dyingCount++] = new Vector2(c.X, c.Y);
+            }
         }
 
         _projectiles.BeginPush();
+        float stuckR2 = StuckBulletRadiusGame * StuckBulletRadiusGame;
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
         {
-            // Carry the projectile speed (ABI v6) in AnimPhase — unused for streak
-            // layers — so InterpolateLayer can drop a stopped/lodged bullet to the
-            // ground with the corpse instead of leaving it floating at the projectile
-            // plane.
-            float speed = Mathf.Sqrt(pr.Vx * pr.Vx + pr.Vy * pr.Vy);
-            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: speed, typeId: pr.TypeId);
+            // A bullet sitting on a dying creature is flagged (AnimPhase = -1, unused
+            // for streak layers) so InterpolateLayer drops it to the ground with the
+            // corpse instead of floating at the shooter plane.
+            bool grounded = false;
+            for (int d = 0; d < _dyingCount; d++)
+            {
+                Vector2 delta = new Vector2(pr.X, pr.Y) - _dyingPos[d];
+                if (delta.LengthSquared() <= stuckR2)
+                {
+                    grounded = true;
+                    break;
+                }
+            }
+            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: grounded ? -1.0f : 0.0f, typeId: pr.TypeId);
         }
 
         _secondaries.BeginPush();
@@ -1128,10 +1146,12 @@ public sealed partial class Diorama : Node3D
         for (int i = 0; i < _muzzleCount; i++)
         {
             Muzzle m = _muzzles[i];
-            // Just ahead of the player along aim; sized by flash strength.
+            // At the gun barrel, a touch ahead of the player along aim (was ~4
+            // sprite-lengths out; the flash blob is large so it still reads as the
+            // muzzle even sitting close to the player).
             Vector3 dir = ForwardFromHeading(m.Heading);
             Vector3 arena = Mapper.GameToArenaLocal(m.Game, _arenaSideMeters, _worldSize)
-                + dir * (m.SizeGame * k * 1.6f) + new Vector3(0.0f, 0.012f, 0.0f);
+                + dir * (m.SizeGame * k * 0.2f) + new Vector3(0.0f, 0.012f, 0.0f);
             float s = Mathf.Max(m.SizeGame * k * 2.2f * m.Alpha, 0.002f);
             var color = new Color(1.0f, 0.85f, 0.5f, m.Alpha);
             AddFx(arena, s, color);
@@ -1238,10 +1258,10 @@ public sealed partial class Diorama : Node3D
             {
                 pos.Y = CorpseLift;
             }
-            // A stopped/lodged bullet (speed ~0, carried in AnimPhase for streak
-            // layers) drops to the ground too, so it settles onto the corpse rather
-            // than floating at the projectile plane after its target dies.
-            if (layer.Streak && cur.AnimPhase < StoppedProjectileSpeed)
+            // A bullet flagged as lodged in a dying creature (AnimPhase < 0 for
+            // streak layers) drops to the ground too, so it settles onto the corpse
+            // rather than floating at the shooter plane after its target dies.
+            if (layer.Streak && cur.AnimPhase < 0.0f)
             {
                 pos.Y = CorpseLift;
             }

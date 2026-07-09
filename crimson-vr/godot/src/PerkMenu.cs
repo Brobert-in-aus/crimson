@@ -20,10 +20,18 @@ namespace CrimsonVR;
 public sealed partial class PerkMenu : Node3D
 {
     private readonly VrButton[] _cards = new VrButton[7];
+    private readonly VrButton[] _help = new VrButton[7]; // "?" press-and-hold per card
+    private readonly int[] _cardPerk = new int[7];       // perk id per visible card
     private int _count;
     private float _cardW;
     private float _cardGap;
+    private float _arenaSide;
     private readonly Dictionary<int, string> _perkNames = new();
+    private readonly Dictionary<int, string> _perkDescs = new();
+
+    // Description popup above the card row, shown while a "?" is held.
+    private Node3D _descPanel = null!;
+    private Label3D _descLabel = null!;
 
     /// <summary>Chosen choice-index (0..count-1) when a card is poked; Main reads
     /// it into the next tick's perk_choice_index and clears it. -1 = nothing.</summary>
@@ -44,6 +52,7 @@ public sealed partial class PerkMenu : Node3D
     public void Build(float arenaSideMeters)
     {
         LoadPerkNames();
+        _arenaSide = arenaSideMeters;
         // Float above the arena centre facing the player. RecenterArena yaws the
         // arena so local +z is the far edge, so a 180 deg yaw faces the near
         // (player) side; a small back-lean tips the tops away from the player.
@@ -52,11 +61,13 @@ public sealed partial class PerkMenu : Node3D
         _cardW = arenaSideMeters * 0.26f;
         _cardGap = arenaSideMeters * 0.05f;
         float cardH = arenaSideMeters * 0.34f;
+        // Neutral dark card (the original perk cards aren't bright yellow).
+        var cardColor = new Color(0.22f, 0.24f, 0.30f);
         for (int i = 0; i < _cards.Length; i++)
         {
             var card = new VrButton();
             AddChild(card);
-            card.Build(_cardW, cardH, string.Empty, new Color(0.9f, 0.82f, 0.4f));
+            card.Build(_cardW, cardH, string.Empty, cardColor);
             // Portrait cards: shrink + word-wrap the perk name to fit the card width
             // (the default height-based sizing made long names overflow neighbours).
             card.ConfigureLabel(arenaSideMeters * 0.00035f, _cardW * 0.85f);
@@ -64,8 +75,51 @@ public sealed partial class PerkMenu : Node3D
             card.OnPress += () => Chosen = idx;
             card.Visible = false;
             _cards[i] = card;
+
+            // "?" button below each card: press-and-hold to show the description.
+            var help = new VrButton();
+            AddChild(help);
+            help.Build(_cardW * 0.35f, arenaSideMeters * 0.08f, "?", new Color(0.35f, 0.4f, 0.55f));
+            help.Visible = false;
+            _help[i] = help;
         }
+
+        BuildDescPanel(arenaSideMeters);
         Visible = false;
+    }
+
+    private void BuildDescPanel(float s)
+    {
+        _descPanel = new Node3D { Visible = false };
+        AddChild(_descPanel);
+        float w = s * 1.3f;
+        float h = s * 0.4f;
+        _descPanel.Position = new Vector3(0.0f, s * 0.42f, 0.0f); // above the card row
+        _descPanel.AddChild(new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(w, h) },
+            Position = new Vector3(0.0f, 0.0f, -0.006f),
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.04f, 0.05f, 0.08f, 0.9f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            },
+        });
+        _descLabel = new Label3D
+        {
+            Text = string.Empty,
+            FontSize = 72,
+            PixelSize = s / 1500.0f,
+            Modulate = new Color(0.92f, 0.92f, 0.96f),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Width = (w * 0.92f) / (s / 1500.0f),
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            NoDepthTest = true,
+        };
+        _descPanel.AddChild(_descLabel);
     }
 
     /// <summary>Refresh from the latest snapshot: show/lay out the candidate cards
@@ -85,26 +139,37 @@ public sealed partial class PerkMenu : Node3D
             {
                 _cards[i].Visible = false;
                 _cards[i].ResetPress();
+                _help[i].Visible = false;
+                _help[i].ResetPress();
             }
+            _descPanel.Visible = false;
             _count = 0;
             return;
         }
 
         float total = count * _cardW + (count - 1) * _cardGap;
         float x0 = -total * 0.5f + _cardW * 0.5f;
+        float cardH = _arenaSide * 0.34f;
         for (int i = 0; i < _cards.Length; i++)
         {
             if (i < count)
             {
+                float cx = x0 + i * (_cardW + _cardGap);
                 _cards[i].Visible = true;
-                _cards[i].Position = new Vector3(x0 + i * (_cardW + _cardGap), 0.0f, 0.0f);
+                _cards[i].Position = new Vector3(cx, 0.0f, 0.0f);
                 int pid = PerkChoice(snap.Header, i);
+                _cardPerk[i] = pid;
                 _cards[i].SetText(_perkNames.TryGetValue(pid, out string? n) ? n : $"Perk {pid}");
+                // "?" sits just below its card.
+                _help[i].Visible = true;
+                _help[i].Position = new Vector3(cx, -(cardH * 0.5f + _arenaSide * 0.06f), 0.0f);
             }
             else
             {
                 _cards[i].Visible = false;
                 _cards[i].ResetPress();
+                _help[i].Visible = false;
+                _help[i].ResetPress();
             }
         }
         _count = count;
@@ -118,9 +183,25 @@ public sealed partial class PerkMenu : Node3D
         {
             return;
         }
+        int held = -1;
         for (int i = 0; i < _count; i++)
         {
             _cards[i].PollPoke(probes);
+            _help[i].PollPoke(probes);
+            if (_help[i].IsPressed)
+            {
+                held = i;
+            }
+        }
+        // Press-and-hold a "?" to show that perk's description above the row.
+        if (held >= 0)
+        {
+            _descLabel.Text = _perkDescs.TryGetValue(_cardPerk[held], out string? d) ? d : "(no description)";
+            _descPanel.Visible = true;
+        }
+        else
+        {
+            _descPanel.Visible = false;
         }
     }
 
@@ -147,20 +228,26 @@ public sealed partial class PerkMenu : Node3D
         try
         {
             using var doc = JsonDocument.Parse(f.GetAsText());
-            if (doc.RootElement.TryGetProperty("perks", out JsonElement perks) && perks.ValueKind == JsonValueKind.Object)
-            {
-                foreach (JsonProperty p in perks.EnumerateObject())
-                {
-                    if (int.TryParse(p.Name, out int id) && p.Value.ValueKind == JsonValueKind.String)
-                    {
-                        _perkNames[id] = p.Value.GetString() ?? string.Empty;
-                    }
-                }
-            }
+            LoadStringMap(doc.RootElement, "perks", _perkNames);
+            LoadStringMap(doc.RootElement, "perk_descriptions", _perkDescs);
         }
         catch (JsonException e)
         {
-            GD.PushWarning($"CrimsonVR: bad perk names in manifest: {e.Message}");
+            GD.PushWarning($"CrimsonVR: bad perk data in manifest: {e.Message}");
+        }
+    }
+
+    private static void LoadStringMap(JsonElement root, string key, Dictionary<int, string> into)
+    {
+        if (root.TryGetProperty(key, out JsonElement obj) && obj.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty p in obj.EnumerateObject())
+            {
+                if (int.TryParse(p.Name, out int id) && p.Value.ValueKind == JsonValueKind.String)
+                {
+                    into[id] = p.Value.GetString() ?? string.Empty;
+                }
+            }
         }
     }
 }

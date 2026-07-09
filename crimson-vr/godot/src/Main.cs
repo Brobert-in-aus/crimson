@@ -172,7 +172,7 @@ public partial class Main : Node3D
         _pauseMenu = new PauseMenu();
         _arenaRoot.AddChild(_pauseMenu);
         _pauseMenu.Build(ArenaSideMeters);
-        _pauseMenu.OnQuit += () => GetTree().Quit();
+        _pauseMenu.OnQuit += ReturnToMenu; // in-game Quit -> main menu (menu Quit exits the app)
         _pauseMenu.OnSettings += () => OpenOptions(fromMenu: false);
         // Level-up button (shown while a perk pick is pending) reveals the perk cards.
         _pauseMenu.OnLevelUp += () => _perkMenu.Open();
@@ -305,6 +305,21 @@ public partial class Main : Node3D
         _mainMenu.Close();
         SetGameplayVisible(true);
         _audio.PlayMusic("gt1_ingame");
+    }
+
+    /// <summary>Quit the current game back to the main menu: reset the sim to a
+    /// fresh run, unpause, and show the menu (Play starts clean). The MAIN MENU's
+    /// Quit exits the app; every in-game Quit routes here instead.</summary>
+    private void ReturnToMenu()
+    {
+        _keyboard.Dismiss();
+        _pauseMenu.ForceResume();
+        _sim?.Restart();
+        _diorama.ResetTerrainFx();
+        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+        _mainMenu.Open();
+        SetGameplayVisible(false);
+        _audio.PlayMusic("crimson_theme");
     }
 
     // ---- Options / VR Settings navigation ----
@@ -653,12 +668,16 @@ public partial class Main : Node3D
         (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
         Sim.HostInput input = VrInput.Build(move, aim, _playerGame, _deadZone);
 
-        // Perk pick: while perks are pending (from the prior tick), pause the sim
-        // (perk_menu_active) and, once a card is poked, feed the choice index. The
-        // ABI applies the choice on the tick perk_choice_index is set.
+        // Perk pick: a level-up leaves the pick PENDING but the game keeps running
+        // (the Level Up! button shows) — the sim only pauses (perk_menu_active) once
+        // the player opens the cards. Once a card is poked, feed the choice index;
+        // the ABI applies it on the tick perk_choice_index is set.
         if (_sim.LastResult.PerkPendingCount > 0)
         {
-            input.PerkMenuActive = 1;
+            if (_perkMenu.Active)
+            {
+                input.PerkMenuActive = 1;
+            }
             if (_perkChoice >= 0)
             {
                 input.PerkChoiceIndex = _perkChoice;

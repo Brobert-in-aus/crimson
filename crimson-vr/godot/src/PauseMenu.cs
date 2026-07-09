@@ -92,6 +92,9 @@ public sealed partial class PauseMenu : Node3D
         return b;
     }
 
+    /// <summary>Force the unpaused state (e.g. when quitting to the main menu).</summary>
+    public void ForceResume() => SetPaused(false);
+
     private void TogglePause() => SetPaused(!IsPaused);
 
     private void SetPaused(bool paused)

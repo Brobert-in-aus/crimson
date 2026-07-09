@@ -59,6 +59,10 @@ public sealed partial class VrButton : Node3D
     /// <summary>Fired once when the button is pushed past the press depth.</summary>
     public event Action? OnPress;
 
+    /// <summary>True while the button is currently held in (for press-and-hold, e.g.
+    /// the perk '?' description popup).</summary>
+    public bool IsPressed => _pressed;
+
     /// <summary>Index/payload the owner can read in the OnPress handler (e.g. the
     /// perk choice index or a menu action id). Purely for the caller's use.</summary>
     public int Payload;
