@@ -18,34 +18,46 @@ public sealed partial class SettingsMenu : Node3D
     // to 0-40 game units (4 per pip).
     private const int DeadZoneStep = 4;
 
+    // Render scale slider: value 0-10 maps to 0.6..1.6x supersampling.
+    private const float RenderScaleBase = 0.6f;
+    private const float RenderScaleStep = 0.1f;
+
     private VrButton _handSwap = null!;
     private VrSegmentedSlider _deadZone = null!;
     private Label3D _deadZoneLabel = null!;
+    private VrSegmentedSlider _renderScale = null!;
+    private Label3D _renderScaleLabel = null!;
+    private VrButton _aa = null!;
+    private VrButton _debug = null!;
     private VrButton _back = null!;
 
-    private VrButton _debug = null!;
     private bool _swapState;
     private bool _debugState;
+    private int _msaaState;
 
     public event Action? OnBack;
     public event Action<bool>? OnHandSwapChanged;
     public event Action<float>? OnDeadZoneChanged;
     public event Action<bool>? OnDebugChanged;
+    public event Action<float>? OnRenderScaleChanged;
+    public event Action<int>? OnMsaaChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, Texture2D? rectOn, Texture2D? rectOff)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
         _debugState = debug;
+        _msaaState = msaa;
 
         // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        Position = new Vector3(0.0f, s * 0.9f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         float bw = s * 0.7f;
-        float bh = s * 0.1f;
-        float pitch = s * 0.16f; // > bh, so rows never overlap
-        float y = s * 0.42f;     // top-down cursor
+        float bh = s * 0.09f;
+        float pitch = s * 0.13f;  // button-row step
+        float sPitch = s * 0.15f; // slider-row step (label + pips)
+        float y = s * 0.5f;       // top-down cursor
 
         AddTitleBacking(y, "VR Settings", 120.0f, s / 1000.0f);
         var title = new Label3D
@@ -70,28 +82,11 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.OnPress += ToggleHandSwap;
         y -= pitch;
 
-        // Dead-zone: a value label above its slider. Enough gap above the pips that
-        // the label's dark backing doesn't overlap them, and air below the Movement
-        // toggle above.
-        float dzTitleY = y + s * 0.06f;
-        AddTitleBacking(dzTitleY, DeadZoneText(deadZone), 90.0f, s / 1200.0f);
-        _deadZoneLabel = new Label3D
-        {
-            Text = DeadZoneText(deadZone),
-            FontSize = 90,
-            PixelSize = s / 1200.0f,
-            Modulate = new Color(0.9f, 0.92f, 0.98f),
-            OutlineSize = 20,
-            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, dzTitleY, 0.002f),
-            NoDepthTest = true,
-        };
-        AddChild(_deadZoneLabel);
-
+        // Dead-zone slider (label above its pips).
+        _deadZoneLabel = MakeSliderLabel(s, DeadZoneText(deadZone), y);
         _deadZone = new VrSegmentedSlider();
         AddChild(_deadZone);
-        int dzValue = Mathf.Clamp(Mathf.RoundToInt(deadZone / DeadZoneStep), 0, 10);
-        _deadZone.Build(s * 0.03f, 0, 10, dzValue, rectOn, rectOff);
+        _deadZone.Build(s * 0.03f, 0, 10, Mathf.Clamp(Mathf.RoundToInt(deadZone / DeadZoneStep), 0, 10), rectOn, rectOff);
         _deadZone.Position = new Vector3(0.0f, y - s * 0.03f, 0.0f);
         _deadZone.OnValueChanged += v =>
         {
@@ -99,7 +94,29 @@ public sealed partial class SettingsMenu : Node3D
             _deadZoneLabel.Text = DeadZoneText(units);
             OnDeadZoneChanged?.Invoke(units);
         };
-        y -= s * 0.13f; // tighter step to the Debug toggle
+        y -= sPitch;
+
+        // Render-scale slider (supersampling).
+        _renderScaleLabel = MakeSliderLabel(s, RenderScaleText(renderScale), y);
+        _renderScale = new VrSegmentedSlider();
+        AddChild(_renderScale);
+        _renderScale.Build(s * 0.03f, 0, 10, RenderScaleToValue(renderScale), rectOn, rectOff);
+        _renderScale.Position = new Vector3(0.0f, y - s * 0.03f, 0.0f);
+        _renderScale.OnValueChanged += v =>
+        {
+            float sc = RenderScaleBase + v * RenderScaleStep;
+            _renderScaleLabel.Text = RenderScaleText(sc);
+            OnRenderScaleChanged?.Invoke(sc);
+        };
+        y -= sPitch;
+
+        // Anti-aliasing cycle (Off / 2x / 4x MSAA).
+        _aa = new VrButton();
+        AddChild(_aa);
+        _aa.Build(bw, bh, AaText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _aa.Position = new Vector3(0.0f, y, 0.0f);
+        _aa.OnPress += CycleAa;
+        y -= pitch;
 
         // Debug-overlay toggle (poke-tip markers + creature facing needle).
         _debug = new VrButton();
@@ -119,6 +136,40 @@ public sealed partial class SettingsMenu : Node3D
         Visible = false;
     }
 
+    /// <summary>A value label sitting above a slider's pips (with its dark backing).</summary>
+    private Label3D MakeSliderLabel(float s, string text, float rowY)
+    {
+        float ty = rowY + s * 0.06f;
+        AddTitleBacking(ty, text, 90.0f, s / 1200.0f);
+        var label = new Label3D
+        {
+            Text = text,
+            FontSize = 90,
+            PixelSize = s / 1200.0f,
+            Modulate = new Color(0.9f, 0.92f, 0.98f),
+            OutlineSize = 20,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
+            Position = new Vector3(0.0f, ty, 0.002f),
+            NoDepthTest = true,
+        };
+        AddChild(label);
+        return label;
+    }
+
+    private static int RenderScaleToValue(float scale) =>
+        Mathf.Clamp(Mathf.RoundToInt((scale - RenderScaleBase) / RenderScaleStep), 0, 10);
+
+    private static string RenderScaleText(float scale) => $"Render scale: {scale:0.0}x";
+
+    private string AaText() => _msaaState <= 0 ? "Anti-aliasing: Off" : $"Anti-aliasing: {_msaaState}x";
+
+    private void CycleAa()
+    {
+        _msaaState = _msaaState switch { 0 => 2, 2 => 4, _ => 0 };
+        _aa.SetText(AaText());
+        OnMsaaChanged?.Invoke(_msaaState);
+    }
+
     public void SetShown(bool visible)
     {
         Visible = visible;
@@ -127,7 +178,9 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.ResetPress();
         _debug.ResetPress();
         _back.ResetPress();
+        _aa.ResetPress();
         _deadZone.ResetPress();
+        _renderScale.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
@@ -139,7 +192,9 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.PollPoke(probes);
         _debug.PollPoke(probes);
         _back.PollPoke(probes);
+        _aa.PollPoke(probes);
         _deadZone.PollPoke(probes);
+        _renderScale.PollPoke(probes);
     }
 
     private void ToggleHandSwap()

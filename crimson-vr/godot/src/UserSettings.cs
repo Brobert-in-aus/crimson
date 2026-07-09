@@ -32,6 +32,11 @@ public sealed class UserSettings
     public int MusicVolume = 10;
     public int GraphicsDetail = 5;
     public bool UiInfoTexts = true;
+
+    // VR render quality: OpenXR render-target multiplier (supersampling) + MSAA
+    // level (0 = off, 2, 4). The flat-sprite scene is cheap, so default high.
+    public float RenderScale = 1.4f;
+    public int Msaa = 4;
     public readonly List<HighscoreEntry> Highscores = new();
     // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
     public readonly Dictionary<string, int> Checklist = new();
@@ -51,6 +56,8 @@ public sealed class UserSettings
         MusicVolume = cf.GetValue("audio", "music_volume", MusicVolume).AsInt32();
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
+        RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
+        Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
         Highscores.Clear();
         string hs = cf.GetValue("game", "highscores", string.Empty).AsString();
@@ -102,6 +109,8 @@ public sealed class UserSettings
         cf.SetValue("audio", "sfx_volume", SfxVolume);
         cf.SetValue("audio", "music_volume", MusicVolume);
         cf.SetValue("video", "graphics_detail", GraphicsDetail);
+        cf.SetValue("video", "render_scale", RenderScale);
+        cf.SetValue("video", "msaa", Msaa);
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
         cf.Save(ConfigPath);

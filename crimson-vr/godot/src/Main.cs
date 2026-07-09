@@ -198,11 +198,14 @@ public partial class Main : Node3D
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
+            _settings.RenderScale, _settings.Msaa,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
+        _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
+        _settingsMenu.OnMsaaChanged += v => { _settings.Msaa = v; ApplyRenderQuality(); _settings.Save(); };
 
         // Validation checklist: a standing panel 90 deg to the RIGHT of the arena,
         // always visible so it can be ticked off in any game state, results persisted.
@@ -280,6 +283,7 @@ public partial class Main : Node3D
         _audio.SetSfxVolume(_settings.SfxVolume);
         _audio.SetMusicVolume(_settings.MusicVolume);
         _diorama.SetGraphicsDetail(_settings.GraphicsDetail);
+        ApplyRenderQuality();
 
         // Boot into the main menu: show it, hide the gameplay chrome until PLAY,
         // and play the menu theme (like the base game).
@@ -383,20 +387,28 @@ public partial class Main : Node3D
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             _xrActive = true;
             _xrInterface = xr; // BuildEnvironment applies passthrough once the env exists
-
-            // The diorama is cheap (flat sprites), so spend the headroom on image
-            // quality: 4x MSAA kills the sprite-edge aliasing, and a >1 render-target
-            // multiplier supersamples the swapchain (sharper than the Quest default).
-            GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
-            if (xr is OpenXRInterface oxr)
-            {
-                oxr.RenderTargetSizeMultiplier = 1.4f;
-            }
-            GD.Print("CrimsonVR: OpenXR initialized (MSAA 4x, render scale 1.4)");
+            GD.Print("CrimsonVR: OpenXR initialized");
         }
         else
         {
             GD.PushWarning("CrimsonVR: OpenXR unavailable; running flat");
+        }
+    }
+
+    /// <summary>Apply the persisted VR render-quality settings: MSAA level + the
+    /// OpenXR render-target supersampling multiplier. The flat-sprite scene is cheap,
+    /// so this is where the aliasing win comes from. Live-adjustable from VR Settings.</summary>
+    private void ApplyRenderQuality()
+    {
+        GetViewport().Msaa3D = _settings.Msaa switch
+        {
+            >= 4 => Viewport.Msaa.Msaa4X,
+            2 => Viewport.Msaa.Msaa2X,
+            _ => Viewport.Msaa.Disabled,
+        };
+        if (_xrInterface is OpenXRInterface oxr)
+        {
+            oxr.RenderTargetSizeMultiplier = Mathf.Clamp(_settings.RenderScale, 0.6f, 1.6f);
         }
     }
 

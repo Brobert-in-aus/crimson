@@ -33,17 +33,24 @@ public sealed partial class VrSegmentedSlider : Node3D
     private float _halfH;
     private float _stripHalfW;
 
-    // Ignore pokes for a settle window after the menu is shown (matches the buttons'
-    // guard), so a finger arriving as the panel appears can't nudge the value.
+    // Accidental-press guards (match the buttons): a settle window after the menu
+    // appears AND require the hand to have LEFT the strip before it responds.
     private ulong _readyAtMs;
     private const ulong ShowCooldownMs = 350;
+    private bool _armed;
 
     public event Action<int>? OnValueChanged;
 
     public int Value => _value;
 
-    /// <summary>Start the settle window (call when the menu is shown/hidden).</summary>
-    public void ResetPress() => _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
+    /// <summary>Reset the guards (call when the menu is shown/hidden): start the
+    /// settle window and require the hand to leave the strip before it can set a
+    /// value again.</summary>
+    public void ResetPress()
+    {
+        _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
+        _armed = false;
+    }
 
     public void Build(float cellWidth, int min, int max, int value, Texture2D? onTex, Texture2D? offTex)
     {
@@ -114,10 +121,34 @@ public sealed partial class VrSegmentedSlider : Node3D
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
-        if (Time.GetTicksMsec() < _readyAtMs)
+        // Is any fingertip over the strip's footprint (X/Y, any depth)?
+        bool overFootprint = false;
+        foreach (HandProbe h in probes)
         {
-            return; // settle window after the menu appears
+            if (!h.Valid)
+            {
+                continue;
+            }
+            Vector3 local = ToLocal(h.Tip);
+            if (Mathf.Abs(local.Y) <= _halfH + PokeRadius && Mathf.Abs(local.X) <= _stripHalfW + PokeRadius)
+            {
+                overFootprint = true;
+                break;
+            }
         }
+
+        // Arm only once the hand has LEFT the strip — so a finger resting on the
+        // slider when the menu appears (or lingering from another control) can't set
+        // a value until it's moved clear and comes back. Plus the settle window.
+        if (!overFootprint)
+        {
+            _armed = true;
+        }
+        if (!_armed || Time.GetTicksMsec() < _readyAtMs)
+        {
+            return;
+        }
+
         foreach (HandProbe h in probes)
         {
             if (!h.Valid)
