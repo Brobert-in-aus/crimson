@@ -19,8 +19,14 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 6;
+pub const abi_version: u32 = 7;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
+
+// Synthetic wire-only bit OR'd into the exported creature flags to signal a
+// plague-infected creature (creature.plague_infected is a bool, not a real
+// CreatureFlags value). The real flags only use up to 0x400, so bit 31 is free.
+// The frontend draws the black plague aura for creatures with this bit set.
+const creature_wire_flag_plague: u32 = 0x8000_0000;
 
 pub const ok: i32 = 0;
 pub const err_generic: i32 = -1;
@@ -95,6 +101,14 @@ pub const SnapshotHeader = extern struct {
     // Global freeze bonus timer (state.bonuses.freeze) for the per-creature
     // freeze-shatter overlay (draw_freeze_overlay). Read-only. Append-only (ABI v5).
     freeze_timer: f32,
+    // Nonzero while the local player (players[0]) has the Monster Vision perk;
+    // draw_creature_overlays then paints a yellow aura over every creature and
+    // suppresses the creature drop-shadow. Read-only. Append-only (ABI v7).
+    monster_vision: u32,
+    // Number of active flame/bubblegun particles (state.particles) packed after
+    // the effect pool. This is a SECOND particle system distinct from the effect
+    // pool (draw_particle_pool). Append-only (ABI v7).
+    glow_count: u32,
 };
 
 pub const PlayerSnap = extern struct {
@@ -186,6 +200,25 @@ pub const ParticleSnap = extern struct {
     age: f32,
     effect_id: i32,
     flags: i32,
+};
+
+// One live entry of the flame/bubblegun ParticlePool (state.particles), a pool
+// SEPARATE from the effect pool above. draw_particle_pool renders these
+// additively: the normal glow uses effect-atlas frame 12 tinted
+// (tint_r, tint_g, tint_b) with alpha = age and radius from intensity; the
+// bubblegun style (style_id 8) uses effect frame 2 with a wobble size and white
+// tint; a low-alpha large glow (frame 13) is drawn on every other entry. Packed
+// after the effect pool in the snapshot (append-only, ABI v7).
+pub const ParticleGlowSnap = extern struct {
+    x: f32,
+    y: f32,
+    intensity: f32,
+    spin: f32,
+    tint_r: f32, // Particle.scale_x
+    tint_g: f32, // Particle.scale_y
+    tint_b: f32, // Particle.scale_z
+    age: f32, // alpha multiplier (0..1)
+    style_id: i32,
 };
 
 pub const AudioHeader = extern struct {
@@ -553,7 +586,8 @@ pub fn snapshotMaxSize() u32 {
         @sizeOf(ProjectileSnap) * crimson_zig.projectiles.main_projectile_pool_size +
         @sizeOf(SecondarySnap) * crimson_zig.secondary_projectiles.secondary_projectile_pool_size +
         @sizeOf(BonusSnap) * crimson_zig.bonuses.bonus_pool_size +
-        @sizeOf(ParticleSnap) * crimson_zig.effects.effect_pool_size;
+        @sizeOf(ParticleSnap) * crimson_zig.effects.effect_pool_size +
+        @sizeOf(ParticleGlowSnap) * crimson_zig.particles.particle_pool_size;
     return @intCast(total);
 }
 
@@ -597,7 +631,21 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .particle_count = 0,
         .energizer_timer = box.runner.session.state.bonuses.energizer,
         .freeze_timer = box.runner.session.state.bonuses.freeze,
+        .monster_vision = 0,
+        .glow_count = 0,
     };
+
+    // Monster Vision is a per-player perk that draws a yellow aura over every
+    // creature (draw_creature_overlays / build_draw_context); surface it as a
+    // global flag keyed on the local player.
+    {
+        const players_const = box.runner.session.playersConst();
+        if (players_const.len > 0 and
+            crimson_zig.perks.perkActive(&players_const[0], crimson_zig.perks.PerkId.monster_vision))
+        {
+            header.monster_vision = 1;
+        }
+    }
 
     if (header.perk_pending_count > 0) {
         const choices = box.runner.currentPerkChoices();
@@ -625,6 +673,10 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     for (box.runner.session.effects.entries) |entry| {
         if (entry.flags != 0 and entry.age >= 0.0) header.particle_count += 1;
     }
+    // Live flame/bubblegun particles (draw_particle_pool's `active` gate).
+    for (box.runner.session.particles.entries) |entry| {
+        if (entry.active) header.glow_count += 1;
+    }
 
     const required: u32 = @sizeOf(SnapshotHeader) +
         @sizeOf(PlayerSnap) * header.player_count +
@@ -632,7 +684,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         @sizeOf(ProjectileSnap) * header.projectile_count +
         @sizeOf(SecondarySnap) * header.secondary_count +
         @sizeOf(BonusSnap) * header.bonus_count +
-        @sizeOf(ParticleSnap) * header.particle_count;
+        @sizeOf(ParticleSnap) * header.particle_count +
+        @sizeOf(ParticleGlowSnap) * header.glow_count;
 
     const out_ptr = buf orelse {
         len_ptr.* = required;
@@ -681,7 +734,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .max_hp = entry.max_hp,
             .lifecycle_stage = entry.lifecycle_stage,
             .type_id = entry.type_id,
-            .flags = entry.flags,
+            .flags = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0),
             .r = entry.color[0],
             .g = entry.color[1],
             .b = entry.color[2],
@@ -738,6 +791,20 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .age = entry.age,
             .effect_id = entry.effect_id,
             .flags = entry.flags,
+        });
+    }
+    for (box.runner.session.particles.entries) |entry| {
+        if (!entry.active) continue;
+        writeStruct(out, &offset, ParticleGlowSnap{
+            .x = entry.pos.x,
+            .y = entry.pos.y,
+            .intensity = entry.intensity,
+            .spin = entry.spin,
+            .tint_r = entry.scale_x,
+            .tint_g = entry.scale_y,
+            .tint_b = entry.scale_z,
+            .age = entry.age,
+            .style_id = @intFromEnum(entry.style_id),
         });
     }
 

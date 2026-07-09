@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 6;
+    public const uint ExpectedAbiVersion = 7;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -95,6 +95,8 @@ public static partial class Sim
         public uint ParticleCount;
         public float EnergizerTimer; // ABI v3+: global energizer bonus timer
         public float FreezeTimer;    // ABI v5+: global freeze bonus timer
+        public uint MonsterVision;   // ABI v7+: 1 => draw yellow aura on all creatures
+        public uint GlowCount;       // ABI v7+: flame/bubblegun particle-pool entries
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -191,6 +193,22 @@ public static partial class Sim
         public float Age;
         public int EffectId;
         public int Flags;
+    }
+
+    // One live flame/bubblegun particle (state.particles), a pool separate from
+    // the effect pool, rendered additively (draw_particle_pool). ABI v7+.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ParticleGlowSnap
+    {
+        public float X;
+        public float Y;
+        public float Intensity;
+        public float Spin;
+        public float TintR;
+        public float TintG;
+        public float TintB;
+        public float Age; // alpha multiplier (0..1)
+        public int StyleId;
     }
 
     // Audio events drained per tick (crimson_host_audio_events). Header then

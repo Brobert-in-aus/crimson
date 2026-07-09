@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 5u
+#define CRIMSON_HOST_ABI_VERSION 7u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -110,7 +110,8 @@ typedef struct crimson_host_tick_result {
  *   crimson_host_projectile_snap[projectile_count]
  *   crimson_host_secondary_snap [secondary_count]
  *   crimson_host_bonus_snap     [bonus_count]
- *   crimson_host_particle_snap  [particle_count]   (ABI v2+)
+ *   crimson_host_particle_snap  [particle_count]   (ABI v2+; effect pool)
+ *   crimson_host_particle_glow_snap [glow_count]   (ABI v7+; flame/bubblegun pool)
  */
 typedef struct crimson_host_snapshot_header {
     uint32_t magic;   /* CRIMSON_HOST_SNAPSHOT_MAGIC */
@@ -133,6 +134,10 @@ typedef struct crimson_host_snapshot_header {
                               * energizer-blue creature tint + lifecycle fade */
     float freeze_timer;      /* ABI v5+; global freeze bonus timer, for the
                               * per-creature freeze-shatter overlay */
+    uint32_t monster_vision; /* ABI v7+; nonzero -> player has Monster Vision:
+                              * draw the yellow aura over every creature */
+    uint32_t glow_count;     /* ABI v7+; flame/bubblegun particle-pool entries
+                              * packed after the effect pool */
 } crimson_host_snapshot_header;
 
 typedef struct crimson_host_player_snap {
@@ -165,7 +170,8 @@ typedef struct crimson_host_creature_snap {
     float max_hp;
     float lifecycle_stage; /* 16.0 = alive (native death-timer convention) */
     int32_t type_id;
-    uint32_t flags;
+    uint32_t flags; /* CreatureFlags; wire bit 0x80000000 = plague-infected (ABI v7+):
+                     * draw the black plague aura. Poison aura = flags & 0x01. */
     /* Per-creature tint RGBA multiplier + white hit-flash timer (ABI v4+).
      * Presentation-only: multiply the sprite by (r,g,b,a); brighten toward white
      * while hit_flash_timer > 0. */
@@ -181,6 +187,8 @@ typedef struct crimson_host_projectile_snap {
     float y;
     float angle;
     int32_t type_id;
+    float vx; /* ABI v6+; velocity — ~0 means stopped/lodged in a target */
+    float vy;
 } crimson_host_projectile_snap;
 
 typedef struct crimson_host_secondary_snap {
@@ -219,6 +227,23 @@ typedef struct crimson_host_particle_snap {
     int32_t effect_id;
     int32_t flags;
 } crimson_host_particle_snap;
+
+/* One live flame/bubblegun particle (state.particles) — a pool SEPARATE from the
+ * effect pool, rendered additively by draw_particle_pool. Normal glow: atlas
+ * frame 12 tinted (tint_r,tint_g,tint_b), alpha = age, radius from intensity.
+ * Bubblegun (style_id 8): atlas frame 2, wobble size, white. A low-alpha large
+ * glow (frame 13) is drawn on every other entry. (ABI v7+.) */
+typedef struct crimson_host_particle_glow_snap {
+    float x;
+    float y;
+    float intensity;
+    float spin;
+    float tint_r;
+    float tint_g;
+    float tint_b;
+    float age; /* alpha multiplier (0..1) */
+    int32_t style_id;
+} crimson_host_particle_glow_snap;
 
 /* Audio payload layout (packed, in order):
  *   crimson_host_audio_header

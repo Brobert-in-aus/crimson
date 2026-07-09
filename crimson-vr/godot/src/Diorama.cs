@@ -173,6 +173,10 @@ public sealed partial class Diorama : Node3D
         {
             _particleAddNode.Visible = level >= 2;
         }
+        if (_glowNode != null)
+        {
+            _glowNode.Visible = level >= 2;
+        }
     }
 
     // 2.5D presentation (PLAN §6). A fixed back-tilt was tried (leaning sprites
@@ -233,6 +237,30 @@ public sealed partial class Diorama : Node3D
     private float _freezeTimer;
     private const int FreezeShatterEffectId = 0x0E; // EffectId.FREEZE_SHATTER
     private const int FreezeCap = 1024;
+
+    // Creature overlays (draw_creature_overlays): per-creature auras from the AURA
+    // atlas frame, alpha-blended UNDER the creature sprites (priority below the
+    // creature layers). Poison (red, flags & 0x01), plague (black, wire bit
+    // 0x80000000), monster-vision (yellow, all creatures when the header flag is
+    // set). One shared mesh; several overlays can stack on one creature.
+    private MultiMesh? _overlays;
+    private bool _monsterVision;
+    private const int AuraEffectId = 0x10; // EffectId.AURA
+    private const uint CreatureWireFlagPlague = 0x8000_0000; // matches exports.zig
+    private const uint CreatureFlagPoison = 0x01;            // CreatureFlags.self_damage_tick
+    private const int OverlayCap = 3072; // up to 3 auras per creature
+
+    // Flame/bubblegun particle-glow pool (draw_particle_pool) — a SECOND particle
+    // system distinct from the effect pool, rendered additively (ABI v7 glow
+    // stream). One shared additive mesh.
+    private MultiMesh? _glowMesh;
+    private MultiMeshInstance3D? _glowNode;
+    private const int GlowLargeEffectId = 13; // ambient big glow (fx_detail 1)
+    private const int GlowNormalEffectId = 12; // per-particle glow
+    private const int GlowBubblegunEffectId = 2; // bubblegun blob
+    private const int BubblegunStyleId = 8;      // ParticleStyleId.bubblegun
+    private const int BlowTorchStyleId = 1;      // ParticleStyleId.blow_torch
+    private const int GlowCap = 384;
 
     // Terrain FX (ABI v3, PLAN §6): blood/scorch splats + corpse stamps drained
     // per tick (crimson_host_terrain_fx). The originals bake these permanently
@@ -627,6 +655,166 @@ public sealed partial class Diorama : Node3D
             VisibleInstanceCount = 0,
         };
         AddChild(new MultiMeshInstance3D { Multimesh = _freezeMesh, MaterialOverride = freezeMat });
+
+        // Creature auras (draw_creature_overlays): alpha-blended, priority 4 so
+        // they sit under the creature sprites (creatures start at priority 6) but
+        // over the ground/decals.
+        var overlayMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 4 };
+        overlayMat.SetShaderParameter("sheet", tex);
+        _overlays = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = OverlayCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _overlays, MaterialOverride = overlayMat });
+
+        // Flame/bubblegun glow pool (draw_particle_pool): additive, priority 27 so
+        // it reads on top of the additive effect flashes (26).
+        var glowMat = new ShaderMaterial { Shader = ParticleShaderAdd, RenderPriority = 27 };
+        glowMat.SetShaderParameter("sheet", tex);
+        _glowMesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = GlowCap,
+            VisibleInstanceCount = 0,
+        };
+        _glowNode = new MultiMeshInstance3D { Multimesh = _glowMesh, MaterialOverride = glowMat };
+        AddChild(_glowNode);
+    }
+
+    /// <summary>Draw the per-creature aura overlays (draw_creature_overlays):
+    /// monster-vision (yellow, all creatures), plague (black), poison (red). All
+    /// alpha-blended, under the sprites, using the AURA atlas frame. Alpha fades
+    /// with lifecycle (monster_vision_fade_alpha).</summary>
+    private void RenderCreatureOverlays(in SnapshotView view)
+    {
+        if (_overlays == null || !_effectUv.TryGetValue(AuraEffectId, out Vector3 uv))
+        {
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        int n = 0;
+
+        void Emit(Vector2 game, float sizeGame, Color color)
+        {
+            if (n >= OverlayCap || color.A <= 1e-3f)
+            {
+                return;
+            }
+            float m = Mathf.Max(sizeGame * k, 0.001f);
+            Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+                + new Vector3(0.0f, 0.0075f, 0.0f); // over decals/shadows, under sprites
+            _overlays.SetInstanceTransform(n, new Transform3D(FlatQuadBasis(0.0f, m, m), pos));
+            _overlays.SetInstanceColor(n, color);
+            _overlays.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+            n++;
+        }
+
+        foreach (Sim.CreatureSnap c in view.Creatures)
+        {
+            // monster_vision_fade_alpha(lifecycle_stage): 1 while alive, ramps to 0
+            // as a corpse fades (stage < 0).
+            float fade = c.LifecycleStage >= 0.0f
+                ? 1.0f
+                : Mathf.Clamp((c.LifecycleStage + 10.0f) * 0.1f, 0.0f, 1.0f);
+            if (fade <= 1e-3f)
+            {
+                continue;
+            }
+            var game = new Vector2(c.X, c.Y);
+            if (_monsterVision)
+            {
+                Emit(game, 90.0f, new Color(1.0f, 1.0f, 0.0f, fade));
+            }
+            if ((c.Flags & CreatureWireFlagPlague) != 0)
+            {
+                Emit(game, 80.0f, new Color(0.0f, 0.0f, 0.0f, fade));
+            }
+            if ((c.Flags & CreatureFlagPoison) != 0)
+            {
+                Emit(game, 60.0f, new Color(1.0f, 0.0f, 0.0f, fade));
+            }
+        }
+        _overlays.VisibleInstanceCount = n;
+    }
+
+    /// <summary>Draw the flame/bubblegun particle-glow pool additively
+    /// (draw_particle_pool): a big ambient glow on every other particle, a normal
+    /// tinted glow per particle, and bubblegun blobs. Distinct from the effect
+    /// pool; fed by the ABI v7 glow stream.</summary>
+    private void RenderGlowPool(in SnapshotView view)
+    {
+        if (_glowMesh == null)
+        {
+            return;
+        }
+        if (!_effectUv.TryGetValue(GlowNormalEffectId, out Vector3 uvNormal)
+            || !_effectUv.TryGetValue(GlowBubblegunEffectId, out Vector3 uvBubble))
+        {
+            _glowMesh.VisibleInstanceCount = 0;
+            return;
+        }
+        bool hasLarge = _effectUv.TryGetValue(GlowLargeEffectId, out Vector3 uvLarge);
+        float k = _arenaSideMeters / _worldSize;
+        int n = 0;
+
+        void Emit(Vector2 game, float wGame, float hGame, float rot, Color color, Vector3 uv)
+        {
+            if (n >= GlowCap || (wGame <= 0.0f) || (hGame <= 0.0f))
+            {
+                return;
+            }
+            Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+                + new Vector3(0.0f, 0.0078f, 0.0f);
+            _glowMesh.SetInstanceTransform(n, new Transform3D(FlatQuadBasis(rot, wGame * k, hGame * k), pos));
+            _glowMesh.SetInstanceColor(n, color);
+            _glowMesh.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+            n++;
+        }
+
+        int idx = 0;
+        foreach (Sim.ParticleGlowSnap g in view.Glows)
+        {
+            var game = new Vector2(g.X, g.Y);
+            bool bubblegun = g.StyleId == BubblegunStyleId;
+
+            // Large ambient glow (fx_detail 1): every other non-bubblegun particle.
+            if (hasLarge && !bubblegun && (idx % 2) == 0)
+            {
+                float r = (Mathf.Sin((1.0f - g.Intensity) * Mathf.Pi * 0.5f) + 0.1f) * 55.0f + 4.0f;
+                r = Mathf.Max(r, 16.0f);
+                float size = r * 2.0f;
+                Emit(game, size, size, 0.0f, new Color(1.0f, 1.0f, 1.0f, 0.065f), uvLarge);
+            }
+
+            if (bubblegun)
+            {
+                float wobble = Mathf.Sin(g.Spin) * 3.0f;
+                float halfH = (wobble + 15.0f) * g.TintR * 7.0f;
+                float halfW = (15.0f - wobble) * g.TintR * 7.0f;
+                Emit(game, halfW * 2.0f, halfH * 2.0f, 0.0f, new Color(1.0f, 1.0f, 1.0f, g.Age), uvBubble);
+            }
+            else
+            {
+                float r = Mathf.Sin((1.0f - g.Intensity) * Mathf.Pi * 0.5f) * 24.0f;
+                if (g.StyleId == BlowTorchStyleId)
+                {
+                    r *= 0.8f;
+                }
+                r = Mathf.Max(r, 2.0f);
+                float size = r * 2.0f;
+                Emit(game, size, size, g.Spin, new Color(g.TintR, g.TintG, g.TintB, g.Age), uvNormal);
+            }
+            idx++;
+        }
+        _glowMesh.VisibleInstanceCount = n;
     }
 
     /// <summary>Draw the freeze-shatter overlay on every creature while the global
@@ -1178,8 +1366,11 @@ public sealed partial class Diorama : Node3D
         }
 
         _freezeTimer = view.Header.FreezeTimer;
+        _monsterVision = view.Header.MonsterVision != 0;
         RenderParticles(view);
+        RenderGlowPool(view);
         RenderFreezeOverlay(view);
+        RenderCreatureOverlays(view);
     }
 
     /// <summary>Write interpolated instance transforms for the current frame.
