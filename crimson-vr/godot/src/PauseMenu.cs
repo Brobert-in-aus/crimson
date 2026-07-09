@@ -35,33 +35,38 @@ public sealed partial class PauseMenu : Node3D
     {
         float s = arenaSideMeters;
 
-        // Pause toggle: flat on the arena plane (face up: local +Z -> world +Y via
-        // a -90 deg X rotation), off to the +x side and near the player edge, just
-        // outside the playfield so it never collides with the move/aim reticles.
+        // Pause + Level Up live on the LEFT VERTICAL FACE of an imaginary cube
+        // whose bottom face is the arena (player's left = arena-local +x, the
+        // checklist side), mounted on the OUTSIDE so nothing projects over the
+        // play surface (they used to lie flat over the table — in-headset fail).
+        // Yaw -90 (like the checklist) points the fronts inward (-x) so they're
+        // readable from the seat; the node sits one proud-depth outside the
+        // x=half plane so the face — even fully depressed — never crosses over
+        // the arena. Stacked vertically near the player's end of the edge.
+        float half = s * 0.5f;
+        float proud = s * 0.03f;
         _toggle = new VrButton();
         AddChild(_toggle);
-        _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: s * 0.03f, plate: true);
-        // Clear of the terrain floor (which extends ~0.65*s past centre); sit it
-        // out to the +x side so it never overlaps the play area.
-        _toggle.Position = new Vector3(s * 0.9f, 0.02f, -s * 0.35f);
-        // Lie flat facing up. The extra 180 about local Z spins the label in-plane
-        // so its top points away from the player (upright when looking down), not
-        // toward them (which read upside down).
-        _toggle.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
+        _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: proud, plate: true);
+        _toggle.Position = new Vector3(half + proud, s * 0.16f, -s * 0.32f);
+        _toggle.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
         _toggle.OnPress += TogglePause;
 
-        // Level-up button: flat like the pause toggle, just inboard of it (toward
-        // the far edge). Shown only while a perk pick is pending; poking it opens
-        // the perk menu (rather than the cards auto-appearing).
+        // Level-up button above the pause toggle on the same face. Shown only
+        // while a perk pick is pending; poking it opens the perk menu (rather
+        // than the cards auto-appearing).
         _levelUp = new VrButton();
         AddChild(_levelUp);
-        _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: s * 0.03f, plate: true);
-        _levelUp.Position = new Vector3(s * 0.9f, 0.02f, -s * 0.12f);
-        _levelUp.RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f);
+        _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: proud, plate: true);
+        _levelUp.Position = new Vector3(half + proud, s * 0.34f, -s * 0.32f);
+        _levelUp.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
         _levelUp.OnPress += () => OnLevelUp?.Invoke();
         _levelUp.Visible = false;
 
-        // Accumulated level-up counter, flat beside the button (shows "xN" for N>1).
+        // Accumulated level-up counter ("xN" for N>1), beside the button along
+        // the face (toward the arena centre = the viewer's right here) so it
+        // never overlaps the label (the old in-plane offset drew the X2 across
+        // the button text — in-headset fail).
         _levelUpBadge = new Label3D
         {
             Text = string.Empty,
@@ -70,8 +75,8 @@ public sealed partial class PauseMenu : Node3D
             Modulate = new Color(1.0f, 0.9f, 0.3f),
             OutlineSize = 28,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(s * 0.9f + s * 0.14f, 0.04f, -s * 0.12f),
-            RotationDegrees = new Vector3(-90.0f, 0.0f, 180.0f),
+            Position = new Vector3(half + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.16f),
+            RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f),
             NoDepthTest = true,
             Visible = false,
         };

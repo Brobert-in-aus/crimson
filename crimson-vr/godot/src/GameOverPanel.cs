@@ -60,8 +60,12 @@ public sealed partial class GameOverPanel : Node3D
 
         // Backing panel. Coplanar overlay quads must be transparent with distinct
         // RenderPriority for draw order to work (HUD lesson); the backing also
-        // sits slightly behind on z.
-        AddQuad(null, 0.0f, 0.0f, s * 1.35f, s * 1.05f, new Color(0.05f, 0.055f, 0.085f, 0.93f), priority: 60, z: -0.006f);
+        // sits slightly behind on z. DEPTH-TESTED (noDepthTest: false): with
+        // NoDepthTest the backing drew over the opaque VrButton faces sitting in
+        // front of it, dimming Play Again / Main Menu behind the 93%-alpha dark
+        // quad (in-headset fail). Depth-testing lets the buttons punch through
+        // while the panel's own labels still order above it by priority.
+        AddQuad(null, 0.0f, 0.0f, s * 1.35f, s * 1.05f, new Color(0.05f, 0.055f, 0.085f, 0.93f), priority: 60, z: -0.006f, noDepthTest: false);
 
         // Reaper banner (256x64 art). Well Done is the quest-victory variant;
         // survival death is always the Reaper.
@@ -234,10 +238,10 @@ public sealed partial class GameOverPanel : Node3D
         return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
     }
 
-    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, float z = 0.0f)
-        => AddQuad(tex, x, y, w, h, tint, priority, out _, z);
+    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, float z = 0.0f, bool noDepthTest = true)
+        => AddQuad(tex, x, y, w, h, tint, priority, out _, z, noDepthTest);
 
-    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat, float z = 0.0f)
+    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat, float z = 0.0f, bool noDepthTest = true)
     {
         mat = new StandardMaterial3D
         {
@@ -248,7 +252,7 @@ public sealed partial class GameOverPanel : Node3D
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-            NoDepthTest = true,
+            NoDepthTest = noDepthTest,
             RenderPriority = priority,
         };
         var node = new MeshInstance3D

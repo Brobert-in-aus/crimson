@@ -102,6 +102,9 @@ public sealed partial class PerkMenu : Node3D
             int idx = i;
             card.OnPress += () => Chosen = idx;
             card.Visible = false;
+            // Alpha pipeline up-front: SetFade's lazy transparency switch caused
+            // a first-fade pipeline-compile stall on Quest that ate the ease.
+            card.PrewarmFade();
             _cards[i] = card;
 
             // "?" button below each card: press-and-hold to show the description.
@@ -109,6 +112,7 @@ public sealed partial class PerkMenu : Node3D
             AddChild(help);
             help.Build(_cardW * 0.5f, arenaSideMeters * 0.11f, "?", new Color(0.35f, 0.4f, 0.55f));
             help.Visible = false;
+            help.PrewarmFade();
             _help[i] = help;
         }
 
@@ -187,6 +191,14 @@ public sealed partial class PerkMenu : Node3D
         {
             _setSig = sig;
             _fadeStartMs = Time.GetTicksMsec();
+            // Start the new set invisible RIGHT NOW: PollPoke applies the ease
+            // later in the frame, so without this the swapped-in cards rendered
+            // one full-alpha frame first (visible flash before the fade).
+            for (int i = 0; i < _cards.Length; i++)
+            {
+                _cards[i].SetFade(0.0f);
+                _help[i].SetFade(0.0f);
+            }
         }
 
         float total = count * _cardW + (count - 1) * _cardGap;

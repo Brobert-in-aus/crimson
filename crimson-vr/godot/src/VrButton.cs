@@ -194,6 +194,19 @@ public sealed partial class VrButton : Node3D
         _label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
     }
 
+    /// <summary>Permanently switch the face material to alpha transparency so
+    /// SetFade never has to flip the pipeline mid-fade. Call once after Build on
+    /// buttons that will fade: the lazy switch inside SetFade caused a shader/
+    /// pipeline compile stall on Quest the first time a fade ran, eating the
+    /// whole 220 ms window (cards popped instead of easing in).</summary>
+    public void PrewarmFade()
+    {
+        if (_mat != null)
+        {
+            _mat.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+        }
+    }
+
     /// <summary>Fade the whole button in/out (0 = invisible, 1 = opaque) for the
     /// perk-pick cross-fade. Modulates the face + label alpha; enables alpha
     /// transparency so a flat-colour face can fade. 1.0 restores the normal look.</summary>

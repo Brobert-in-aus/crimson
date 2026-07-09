@@ -133,7 +133,9 @@ public partial class Main : Node3D
     // tabletop and washing contrast out of the whole diorama.
     private static readonly Color FogGrey = new(0.55f, 0.55f, 0.58f);
     private const float FogStartMeters = 3.0f;
-    private const float FogEndMeters = 12.0f;
+    // Full grey well BEFORE the 24m world floor's edge (~12m away): with the
+    // end at 12 the edge itself was still faintly visible (in-headset fail).
+    private const float FogEndMeters = 8.0f;
 
     private bool _recenterPending = true;
     private bool _prevRecenterHeld;

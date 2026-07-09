@@ -79,8 +79,10 @@ public sealed partial class Hud : Node3D
         // Anchor the HUD's TOP edge at the arena's near edge and hang it DOWN /
         // toward the seated player (tilted to face up), so it never covers the play
         // surface. Arena is yawed so the player's side is local -z; the 180 yaw
-        // turns the art to face them.
-        Position = new Vector3(0.0f, 0.01f, -(half + arenaSideMeters * 0.01f));
+        // turns the art to face them. Together with depth-tested quads (below)
+        // the tabletop occludes the HUD at shallow view angles instead of the
+        // HUD drawing over the arena.
+        Position = new Vector3(0.0f, 0.0f, -half);
         RotationDegrees = new Vector3(-45.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
@@ -232,7 +234,11 @@ public sealed partial class Hud : Node3D
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-            NoDepthTest = true,
+            // Depth-TESTED (no NoDepthTest): the HUD hangs below/outside the
+            // table edge, and the opaque tabletop must occlude it at shallow
+            // angles — with NoDepthTest it drew over the arena (in-headset
+            // fail). Coplanar HUD quads still order among themselves by
+            // RenderPriority (all transparent, depth write off).
             RenderPriority = priority,
         };
         var node = new MeshInstance3D
@@ -258,7 +264,7 @@ public sealed partial class Hud : Node3D
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-                NoDepthTest = true,
+                // Depth-tested like TexQuad: the tabletop occludes the HUD.
                 RenderPriority = priority,
             },
         };
@@ -275,7 +281,7 @@ public sealed partial class Hud : Node3D
             PixelSize = _u * 0.32f, // ~15 native units tall
             Modulate = new Color(0.9f, 0.9f, 0.9f),
             HorizontalAlignment = align,
-            NoDepthTest = true,
+            // Depth-tested like the quads: the tabletop occludes the HUD.
             Position = new Vector3(LocalX(nx), LocalY(ny), 0.001f),
             RenderPriority = 44,
         };
