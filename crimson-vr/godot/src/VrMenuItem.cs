@@ -67,15 +67,27 @@ public sealed partial class VrMenuItem : Node3D
         _group.AddChild(plate);
 
         // The label (one row of ui_itemTexts) centred a hair in front of the plate
-        // so it composites on top. An AtlasTexture selects the row's sub-rect, so
-        // the QuadMesh keeps default UVs (no manual UV math / v-flip ambiguity).
+        // so it composites on top, sized to sit within the plate keeping the row's
+        // 122:32 aspect. The single row is selected with a UV crop: AtlasTexture
+        // does NOT crop when sampled as a 3D material albedo (the GPU samples the
+        // whole sheet, so every item showed all 8 rows stacked), whereas Uv1
+        // scale/offset remaps the QuadMesh UVs into just this row's sub-rect.
         if (labelTex != null)
         {
-            float labelW = width * 0.6f;
-            float labelH = labelW * (LabelRectH / LabelRectW);
-            _labelMat = FlatTexMat(
-                new AtlasTexture { Atlas = labelTex, Region = new Rect2(0.0f, labelRow * LabelRectH, LabelRectW, LabelRectH) },
-                Colors.White, priority: 31);
+            float labelH = height * 0.62f;
+            float labelW = labelH * (LabelRectW / LabelRectH);
+            _labelMat = new StandardMaterial3D
+            {
+                AlbedoTexture = labelTex,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+                TextureRepeat = false,
+                Uv1Scale = new Vector3(LabelRectW / AtlasW, LabelRectH / AtlasH, 1.0f),
+                Uv1Offset = new Vector3(0.0f, labelRow * LabelRectH / AtlasH, 0.0f),
+                RenderPriority = 31,
+            };
             var label = new MeshInstance3D
             {
                 Mesh = new QuadMesh { Size = new Vector2(labelW, labelH) },
