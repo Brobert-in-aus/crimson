@@ -1,3 +1,4 @@
+using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -61,6 +62,8 @@ public partial class Main : Node3D
     private Diorama _diorama = null!;
     private AudioBank _audio = null!;
     private Hud _hud = null!;
+    private PerkMenu _perkMenu = null!;
+    private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -124,6 +127,11 @@ public partial class Main : Node3D
         _hud = new Hud();
         _arenaRoot.AddChild(_hud);
         _hud.Build(ArenaSideMeters);
+
+        // Perk pick cards float above the arena (poke to choose), arena-local.
+        _perkMenu = new PerkMenu();
+        _arenaRoot.AddChild(_perkMenu);
+        _perkMenu.Build(ArenaSideMeters);
 
         try
         {
@@ -394,6 +402,19 @@ public partial class Main : Node3D
         (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
         Sim.HostInput input = VrInput.Build(move, aim, _playerGame);
 
+        // Perk pick: while perks are pending (from the prior tick), pause the sim
+        // (perk_menu_active) and, once a card is poked, feed the choice index. The
+        // ABI applies the choice on the tick perk_choice_index is set.
+        if (_sim.LastResult.PerkPendingCount > 0)
+        {
+            input.PerkMenuActive = 1;
+            if (_perkChoice >= 0)
+            {
+                input.PerkChoiceIndex = _perkChoice;
+                _perkChoice = -1;
+            }
+        }
+
         Sim.TickResult result = _sim.Tick(input);
         SnapshotView snap = _sim.CaptureSnapshot();
         if (snap.Header.PlayerCount > 0)
@@ -402,6 +423,7 @@ public partial class Main : Node3D
             _playerGame = new Vector2(p.X, p.Y);
             _hud.Update(result, p);
         }
+        _perkMenu.Update(snap);
         _diorama.PushSnapshot(snap);
 
         // Accumulate this tick's blood/scorch splats + corpse stamps (ABI v3).
@@ -452,8 +474,41 @@ public partial class Main : Node3D
         if (_sim != null)
         {
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
+            PollPerkPoke();
         }
     }
+
+    /// <summary>Feed controller tips to the perk cards (poke) each rendered frame
+    /// and latch a choice for the next sim tick. The tip is a point just ahead of
+    /// the grip pose (roughly the controller's front).</summary>
+    private void PollPerkPoke()
+    {
+        if (!_perkMenu.Active)
+        {
+            return;
+        }
+        Span<Vector3> tips = stackalloc Vector3[2];
+        int n = 0;
+        if (_leftHand.GetHasTrackingData())
+        {
+            tips[n++] = PokeTip(_leftHand);
+        }
+        if (_rightHand.GetHasTrackingData())
+        {
+            tips[n++] = PokeTip(_rightHand);
+        }
+        _perkMenu.PollPoke(tips[..n]);
+        if (_perkMenu.Chosen >= 0)
+        {
+            _perkChoice = _perkMenu.Chosen;
+            _perkMenu.Chosen = -1;
+        }
+    }
+
+    // A point ~4 cm ahead of the grip (grip -Z faces out the controller front),
+    // used as the poke fingertip for physical menu buttons.
+    private static Vector3 PokeTip(XRController3D hand)
+        => hand.GlobalPosition + hand.GlobalTransform.Basis.Z * -0.04f;
 
     /// <summary>Shared vertical projection of a controller onto the arena plane
     /// (PLAN §4). Returns the clamped game-space point; also reports whether the

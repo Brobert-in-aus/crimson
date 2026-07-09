@@ -160,6 +160,13 @@ def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | No
     return out
 
 
+def perk_names() -> dict[str, str]:
+    """perk_id -> display name (PERK_BY_ID), for the VR perk-menu card labels."""
+    from src.crimson.perks.ids import PERK_BY_ID
+
+    return {str(int(pid)): meta.name for pid, meta in PERK_BY_ID.items()}
+
+
 def main() -> None:
     assets_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("artifacts/assets")
     out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("crimson-vr/godot/assets/sprites")
@@ -271,6 +278,10 @@ def main() -> None:
         }
         if any(fn in staged for fn in TERRAIN_SLOT_FILES.values())
         else None,
+        # Perk id -> display name (src/crimson/perks/ids.py PERK_BY_ID) for the VR
+        # perk-menu cards. Factual metadata only; no art. The ABI snapshot header
+        # sends perk_choices[] as PerkId values, which the frontend labels from this.
+        "perks": perk_names(),
     }
 
     manifest_path = out_dir / "sprite_manifest.json"

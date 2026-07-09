@@ -1,0 +1,141 @@
+using System;
+using Godot;
+
+namespace CrimsonVR;
+
+/// <summary>
+/// A diegetic physical push-button for VR menus (PLAN M4 UI model): a button that
+/// sits PROUD of its panel along local +Z and is POKED with a controller tip —
+/// it depresses to follow the tip and fires <see cref="OnPress"/> on the
+/// press-down edge, showing a pressed colour while held in. No laser pointer.
+///
+/// Local frame: the panel lies in local XY, the front face normal is local +Z
+/// (toward the player). Callers place/orient the button node; poke points are
+/// supplied in world space each frame via <see cref="PollPoke"/>.
+///
+/// Built from code as a child of a menu root so it inherits the menu's
+/// world placement. Dimensions are metres; tuned first-pass, refine in-headset.
+/// </summary>
+public sealed partial class VrButton : Node3D
+{
+    private MeshInstance3D _face = null!;
+    private StandardMaterial3D _mat = null!;
+    private Label3D? _label;
+
+    private float _halfW;
+    private float _halfH;
+    private float _proud;         // rest depth of the button front (local +Z)
+    private float _pressDepth;    // press fires once the front passes this local Z
+    private bool _pressed;
+
+    private Color _baseColor;
+    private Color _pressedColor;
+
+    /// <summary>Fired once when the button is pushed past the press depth.</summary>
+    public event Action? OnPress;
+
+    /// <summary>Index/payload the owner can read in the OnPress handler (e.g. the
+    /// perk choice index or a menu action id). Purely for the caller's use.</summary>
+    public int Payload;
+
+    public void Build(float width, float height, string? text, Color color, float proud = 0.012f)
+    {
+        _halfW = width * 0.5f;
+        _halfH = height * 0.5f;
+        _proud = proud;
+        _pressDepth = proud * 0.45f; // pressed once pushed ~55% of the way in
+        _baseColor = color;
+        _pressedColor = color.Lerp(Colors.White, 0.55f);
+
+        // Socket/backing at the panel surface (local Z = 0) so the button reads as
+        // recessed into a frame.
+        var socket = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(width * 1.08f, height * 1.08f, 0.004f) },
+            Position = new Vector3(0.0f, 0.0f, -0.002f),
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.08f, 0.08f, 0.10f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
+        };
+        AddChild(socket);
+
+        // The proud button face, moved along local Z by the poke.
+        _mat = new StandardMaterial3D
+        {
+            AlbedoColor = _baseColor,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        };
+        _face = new MeshInstance3D
+        {
+            Mesh = new BoxMesh { Size = new Vector3(width, height, 0.006f) },
+            Position = new Vector3(0.0f, 0.0f, _proud),
+            MaterialOverride = _mat,
+        };
+        AddChild(_face);
+
+        if (!string.IsNullOrEmpty(text))
+        {
+            _label = new Label3D
+            {
+                Text = text,
+                FontSize = 96,
+                PixelSize = height / 220.0f, // scale text to the button
+                Modulate = new Color(0.05f, 0.05f, 0.06f),
+                Position = new Vector3(0.0f, 0.0f, _proud + 0.004f),
+                NoDepthTest = true,
+                Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
+            };
+            _face.AddChild(_label);
+        }
+    }
+
+    public void SetText(string text)
+    {
+        if (_label != null)
+        {
+            _label.Text = text;
+        }
+    }
+
+    /// <summary>Update the depress state from world-space poke points (controller
+    /// tips). Call every rendered frame while the button is visible.</summary>
+    public void PollPoke(ReadOnlySpan<Vector3> tipsGlobal)
+    {
+        bool inside = false;
+        float frontZ = _proud; // least-pressed default
+        foreach (Vector3 tipG in tipsGlobal)
+        {
+            Vector3 local = ToLocal(tipG);
+            if (Mathf.Abs(local.X) <= _halfW && Mathf.Abs(local.Y) <= _halfH && local.Z < _proud)
+            {
+                inside = true;
+                frontZ = Mathf.Min(frontZ, local.Z);
+            }
+        }
+
+        float z = inside ? Mathf.Clamp(frontZ, 0.0f, _proud) : _proud;
+        _face.Position = new Vector3(0.0f, 0.0f, z);
+
+        bool nowPressed = inside && z <= _pressDepth;
+        _mat.AlbedoColor = nowPressed ? _pressedColor : _baseColor;
+        if (nowPressed && !_pressed)
+        {
+            OnPress?.Invoke();
+        }
+        _pressed = nowPressed;
+    }
+
+    /// <summary>Reset to the unpressed rest state (e.g. when the menu hides, so a
+    /// held poke doesn't re-fire when it reappears).</summary>
+    public void ResetPress()
+    {
+        _pressed = false;
+        if (_face != null)
+        {
+            _face.Position = new Vector3(0.0f, 0.0f, _proud);
+            _mat.AlbedoColor = _baseColor;
+        }
+    }
+}

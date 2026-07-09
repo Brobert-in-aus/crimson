@@ -809,15 +809,57 @@ off-arena spawn-margin edge treatment (§6); other effect pools; combined-atlas
 single-mesh (true per-instance sort); id-based snapshot matching; player legs.
 
 ### M4 — Interaction polish
-- Perk menu in VR, pause menu, arena placement/recenter/scale settings
-  (§5 rules incl. play-area fit + override, and the **seated reach-envelope
-  calibration** flagged in §5), player-centered follow mode toggle (§5), hand
-  swap, dead-zone tuning, haptics, comfort pass.
-- Replay recording on by default, saved to the standard runtime replays dir.
+
+**VR UI model (decided 2026-07-09).** All menus are diegetic 3D panels, not
+screen-space overlays:
+- **Anchoring:** transient menus (perk pick, pause contents, settings) float
+  **above the arena**, vertical or slightly leaned back toward the player.
+  Controls that must be pressable **during** gameplay (the pause button and any
+  peers) sit **parallel to the arena** (flat, like a control console) **off to one
+  side** of it.
+- **Interaction is physical.** Buttons are **poked** with the controller tip:
+  they sit **proud** of their panel, **depress** (move back) on press, and show a
+  pressed state where one exists. No laser pointer for menus. This **refines** the
+  earlier §4 "reticle-over-card + trigger" perk note — perk cards are poke buttons.
+- **Sliders/toggles:** grab-and-drag; fall back to a text-box entry (virtual
+  keyboard) where precise/fiddly.
+- **Comfort:** none for v1 (no artificial locomotion — the arena is world-anchored,
+  so the only vection source is the optional follow-mode).
+- **HUD:** unchanged for now (near-edge panel); refine later.
+
+**M4 slices (in order):**
+1. **Physical-button primitive — BUILT (2026-07-09, in-headset pending).**
+   `VrButton` (poke detection: controller tip in the button footprint + past a
+   press depth; depresses to follow the tip, pressed colour, fires OnPress on the
+   press-down edge; socket + proud face + label). Headless-verified (compiles,
+   boots); feel/dimensions need in-headset tuning.
+2. **Perk menu — BUILT (2026-07-09, in-headset pending).** `PerkMenu` floats the
+   candidate perks above the arena as `VrButton` cards (labels from the baked
+   perk-id->name table, 58 perks). Poke -> `perk_choice_index`; Main pauses via
+   `perk_menu_active` while `perk_pending_count > 0`. Headless can't trigger it
+   (no XP/levels, no tracked hands) — needs in-headset validation of poke feel,
+   card layout/reach, and the pause/resume flow.
+3. **Pause menu** — a side-of-arena, arena-parallel pause button (always
+   pressable); opens resume / settings / quit above the arena.
+4. **Settings (MVP)** — top-level menu; arena scale/height/hand-swap/dead-zone as
+   **submenus**. Live-adjust where cheap. Persisted.
+5. **First run** — show the default arena + a "calibrate or accept" prompt. (The
+   seated reach calibration itself + the arena-size UI are their own later slices.)
+6. **Highscore name entry** via an in-VR **virtual keyboard**.
+7. **Haptics** (fire / player-hit / reload).
+8. **Replay recording** on by default -> standard `.crd` in the runtime replays
+   dir. Best-practice choice: add the deferred in-ABI recorder
+   (`crimson_host_replay_begin/finish`) backed by a **Zig msgpack `.crd` encoder**,
+   so the recorded format lives in the same deterministic native stack as the
+   verifier (no C#-side format drift). Its own slice (carries the encoder cost).
+9. **Settings persistence.**
+
+Deferred to their own later slices (flagged, not M4-blocking): seated
+reach-envelope calibration (§5), the arena-size adjustment UI, player-centered
+follow-mode toggle (§5).
+
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
-  without touching desktop; recorded `.crd` verifies; settings persist;
-  player-centered follow mode tracks the avatar smoothly with no
-  reported-comfort regressions in the comfort pass.
+  without touching desktop; recorded `.crd` verifies; settings persist.
 
 ### M5 — Shell + builds
 - VR-native minimal menu (start survival, settings, quit), version/about.
