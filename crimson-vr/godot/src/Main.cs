@@ -594,6 +594,9 @@ public partial class Main : Node3D
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+                // Flip V: on the flat PlaneMesh the cursor art read upside down from
+                // the player's downward view; this rights it (texture top -> far edge).
+                Uv1Scale = new Vector3(1.0f, -1.0f, 1.0f),
                 NoDepthTest = true,
                 RenderPriority = 4,
             },

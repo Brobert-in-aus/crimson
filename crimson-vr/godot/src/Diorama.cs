@@ -519,7 +519,11 @@ public sealed partial class Diorama : Node3D
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
-                vec2 cell = UV * inst.z + inst.xy;
+                // Inset the atlas cell by 1px each side (matches the native effect
+                // pool's cell_size-2px clamp) so filter_linear can't bleed the cell
+                // edge / neighbour into the quad.
+                vec2 texel = 1.0 / vec2(textureSize(sheet, 0));
+                vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
                 vec4 c = texture(sheet, cell);
                 ALBEDO = c.rgb * col.rgb;
                 ALPHA = c.a * col.a;
@@ -541,7 +545,10 @@ public sealed partial class Diorama : Node3D
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
-                vec2 cell = UV * inst.z + inst.xy;
+                // Inset the cell 1px each side (native cell_size-2px clamp) so the
+                // additive blend doesn't add the bled cell edge as a visible square.
+                vec2 texel = 1.0 / vec2(textureSize(sheet, 0));
+                vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
                 vec4 c = texture(sheet, cell);
                 // Premultiplied so the additive add carries the life-fade (col.a) and
                 // the texture shape (c.a) regardless of how blend_add treats ALPHA.
@@ -832,7 +839,10 @@ public sealed partial class Diorama : Node3D
             void fragment() {
                 vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
-                ALBEDO = c.rgb * col.rgb;
+                // inst.w = hit-flash intensity: ADD white (a multiply tint toward
+                // white does nothing, so the flash was invisible). Brightens the
+                // opaque sprite toward white on hit.
+                ALBEDO = c.rgb * col.rgb + vec3(inst.w) * c.a;
                 ALPHA = c.a * col.a;
             }
             """,
@@ -1352,11 +1362,14 @@ public sealed partial class Diorama : Node3D
                 int cells = grid * grid;
                 frame = frame < 0 ? 0 : (frame >= cells ? cells - 1 : frame);
                 float inv = 1.0f / grid;
+                // Custom data = (uvOffX, uvOffY, uvScale, hitFlash). The w channel
+                // drives the additive white hit-flash in TintedSpriteShader.
+                float flash = cur.HitFlash > 0.0f ? Mathf.Clamp(cur.HitFlash / 0.2f, 0.0f, 1.0f) : 0.0f;
                 layer.Mesh.SetInstanceCustomData(i, new Color(
                     (frame % grid) * inv,
                     (frame / grid) * inv,
                     inv,
-                    0.0f));
+                    flash));
             }
 
             if (layer.UvIndexed)
@@ -1409,16 +1422,8 @@ public sealed partial class Diorama : Node3D
         {
             a = Mathf.Max(0.0f, a + e.LifecycleStage * 0.1f);
         }
-        if (e.HitFlash > 0.0f)
-        {
-            // White flash on hit (timer starts at 0.2): brighten toward white by
-            // the remaining fraction. First-pass approximation of the original's
-            // additive flash (no Python render reference) — tune in-headset.
-            float f = Mathf.Clamp(e.HitFlash / 0.2f, 0.0f, 1.0f);
-            r = Mathf.Lerp(r, 1.0f, f);
-            g = Mathf.Lerp(g, 1.0f, f);
-            b = Mathf.Lerp(b, 1.0f, f);
-        }
+        // The hit-flash is now applied ADDITIVELY in TintedSpriteShader (via the
+        // custom-data w channel) — a multiply tint toward white did nothing.
         return new Color(r, g, b, a);
     }
 
