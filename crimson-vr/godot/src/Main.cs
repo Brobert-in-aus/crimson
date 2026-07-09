@@ -125,9 +125,15 @@ public partial class Main : Node3D
     private WorldEnvironment _worldEnv = null!;
     private bool _passthroughActive;
 
-    // Skybox-mode grey fog (rapid view-distance falloff). First-pass; tune in-headset.
+    // Skybox-mode grey fog. THEMING ONLY: depth-mode fog with an onset distance
+    // so nothing near the player is tinted — the diorama and menus (< ~1.5 m)
+    // stay fog-free, the ramp starts at FogStartMeters and reaches full grey by
+    // FogEndMeters (hiding the world-floor edge at ~12 m). The old exponential
+    // fog (density 0.35) was already ~30% opaque at 1 m, visibly greying the
+    // tabletop and washing contrast out of the whole diorama.
     private static readonly Color FogGrey = new(0.55f, 0.55f, 0.58f);
-    private const float FogDensityValue = 0.35f;
+    private const float FogStartMeters = 3.0f;
+    private const float FogEndMeters = 12.0f;
 
     private bool _recenterPending = true;
     private bool _prevRecenterHeld;
@@ -447,15 +453,20 @@ public partial class Main : Node3D
             AmbientLightSource = Godot.Environment.AmbientSource.Color,
             AmbientLightColor = new Color(0.4f, 0.4f, 0.45f),
             AmbientLightEnergy = 1.0f,
-            // Thick grey fog: rapid view-distance falloff so the diorama reads as
-            // sitting in a contained foggy space (and it masks the off-arena spawn
-            // margin, §6). FogSkyAffect greys the background sky to match. Disabled
-            // in passthrough (TrySetupPassthrough) so the real room shows through.
-            // Density/color are first-pass — tune in-headset.
+            // Grey fog so the diorama reads as sitting in a contained foggy space
+            // (and it masks the off-arena spawn margin, §6). DEPTH mode with an
+            // onset: fog-free out to FogStartMeters (the diorama/menus are never
+            // tinted), full grey by FogEndMeters. FogSkyAffect greys the
+            // background sky to match. Disabled in passthrough
+            // (TrySetupPassthrough) so the real room shows through.
             FogEnabled = true,
+            FogMode = Godot.Environment.FogModeEnum.Depth,
             FogLightColor = FogGrey,
             FogLightEnergy = 1.0f,
-            FogDensity = FogDensityValue,
+            FogDepthBegin = FogStartMeters,
+            FogDepthEnd = FogEndMeters,
+            FogDepthCurve = 1.0f,
+            FogDensity = 1.0f, // depth mode: max opacity at FogDepthEnd
             FogSkyAffect = 1.0f,
             FogAerialPerspective = 0.0f,
         };
