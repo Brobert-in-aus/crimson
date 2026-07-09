@@ -80,6 +80,11 @@ public partial class Main : Node3D
     private readonly bool[] _prevTrigger = new bool[2];
     private readonly bool[] _prevGrip = new bool[2];
 
+    // Haptics (slice 7): fire pulse on the aim hand, a strong both-hand pulse when
+    // hit, a tick on reload complete. Deltas tracked tick-to-tick.
+    private float _prevHealth;
+    private bool _prevReloadActive;
+
     private bool _xrActive;
 
     // Display mode (PLAN §6 / MR): Auto uses passthrough when the headset supports
@@ -463,11 +468,15 @@ public partial class Main : Node3D
 
         Sim.TickResult result = _sim.Tick(input);
         SnapshotView snap = _sim.CaptureSnapshot();
+        float health = _prevHealth;
+        bool reloadActive = _prevReloadActive;
         if (snap.Header.PlayerCount > 0)
         {
             Sim.PlayerSnap p = snap.Players[0];
             _playerGame = new Vector2(p.X, p.Y);
             _hud.Update(result, p);
+            health = p.Health;
+            reloadActive = p.ReloadActive != 0;
         }
         _perkMenu.Update(snap);
         _diorama.PushSnapshot(snap);
@@ -479,6 +488,39 @@ public partial class Main : Node3D
         // Play the audio this tick emitted, positioned relative to the player.
         AudioEventsView audio = _sim.CaptureAudio();
         _audio.Route(audio, _playerGame);
+
+        UpdateHaptics(audio, health, reloadActive);
+    }
+
+    /// <summary>Haptics from this tick: a light fire pulse on the aim hand, a
+    /// strong both-hand pulse when the player takes damage, and a tick on reload
+    /// complete. Uses the OpenXR "haptic" output action.</summary>
+    private void UpdateHaptics(in AudioEventsView audio, float health, bool reloadActive)
+    {
+        XRController3D aim = _handSwap ? _leftHand : _rightHand;
+        if (audio.Header.ShotCount > 0)
+        {
+            Pulse(aim, 0.3f, 0.04f);
+        }
+        if (health < _prevHealth - 0.001f)
+        {
+            Pulse(_leftHand, 0.8f, 0.12f);
+            Pulse(_rightHand, 0.8f, 0.12f);
+        }
+        if (_prevReloadActive && !reloadActive)
+        {
+            Pulse(aim, 0.5f, 0.05f);
+        }
+        _prevHealth = health;
+        _prevReloadActive = reloadActive;
+    }
+
+    private static void Pulse(XRController3D hand, float amplitude, float duration)
+    {
+        if (hand.GetHasTrackingData())
+        {
+            hand.TriggerHapticPulse("haptic", 0.0, amplitude, duration, 0.0);
+        }
     }
 
     private HandSample SampleHand(XRController3D hand, int index)
