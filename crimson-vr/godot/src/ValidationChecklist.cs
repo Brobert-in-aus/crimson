@@ -54,6 +54,7 @@ public sealed partial class ValidationChecklist : Node3D
         new(0.8f, 0.35f, 0.3f),   // 2 fail
     };
     private static readonly string[] StatePrefix = { "[ ] ", "[PASS] ", "[FAIL] " };
+    private static readonly string[] StateName = { "untested", "PASS", "FAIL" };
 
     private readonly VrButton[] _rows = new VrButton[PerPage];
     private VrButton _prev = null!;
@@ -215,6 +216,36 @@ public sealed partial class ValidationChecklist : Node3D
         }
         _results[id] = state;
         ApplyRow(row, idx);
+        // Log every change so it's retrievable off-device (adb logcat | grep CVRCHECK).
+        GD.Print($"CVRCHECK item {id} -> {StateName[state]}");
         OnItemChanged?.Invoke(id, state);
+    }
+
+    /// <summary>Print the full pass/fail summary to the log (Android logcat) so
+    /// results can be pulled off the Quest with `adb logcat | grep CVRCHECK`.</summary>
+    public void LogResults()
+    {
+        int pass = 0;
+        int fail = 0;
+        int untested = 0;
+        GD.Print("CVRCHECK ===== checklist results =====");
+        foreach ((string id, string label) in Items)
+        {
+            int state = _results.TryGetValue(id, out int v) ? Mathf.Clamp(v, 0, 2) : 0;
+            if (state == 1)
+            {
+                pass++;
+            }
+            else if (state == 2)
+            {
+                fail++;
+            }
+            else
+            {
+                untested++;
+            }
+            GD.Print($"CVRCHECK [{StateName[state]}] {id} - {label}");
+        }
+        GD.Print($"CVRCHECK ===== pass={pass} fail={fail} untested={untested} / {Items.Length} =====");
     }
 }

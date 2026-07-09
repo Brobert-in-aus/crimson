@@ -715,6 +715,7 @@ public partial class Main : Node3D
     private void CloseChecklist()
     {
         _checklistOpen = false;
+        _checklist.LogResults(); // dump a full summary to logcat on close
         _checklist.SetShown(false);
         if (_pauseMenu.IsPaused)
         {
