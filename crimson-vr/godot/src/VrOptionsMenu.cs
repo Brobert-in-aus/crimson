@@ -49,7 +49,8 @@ public sealed partial class VrOptionsMenu : Node3D
         // is unused for now; kept in the signature for a future fitted panel skin.)
         _ = panelTex;
 
-        float y = hp * 0.5f - s * 0.06f;
+        float y = hp * 0.5f - s * 0.05f;
+        AddTitleBacking(s, y, s * 0.44f, s * 0.075f);
         AddChild(new Label3D
         {
             Text = "Options",
@@ -58,17 +59,17 @@ public sealed partial class VrOptionsMenu : Node3D
             Modulate = TitleColor,
             OutlineSize = 24,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, y, 0.0f),
+            Position = new Vector3(0.0f, y, 0.002f),
             NoDepthTest = true,
         });
-        y -= s * 0.13f;
+        y -= s * 0.17f;
 
         _sfx = AddSliderRow("Sound volume", s, y, 0, 10, sfx, rectOn, rectOff, v => OnSfxChanged?.Invoke(v));
-        y -= s * 0.13f;
+        y -= s * 0.18f;
         _music = AddSliderRow("Music volume", s, y, 0, 10, music, rectOn, rectOff, v => OnMusicChanged?.Invoke(v));
-        y -= s * 0.13f;
+        y -= s * 0.18f;
         _detail = AddSliderRow("Graphics detail", s, y, 1, 5, detail, rectOn, rectOff, v => OnDetailChanged?.Invoke(v));
-        y -= s * 0.12f;
+        y -= s * 0.15f;
 
         _infoTexts = new VrCheckbox();
         AddChild(_infoTexts);
@@ -98,6 +99,8 @@ public sealed partial class VrOptionsMenu : Node3D
         string label, float s, float y, int min, int max, int value,
         Texture2D? rectOn, Texture2D? rectOff, Action<int> onChanged)
     {
+        float titleY = y + s * 0.08f; // more air between the title and its pips
+        AddTitleBacking(s, titleY, s * 0.4f, s * 0.06f);
         AddChild(new Label3D
         {
             Text = label,
@@ -106,7 +109,7 @@ public sealed partial class VrOptionsMenu : Node3D
             Modulate = new Color(0.9f, 0.92f, 0.98f),
             OutlineSize = 20,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
+            Position = new Vector3(0.0f, titleY, 0.002f),
             NoDepthTest = true,
         });
         var slider = new VrSegmentedSlider();
@@ -115,6 +118,25 @@ public sealed partial class VrOptionsMenu : Node3D
         slider.Position = new Vector3(0.0f, y, 0.0f);
         slider.OnValueChanged += v => onChanged(v);
         return slider;
+    }
+
+    /// <summary>A dark translucent backing strip behind a title so it reads as a
+    /// panel label rather than free-floating text against the terrain.</summary>
+    private void AddTitleBacking(float s, float y, float width, float height)
+    {
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(width, height) },
+            Position = new Vector3(0.0f, y, 0.0f),
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.04f, 0.05f, 0.08f, 0.72f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                RenderPriority = 25,
+            },
+        });
     }
 
     public void SetShown(bool visible)

@@ -19,12 +19,10 @@ namespace CrimsonVR;
 public sealed partial class VrMenuItem : Node3D
 {
     // Plate art aspect: ui_menuItem.png is 512x64, so height = width/8.
-    // ui_menuItem is a rail (left) + button plate (right); we crop to the plate
-    // region (UV x 0.55-1.0, ~230x64 px) so items match the submenu buttons — plate
-    // only, no rail. Aspect is that region: height = width * 64/230.
-    private const float PlateUvX0 = 0.55f;
-    private const float PlateUvW = 0.45f;
-    private const float PlateAspect = 64.0f / 230.0f;
+    // Full uncropped ui_menuItem art (rail on the left + button plate on the right),
+    // aspect 512x64 = 8:1. The label is right-aligned onto the plate (right edge).
+    private const float PlateAspect = 64.0f / 512.0f;
+    private const float PlateRightUv = 0.95f; // plate's right edge in the art
     // ui_itemTexts.png atlas: 128x256, one label row is 122x32 (visible 28 tall).
     private const float AtlasW = 128.0f;
     private const float AtlasH = 256.0f;
@@ -69,16 +67,9 @@ public sealed partial class VrMenuItem : Node3D
         _group = new Node3D { Position = new Vector3(0.0f, 0.0f, _proud) };
         AddChild(_group);
 
-        // The plate (ui_menuItem), cropped to the plate region so the item is just
-        // the button plate (no rail), matching the submenu buttons. Falls back to a
-        // translucent grey slab if the art isn't staged.
+        // The full ui_menuItem art (rail + plate). Falls back to a translucent grey
+        // slab if the art isn't staged.
         _plateMat = FlatTexMat(plateTex, new Color(0.55f, 0.57f, 0.65f, 0.9f), priority: 30);
-        if (plateTex != null)
-        {
-            _plateMat.TextureRepeat = false;
-            _plateMat.Uv1Scale = new Vector3(PlateUvW, 1.0f, 1.0f);
-            _plateMat.Uv1Offset = new Vector3(PlateUvX0, 0.0f, 0.0f);
-        }
         var plate = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
@@ -111,8 +102,10 @@ public sealed partial class VrMenuItem : Node3D
             var label = new MeshInstance3D
             {
                 Mesh = new QuadMesh { Size = new Vector2(labelW, labelH) },
-                // Plate is cropped to fill the item, so the label centres on it.
-                Position = new Vector3(0.0f, 0.0f, 0.002f),
+                // Right-align onto the plate: label's right edge at the plate's right
+                // edge (local x = (PlateRightUv-0.5)*width), so names of any length sit
+                // flush-right on the plate rather than centred over the rail.
+                Position = new Vector3((PlateRightUv - 0.5f) * width - labelW * 0.5f, 0.0f, 0.002f),
                 MaterialOverride = _labelMat,
             };
             _group.AddChild(label);

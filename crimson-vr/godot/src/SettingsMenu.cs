@@ -47,6 +47,7 @@ public sealed partial class SettingsMenu : Node3D
         float pitch = s * 0.16f; // > bh, so rows never overlap
         float y = s * 0.42f;     // top-down cursor
 
+        AddTitleBacking(y, s * 0.5f, s * 0.08f);
         var title = new Label3D
         {
             Text = "VR Settings",
@@ -55,7 +56,7 @@ public sealed partial class SettingsMenu : Node3D
             Modulate = new Color(0.45f, 0.72f, 1.0f), // blue neon, like the OG headings
             OutlineSize = 24,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, y, 0.0f),
+            Position = new Vector3(0.0f, y, 0.002f),
             NoDepthTest = true,
         };
         AddChild(title);
@@ -69,7 +70,9 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.OnPress += ToggleHandSwap;
         y -= pitch;
 
-        // Dead-zone: a value label above its slider.
+        // Dead-zone: a value label above its slider, with air between them.
+        float dzTitleY = y + s * 0.08f;
+        AddTitleBacking(dzTitleY, s * 0.42f, s * 0.06f);
         _deadZoneLabel = new Label3D
         {
             Text = DeadZoneText(deadZone),
@@ -78,7 +81,7 @@ public sealed partial class SettingsMenu : Node3D
             Modulate = new Color(0.9f, 0.92f, 0.98f),
             OutlineSize = 20,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
+            Position = new Vector3(0.0f, dzTitleY, 0.002f),
             NoDepthTest = true,
         };
         AddChild(_deadZoneLabel);
@@ -148,6 +151,24 @@ public sealed partial class SettingsMenu : Node3D
         _debugState = !_debugState;
         _debug.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
+    }
+
+    /// <summary>A dark translucent backing strip behind a title (see VrOptionsMenu).</summary>
+    private void AddTitleBacking(float y, float width, float height)
+    {
+        AddChild(new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(width, height) },
+            Position = new Vector3(0.0f, y, 0.0f),
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.04f, 0.05f, 0.08f, 0.72f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                RenderPriority = 25,
+            },
+        });
     }
 
     private string HandSwapText() => _swapState ? "Movement: Right hand" : "Movement: Left hand";

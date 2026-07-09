@@ -48,6 +48,9 @@ public sealed partial class PerkMenu : Node3D
             var card = new VrButton();
             AddChild(card);
             card.Build(_cardW, cardH, string.Empty, new Color(0.9f, 0.82f, 0.4f));
+            // Portrait cards: shrink + word-wrap the perk name to fit the card width
+            // (the default height-based sizing made long names overflow neighbours).
+            card.ConfigureLabel(arenaSideMeters * 0.00035f, _cardW * 0.85f);
             int idx = i;
             card.OnPress += () => Chosen = idx;
             card.Visible = false;

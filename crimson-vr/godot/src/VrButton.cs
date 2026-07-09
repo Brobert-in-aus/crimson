@@ -83,13 +83,6 @@ public sealed partial class VrButton : Node3D
     /// <param name="plate">Use the original ui_menuItem neon-bar plate as the button
     /// face (dark textured bar + centred label, matching the main menu), instead of
     /// the flat colour box. <paramref name="color"/> becomes a subtle accent tint.</param>
-    // The ui_menuItem art is a long rail on the left with the actual button plate
-    // on the right (measured: the tall panel spans UV x 0.55-0.98). Crop to that
-    // region so the plate fills the button and the centred label sits on it, not
-    // on the rail.
-    private const float PlateUvX0 = 0.55f;
-    private const float PlateUvW = 0.45f;
-
     public void Build(float width, float height, string? text, Color color, float proud = 0.02f, bool plate = false)
     {
         _halfW = width * 0.5f;
@@ -134,12 +127,6 @@ public sealed partial class VrButton : Node3D
             Transparency = _plate ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
-        if (_plate)
-        {
-            _mat.TextureRepeat = false;
-            _mat.Uv1Scale = new Vector3(PlateUvW, 1.0f, 1.0f);
-            _mat.Uv1Offset = new Vector3(PlateUvX0, 0.0f, 0.0f);
-        }
         _face = new MeshInstance3D
         {
             Mesh = _plate
@@ -177,6 +164,21 @@ public sealed partial class VrButton : Node3D
         {
             _label.Text = text;
         }
+    }
+
+    /// <summary>Override the auto-sized label with an explicit pixel size and a wrap
+    /// width (metres), for buttons where the default height-based sizing is wrong —
+    /// e.g. tall portrait perk cards, whose long names must shrink and word-wrap to
+    /// fit the card rather than overflow into their neighbours.</summary>
+    public void ConfigureLabel(float pixelSize, float wrapWidthMeters)
+    {
+        if (_label == null)
+        {
+            return;
+        }
+        _label.PixelSize = pixelSize;
+        _label.Width = wrapWidthMeters / pixelSize; // Label3D.Width is in font pixels
+        _label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
     }
 
     /// <summary>Recolor the button (e.g. a checklist item changing pass/fail).</summary>

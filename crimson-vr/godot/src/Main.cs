@@ -858,8 +858,16 @@ public partial class Main : Node3D
         {
             _checklist.PollPoke(p);
         }
-        if (_perkMenu.Active)
+        // Perk cards only while a pick is pending AND the pause menu isn't up (they
+        // share the space; the pause panel takes precedence). While paused the sim
+        // is frozen so Update won't run — hide the cards explicitly.
+        if (_perkMenu.Active && _pauseMenu.IsPaused)
         {
+            _perkMenu.Visible = false;
+        }
+        else if (_perkMenu.Active)
+        {
+            _perkMenu.Visible = true;
             _perkMenu.PollPoke(p);
             if (_perkMenu.Chosen >= 0)
             {
