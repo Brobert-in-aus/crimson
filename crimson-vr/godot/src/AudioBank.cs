@@ -55,6 +55,11 @@ public sealed partial class AudioBank : Node3D
     private float _sfxVolumeDb;
     private float _musicVolumeDb;
     private AudioStream? _levelUpStream; // one-shot UI cue on level up
+    // UI poke cues (button click / keyboard type / enter), loaded by name.
+    private AudioStream? _buttonClickStream;
+    private readonly List<AudioStream> _typeClickStreams = new();
+    private AudioStream? _typeEnterStream;
+    private int _typeClickNext;
 
     public void Configure(float arenaSideMeters, float worldSize)
     {
@@ -82,6 +87,17 @@ public sealed partial class AudioBank : Node3D
         if (ResourceLoader.Exists(levelUpPath))
         {
             _levelUpStream = ResourceLoader.Load<AudioStream>(levelUpPath);
+        }
+
+        // UI poke cues, loaded by name (mirrors the desktop menu/keyboard sfx).
+        _buttonClickStream = LoadUi("ui_buttonClick.ogg");
+        _typeEnterStream = LoadUi("ui_typeEnter.ogg");
+        foreach (string name in new[] { "ui_typeClick_01.ogg", "ui_typeClick_02.ogg" })
+        {
+            if (LoadUi(name) is AudioStream s)
+            {
+                _typeClickStreams.Add(s);
+            }
         }
 
         if (manifest?.sfx is not { Length: > 0 } files)
@@ -251,6 +267,40 @@ public sealed partial class AudioBank : Node3D
         AudioStreamPlayer3D p = _pool[_next];
         _next = (_next + 1) % _pool.Length;
         p.Stream = _levelUpStream;
+        p.Position = Vector3.Zero;
+        p.Play();
+    }
+
+    private static AudioStream? LoadUi(string name)
+    {
+        string path = AudioDir + name;
+        return ResourceLoader.Exists(path) ? ResourceLoader.Load<AudioStream>(path) : null;
+    }
+
+    /// <summary>UI poke cue kinds (matches VrButton.ClickSound).</summary>
+    public const int UiButton = 0;
+    public const int UiType = 1;
+    public const int UiEnter = 2;
+
+    /// <summary>Play a UI poke cue (button click / keyboard type / enter) at the
+    /// arena centre. Driven by VrButton.OnAnyPress so every poke button clicks.</summary>
+    public void PlayUi(int kind)
+    {
+        AudioStream? stream = kind switch
+        {
+            UiType => _typeClickStreams.Count > 0
+                ? _typeClickStreams[_typeClickNext++ % _typeClickStreams.Count]
+                : null,
+            UiEnter => _typeEnterStream,
+            _ => _buttonClickStream,
+        };
+        if (stream == null || _pool.Length == 0)
+        {
+            return;
+        }
+        AudioStreamPlayer3D p = _pool[_next];
+        _next = (_next + 1) % _pool.Length;
+        p.Stream = stream;
         p.Position = Vector3.Zero;
         p.Play();
     }

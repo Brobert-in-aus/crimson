@@ -59,6 +59,15 @@ public sealed partial class VrButton : Node3D
     /// <summary>Fired once when the button is pushed past the press depth.</summary>
     public event Action? OnPress;
 
+    /// <summary>Global poke-click hook: fired (with this button's <see cref="ClickSound"/>)
+    /// on every press-down edge, so a single wiring in Main plays the UI click cue for
+    /// every diegetic button without per-button plumbing.</summary>
+    public static Action<int>? OnAnyPress;
+
+    /// <summary>Which UI cue this button plays on press (AudioBank.UiButton/UiType/
+    /// UiEnter). Default is the menu button click; the keyboard sets its keys to Type.</summary>
+    public int ClickSound;
+
     /// <summary>True while the button is currently held in (for press-and-hold, e.g.
     /// the perk '?' description popup).</summary>
     public bool IsPressed => _pressed;
@@ -185,6 +194,30 @@ public sealed partial class VrButton : Node3D
         _label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
     }
 
+    /// <summary>Fade the whole button in/out (0 = invisible, 1 = opaque) for the
+    /// perk-pick cross-fade. Modulates the face + label alpha; enables alpha
+    /// transparency so a flat-colour face can fade. 1.0 restores the normal look.</summary>
+    public void SetFade(float alpha)
+    {
+        alpha = Mathf.Clamp(alpha, 0.0f, 1.0f);
+        if (_mat != null)
+        {
+            if (alpha < 1.0f && _mat.Transparency == BaseMaterial3D.TransparencyEnum.Disabled)
+            {
+                _mat.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+            }
+            Color c = _mat.AlbedoColor;
+            _mat.AlbedoColor = new Color(c.R, c.G, c.B, alpha);
+        }
+        if (_label != null)
+        {
+            Color m = _label.Modulate;
+            _label.Modulate = new Color(m.R, m.G, m.B, alpha);
+            Color o = _label.OutlineModulate;
+            _label.OutlineModulate = new Color(o.R, o.G, o.B, alpha);
+        }
+    }
+
     /// <summary>Recolor the button (e.g. a checklist item changing pass/fail).</summary>
     public void SetColor(Color color)
     {
@@ -246,6 +279,7 @@ public sealed partial class VrButton : Node3D
         }
         else if (nowPressed && !_pressed && _armed && Time.GetTicksMsec() >= _readyAtMs)
         {
+            OnAnyPress?.Invoke(ClickSound);
             OnPress?.Invoke();
         }
         _pressed = nowPressed;

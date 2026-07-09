@@ -52,6 +52,7 @@ public sealed partial class VirtualKeyboard : Node3D
             var b = new VrButton();
             AddChild(b);
             b.Build(kw, kh, ch.ToString(), new Color(0.5f, 0.55f, 0.66f));
+            b.ClickSound = AudioBank.UiType;
             b.Position = new Vector3(startX + c * (kw + gap), rowTop - r * (kh + gap), 0.0f);
             b.OnPress += () => Append(ch);
             _keys.Add(b);
@@ -60,9 +61,9 @@ public sealed partial class VirtualKeyboard : Node3D
         // Control row under the letters: Space / Del / Enter.
         int rows = (Letters.Length + Cols - 1) / Cols;
         float ctrlY = rowTop - rows * (kh + gap);
-        AddKey("Space", kw * 2.2f, kh, startX + kw * 1.4f, ctrlY, () => Append(' '));
-        AddKey("Del", kw * 1.6f, kh, startX + kw * 3.4f, ctrlY, Backspace, new Color(0.6f, 0.5f, 0.5f));
-        AddKey("Enter", kw * 2.0f, kh, startX + kw * 5.4f, ctrlY, Submit, new Color(0.4f, 0.7f, 0.45f));
+        AddKey("Space", kw * 2.2f, kh, startX + kw * 1.4f, ctrlY, () => Append(' '), clickSound: AudioBank.UiType);
+        AddKey("Del", kw * 1.6f, kh, startX + kw * 3.4f, ctrlY, Backspace, new Color(0.6f, 0.5f, 0.5f), AudioBank.UiType);
+        AddKey("Enter", kw * 2.0f, kh, startX + kw * 5.4f, ctrlY, Submit, new Color(0.4f, 0.7f, 0.45f), AudioBank.UiEnter);
 
         Visible = false;
     }
@@ -99,11 +100,12 @@ public sealed partial class VirtualKeyboard : Node3D
         }
     }
 
-    private void AddKey(string text, float w, float h, float x, float y, Action onPress, Color? color = null)
+    private void AddKey(string text, float w, float h, float x, float y, Action onPress, Color? color = null, int clickSound = AudioBank.UiButton)
     {
         var b = new VrButton();
         AddChild(b);
         b.Build(w, h, text, color ?? new Color(0.5f, 0.55f, 0.66f));
+        b.ClickSound = clickSound;
         b.Position = new Vector3(x, y, 0.0f);
         b.OnPress += onPress;
         _keys.Add(b);

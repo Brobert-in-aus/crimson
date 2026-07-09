@@ -157,6 +157,9 @@ public partial class Main : Node3D
         _audio = new AudioBank();
         _arenaRoot.AddChild(_audio);
         _audio.Configure(ArenaSideMeters, GameWorldSize);
+        // Every diegetic poke button plays a UI click cue (menu = click, keyboard
+        // keys = type, Enter = type-enter), via the global VrButton press hook.
+        VrButton.OnAnyPress = kind => _audio.PlayUi(kind);
 
         // HUD panel at the arena's near edge (health/ammo/level), also arena-local.
         _hud = new Hud();

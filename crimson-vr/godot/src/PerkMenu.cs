@@ -39,6 +39,12 @@ public sealed partial class PerkMenu : Node3D
 
     private bool _opened; // cards revealed (via the level-up button)
 
+    // Cross-fade: each new candidate set (first open, or the next accumulated pick)
+    // eases in over FadeMs so the swap reads clearly instead of popping.
+    private const ulong FadeMs = 220;
+    private ulong _fadeStartMs;
+    private int _setSig = int.MinValue; // signature of the visible set, to detect a swap
+
     /// <summary>True while a perk pick is available (Main pauses the sim + shows the
     /// level-up button). The cards themselves only appear once <see cref="Open"/>.</summary>
     public bool Pending { get; private set; }
@@ -144,7 +150,21 @@ public sealed partial class PerkMenu : Node3D
             }
             _descPanel.Visible = false;
             _count = 0;
+            _setSig = int.MinValue; // next open counts as a fresh set
             return;
+        }
+
+        // Detect a new candidate set (first open or the next accumulated pick) and
+        // (re)start the fade-in.
+        int sig = count;
+        for (int i = 0; i < count; i++)
+        {
+            sig = sig * 131 + PerkChoice(snap.Header, i);
+        }
+        if (sig != _setSig)
+        {
+            _setSig = sig;
+            _fadeStartMs = Time.GetTicksMsec();
         }
 
         float total = count * _cardW + (count - 1) * _cardGap;
@@ -183,11 +203,17 @@ public sealed partial class PerkMenu : Node3D
         {
             return;
         }
+        // Ease the current set in. Applied AFTER PollPoke so VrButton's per-frame
+        // recolor (which resets alpha to opaque) doesn't clobber the fade.
+        ulong dt = Time.GetTicksMsec() - _fadeStartMs;
+        float fade = dt >= FadeMs ? 1.0f : Mathf.Clamp((float)dt / FadeMs, 0.0f, 1.0f);
         int held = -1;
         for (int i = 0; i < _count; i++)
         {
             _cards[i].PollPoke(probes);
             _help[i].PollPoke(probes);
+            _cards[i].SetFade(fade);
+            _help[i].SetFade(fade);
             if (_help[i].IsPressed)
             {
                 held = i;
