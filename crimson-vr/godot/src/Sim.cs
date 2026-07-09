@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 2;
+    public const uint ExpectedAbiVersion = 5;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -93,6 +93,8 @@ public static partial class Sim
         public uint SecondaryCount;
         public uint BonusCount;
         public uint ParticleCount;
+        public float EnergizerTimer; // ABI v3+: global energizer bonus timer
+        public float FreezeTimer;    // ABI v5+: global freeze bonus timer
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -130,6 +132,11 @@ public static partial class Sim
         public float LifecycleStage;
         public int TypeId;
         public uint Flags;
+        public float R; // ABI v4+: per-creature tint RGBA + hit-flash timer
+        public float G;
+        public float B;
+        public float A;
+        public float HitFlashTimer;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -196,6 +203,61 @@ public static partial class Sim
         public uint ReloadCount;
         public uint HitCount;
         public uint SfxCount;
+    }
+
+    // Static terrain generation info (crimson_host_terrain_info, ABI v3). The
+    // base ground is stamped once from three atlas slots seeded by TerrainSeed;
+    // query once after session create.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TerrainInfo
+    {
+        public int Slot0; // base atlas slot (ter/ sheet index)
+        public int Slot1; // overlay atlas slot
+        public int Slot2; // detail atlas slot
+        public uint TerrainSeed;
+        public int TerrainSize;
+        public float WorldSize;
+    }
+
+    // Terrain FX drained per tick (crimson_host_terrain_fx, ABI v3). Header then
+    // packed arrays: TerrainDecalSnap[] (blood/scorch splats), then
+    // TerrainCorpseSnap[] (rotated corpse stamps on creature death). One-shot
+    // events -> paint into a persistent decal layer; do not treat as state.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TerrainFxHeader
+    {
+        public uint Version;
+        public uint DecalCount;
+        public uint CorpseCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TerrainDecalSnap
+    {
+        public int EffectId; // ter/ decal atlas frame
+        public float X;
+        public float Y;
+        public float Width;
+        public float Height;
+        public float Rotation;
+        public float R;
+        public float G;
+        public float B;
+        public float A;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TerrainCorpseSnap
+    {
+        public int CreatureTypeId; // bodyset/creature sheet id (7 = ping-pong fallback)
+        public float X; // top-left x
+        public float Y; // top-left y
+        public float Rotation;
+        public float Scale;
+        public float R;
+        public float G;
+        public float B;
+        public float A;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -267,6 +329,12 @@ public static partial class Sim
 
     [LibraryImport(LibName, EntryPoint = "crimson_host_audio_events")]
     public static partial int AudioEvents(ulong handle, Span<byte> buf, ref uint len);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_terrain_info")]
+    public static partial int TerrainInfoNative(ulong handle, out TerrainInfo info);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_terrain_fx")]
+    public static partial int TerrainFx(ulong handle, Span<byte> buf, ref uint len);
 
     public static string LastError()
     {

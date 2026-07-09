@@ -36,9 +36,14 @@ public sealed partial class Diorama : Node3D
         public Vector2 Game;
         public float Angle;
         public float SizeGame;
-        public float AnimPhase; // creatures only; drives per-instance frame
-        public uint Flags;      // creatures only; anim strip/mirror/shock bits
-        public int TypeId;      // projectiles/secondaries only; per-type glow tint
+        public float AnimPhase;      // creatures only; drives per-instance frame
+        public uint Flags;           // creatures only; anim strip/mirror/shock bits
+        public int TypeId;           // projectiles/secondaries only; per-type glow tint
+        public float MaxHp;          // creatures only; energizer gates on max_hp<500
+        public float LifecycleStage; // creatures only; <0 fades the death sprite
+        public Color BaseColor;      // creatures only; per-creature tint multiplier
+        public float HitFlash;       // creatures only; white hit-flash timer
+        public int Frame;            // UvIndexed layers (bonuses); atlas cell index
     }
 
     private sealed class Layer
@@ -69,6 +74,14 @@ public sealed partial class Diorama : Node3D
         // the sprite matches the sim hit radius instead of overshooting it.
         public bool ClampRefSize;
 
+        // Creature layers: apply the energizer-blue + lifecycle-fade tint per
+        // instance (draw.py draw_creatures) via MultiMesh instance colors.
+        public bool Tinted;
+
+        // Bonus layer: pick the atlas cell per instance from Ent.Frame (a fixed
+        // grid, no anim), written to custom data like the animated path.
+        public bool UvIndexed;
+
         public Layer(int capacity)
         {
             Prev = new Ent[capacity];
@@ -82,7 +95,7 @@ public sealed partial class Diorama : Node3D
             CurrCount = 0;
         }
 
-        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0, int typeId = 0)
+        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0, int typeId = 0, float maxHp = 0.0f, float lifecycleStage = 16.0f, Color? baseColor = null, float hitFlash = 0.0f, int frame = 0)
         {
             if (CurrCount >= Curr.Length)
             {
@@ -96,6 +109,11 @@ public sealed partial class Diorama : Node3D
                 AnimPhase = animPhase,
                 Flags = flags,
                 TypeId = typeId,
+                MaxHp = maxHp,
+                LifecycleStage = lifecycleStage,
+                BaseColor = baseColor ?? Colors.White,
+                HitFlash = hitFlash,
+                Frame = frame,
             };
         }
     }
@@ -140,6 +158,7 @@ public sealed partial class Diorama : Node3D
 
     private float _arenaSideMeters;
     private float _worldSize;
+    private float _energizerTimer; // global energizer bonus timer (snapshot header)
 
     private Layer _players = null!;
     private readonly Dictionary<int, Layer> _creatureLayers = new();
@@ -171,6 +190,53 @@ public sealed partial class Diorama : Node3D
     // (uv offset + scale) from the bake; per-instance UV + color via the shader.
     private MultiMesh? _particles;
     private readonly Dictionary<int, Vector3> _effectUv = new(); // effect_id -> (offX, offY, scale)
+
+    // Freeze overlay (draw_freeze_overlay): while the global freeze bonus is
+    // active (ABI v5 header), each creature wears a FREEZE_SHATTER frame from
+    // particles.png. One shared mesh, drawn over the creatures at tick rate.
+    private MultiMesh? _freezeMesh;
+    private float _freezeTimer;
+    private const int FreezeShatterEffectId = 0x0E; // EffectId.FREEZE_SHATTER
+    private const int FreezeCap = 1024;
+
+    // Terrain FX (ABI v3, PLAN §6): blood/scorch splats + corpse stamps drained
+    // per tick (crimson_host_terrain_fx). The originals bake these permanently
+    // into the ground; here each is a persistent flat quad accumulated into a
+    // ring-buffer MultiMesh (oldest overwritten past capacity). Blood splats reuse
+    // particles.png via the SAME effect_id -> UV table as sprite-effects; corpse
+    // stamps use bodyset.png (per-type frame). Both draw UNDER the living sprites.
+    private MultiMesh? _decals;   // blood/scorch splats (particles.png)
+    private int _decalCursor;
+    private int _decalCount;
+    private const int DecalCap = 4096;
+    private const float DecalLift = 0.0016f; // just above terrain, below shadows
+
+    private MultiMesh? _corpses;  // corpse stamps (bodyset.png)
+    private int _corpseCursor;
+    private int _corpseCount;
+    private const int CorpseCap = 1024;
+    private const float CorpseLift = 0.0018f; // above blood, below shadows
+    private int _corpseGrid = 4;
+    private float _corpseUvScale = 0.25f;
+    private readonly Dictionary<int, int> _corpseFrames = new(); // type_id -> bodyset frame
+
+    // Arena floor (PLAN §6): a ground plane textured with the terrain base slot
+    // (ABI terrain-info), so the diorama sits above a real floor in skybox mode
+    // rather than a void. Extends a little past the playfield to cover the
+    // off-arena spawn margin (§6); grey fog fades the edges. Texture is applied
+    // once the session's terrain slots are known (ApplyTerrainInfo).
+    private MeshInstance3D? _floor;
+    private StandardMaterial3D? _floorMaterial;
+    private readonly Dictionary<int, string> _terrainSlots = new(); // slot -> sheet
+    private const float FloorMarginScale = 1.3f; // floor size vs playfield side
+    private const float FloorY = -0.001f;        // just below the decal plane
+    private const float FloorTile = 4.0f;        // ground texture repeats across the floor
+
+    // Bonus icons (bonuses.png, 4x4 grid): bonus_id -> icon frame. Rendered on
+    // the _bonuses layer via per-instance UV (Layer.UvIndexed). Icon-only for now
+    // (the bubble container + pulse/rotate are refinements).
+    private readonly Dictionary<int, int> _bonusIcons = new();
+    private int _bonusGrid = 4;
 
     // Per-type projectile glow tint (known_proj_rgb, projectile_render_registry.py).
     // Colors only (not asset-derived); default is the tan bullet glow.
@@ -240,11 +306,14 @@ public sealed partial class Diorama : Node3D
         // finding: the player reads on a higher plane, which is wanted).
         _projectiles = BuildStreakLayer(ProjectileCap, lift: 0.012f, sizeScale: 5.0f, renderPriority: 20);
         _secondaries = BuildStreakLayer(SecondaryCap, lift: 0.012f, sizeScale: 7.0f, renderPriority: 20);
-        _bonuses = BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift: 0.006f, sizeScale: 14.0f, renderPriority: 25);
+        _bonuses = BuildBonusLayer(manifest);
 
+        BuildFloor(manifest);
         BuildShadows();
         BuildFx();
         BuildParticles(manifest);
+        BuildDecals(manifest);
+        BuildCorpses(manifest);
 
         if (DebugFacing)
         {
@@ -331,11 +400,15 @@ public sealed partial class Diorama : Node3D
             return BuildColorLayer(capacity, fallback, lift, sizeScale);
         }
 
-        var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = desc.priority };
+        // TintedSpriteShader (not SpriteShader) so the per-instance energizer +
+        // lifecycle tint (MultiMesh COLOR) modulates the sprite; instances default
+        // to white (no tint) when neither effect is active.
+        var material = new ShaderMaterial { Shader = TintedSpriteShader, RenderPriority = desc.priority };
         material.SetShaderParameter("sheet", tex);
-        Layer layer = BuildLayer(capacity, material, lift, sizeScale, useCustomData: true);
+        Layer layer = BuildLayer(capacity, material, lift, sizeScale, useCustomData: true, useColors: true);
         layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
         layer.Animated = true;
+        layer.Tinted = true;
         layer.Grid = Mathf.Max(desc.grid, 1);
         layer.BaseFrame = desc.baseFrame;
         layer.MirrorLong = desc.mirror;
@@ -455,6 +528,66 @@ public sealed partial class Diorama : Node3D
             VisibleInstanceCount = 0,
         };
         AddChild(new MultiMeshInstance3D { Multimesh = _particles, MaterialOverride = material });
+
+        // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
+        // 24 sits just over the particle layer.
+        var freezeMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 24 };
+        freezeMat.SetShaderParameter("sheet", tex);
+        _freezeMesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = FreezeCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _freezeMesh, MaterialOverride = freezeMat });
+    }
+
+    /// <summary>Draw the freeze-shatter overlay on every creature while the global
+    /// freeze bonus is active (draw_freeze_overlay). Tick-rate, like the particle
+    /// pass; alpha = clamp(min(freeze,1) * 0.7).</summary>
+    private void RenderFreezeOverlay(in SnapshotView view)
+    {
+        if (_freezeMesh == null)
+        {
+            return;
+        }
+        float freeze = _freezeTimer;
+        if (freeze <= 0.0f || !_effectUv.TryGetValue(FreezeShatterEffectId, out Vector3 uv))
+        {
+            _freezeMesh.VisibleInstanceCount = 0;
+            return;
+        }
+        float fade = freeze >= 1.0f ? 1.0f : Mathf.Clamp(freeze, 0.0f, 1.0f);
+        float alpha = Mathf.Clamp(fade * 0.7f, 0.0f, 1.0f);
+        if (alpha <= 1e-3f)
+        {
+            _freezeMesh.VisibleInstanceCount = 0;
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        int n = 0;
+        int idx = 0;
+        foreach (Sim.CreatureSnap c in view.Creatures)
+        {
+            if (n >= FreezeCap)
+            {
+                break;
+            }
+            float size = Mathf.Max(c.Size * k, 0.001f);
+            float rot = idx * 0.01f + c.Heading; // matches draw_freeze_overlay
+            Vector3 pos = Mapper.GameToArenaLocal(new Vector2(c.X, c.Y), _arenaSideMeters, _worldSize)
+                + new Vector3(0.0f, 0.009f, 0.0f); // just over the creature plane
+            Basis basis = FlatQuadBasis(rot, size, size);
+            _freezeMesh.SetInstanceTransform(n, new Transform3D(basis, pos));
+            _freezeMesh.SetInstanceColor(n, new Color(1.0f, 1.0f, 1.0f, alpha));
+            _freezeMesh.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+            n++;
+            idx++;
+        }
+        _freezeMesh.VisibleInstanceCount = n;
     }
 
     /// <summary>Draw the live sprite-effect entries from one snapshot (called at
@@ -498,6 +631,272 @@ public sealed partial class Diorama : Node3D
             n++;
         }
         _particles.VisibleInstanceCount = n;
+    }
+
+    /// <summary>Bonus pickup layer: one textured quad per bonus, per-instance UV
+    /// selecting the icon frame from bonuses.png (4x4). Falls back to the old
+    /// cyan colored quad when the sheet is absent.</summary>
+    private Layer BuildBonusLayer(SpriteManifest? manifest)
+    {
+        const float lift = 0.006f;
+        if (manifest?.bonuses is not { } bd)
+        {
+            return BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 25);
+        }
+        string path = SpriteDir + bd.sheet;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            return BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 25);
+        }
+        _bonusGrid = Mathf.Max(bd.grid, 1);
+        foreach (KeyValuePair<string, int> kv in bd.icons)
+        {
+            if (int.TryParse(kv.Key, out int id))
+            {
+                _bonusIcons[id] = kv.Value;
+            }
+        }
+        var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = bd.priority };
+        material.SetShaderParameter("sheet", tex);
+        // Icons read ~32 game units in the reference; sizeScale scales from `size`
+        // which we pass as ~32, so use 1.0 and pass a fixed size in PushSnapshot.
+        Layer layer = BuildLayer(BonusCap, material, lift, sizeScale: 1.0f, useCustomData: true);
+        layer.UvIndexed = true;
+        layer.Grid = _bonusGrid;
+        return layer;
+    }
+
+    /// <summary>Build the arena floor plane (neutral grey until the terrain
+    /// texture is applied via ApplyTerrainInfo). A flat PlaneMesh (normal +Y)
+    /// centred on the playfield, extended by FloorMarginScale so entities that
+    /// spawn just outside the bounds still stand on ground.</summary>
+    private void BuildFloor(SpriteManifest? manifest)
+    {
+        if (manifest?.terrain?.slots is { } slots)
+        {
+            foreach (KeyValuePair<string, string> kv in slots)
+            {
+                if (int.TryParse(kv.Key, out int i))
+                {
+                    _terrainSlots[i] = kv.Value;
+                }
+            }
+        }
+        _floorMaterial = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.26f, 0.26f, 0.29f), // neutral fallback ground
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            Uv1Scale = new Vector3(FloorTile, FloorTile, 1.0f),
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+        };
+        float s = _arenaSideMeters * FloorMarginScale;
+        _floor = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(s, s) },
+            MaterialOverride = _floorMaterial,
+            Position = new Vector3(0.0f, FloorY, 0.0f),
+        };
+        AddChild(_floor);
+    }
+
+    /// <summary>Texture the floor from the session's base terrain slot (ABI
+    /// terrain-info). Called once the session exists; leaves the grey fallback if
+    /// the terrain sheet isn't baked.</summary>
+    public void ApplyTerrainInfo(Sim.TerrainInfo info)
+    {
+        if (_floorMaterial == null || !_terrainSlots.TryGetValue(info.Slot0, out string? file))
+        {
+            return;
+        }
+        string path = SpriteDir + file;
+        if (ResourceLoader.Exists(path) && ResourceLoader.Load<Texture2D>(path) is Texture2D tex)
+        {
+            _floorMaterial.AlbedoTexture = tex;
+        }
+        else
+        {
+            GD.PushWarning($"CrimsonVR: terrain sheet missing ({path}); grey floor");
+        }
+    }
+
+    // Tinted sprite shader (corpses): per-instance UV cell (INSTANCE_CUSTOM) and
+    // per-instance rgba tint (COLOR), nearest-filtered (bodyset frames have no
+    // cell inset, so linear would bleed adjacent frames). Alpha-blended,
+    // depth-write off so RenderPriority orders the flat ground layer.
+    private Shader? _tintedSpriteShader;
+    private Shader TintedSpriteShader => _tintedSpriteShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform sampler2D sheet : source_color, filter_nearest;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                ALBEDO = c.rgb * col.rgb;
+                ALPHA = c.a * col.a;
+            }
+            """,
+    };
+
+    /// <summary>Persistent blood/scorch splat layer (terrain-fx decals). Draws
+    /// from particles.png via the same effect_id -> UV table as the sprite-effect
+    /// particles, so it needs no extra assets. Absent particles -> no decals.</summary>
+    private void BuildDecals(SpriteManifest? manifest)
+    {
+        if (_effectUv.Count == 0 || manifest?.effects_sheet is not { } sheetName)
+        {
+            return; // BuildParticles ran first and found no particles.png
+        }
+        string path = SpriteDir + sheetName;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            return;
+        }
+        var material = new ShaderMaterial { Shader = ParticleShader, RenderPriority = -3 };
+        material.SetShaderParameter("sheet", tex);
+        _decals = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = DecalCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _decals, MaterialOverride = material });
+    }
+
+    /// <summary>Persistent corpse-stamp layer (terrain-fx corpses) from
+    /// bodyset.png (4x4 grid; per-type frame + &0xF fallback). Absent bodyset ->
+    /// no corpses (still runs).</summary>
+    private void BuildCorpses(SpriteManifest? manifest)
+    {
+        if (manifest?.corpses is not { } cd)
+        {
+            return;
+        }
+        string path = SpriteDir + cd.sheet;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            GD.PushWarning($"CrimsonVR: corpse sheet missing ({path}); no corpses");
+            return;
+        }
+        _corpseGrid = Mathf.Max(cd.grid, 1);
+        _corpseUvScale = 1.0f / _corpseGrid;
+        foreach (KeyValuePair<string, int> kv in cd.frames)
+        {
+            if (int.TryParse(kv.Key, out int typeId))
+            {
+                _corpseFrames[typeId] = kv.Value;
+            }
+        }
+        var material = new ShaderMaterial { Shader = TintedSpriteShader, RenderPriority = cd.priority };
+        material.SetShaderParameter("sheet", tex);
+        _corpses = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = true,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = CorpseCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = _corpses, MaterialOverride = material });
+    }
+
+    /// <summary>Append the terrain FX (blood/scorch splats + corpse stamps)
+    /// emitted this tick into the persistent decal/corpse ring buffers. Call once
+    /// per sim tick with the drained TerrainFxView; these are one-shot events, so
+    /// they accumulate rather than reset each tick.</summary>
+    public void RenderTerrainFx(in TerrainFxView fx)
+    {
+        float k = _arenaSideMeters / _worldSize;
+        if (_decals != null)
+        {
+            foreach (Sim.TerrainDecalSnap d in fx.Decals)
+            {
+                if (!_effectUv.TryGetValue(d.EffectId, out Vector3 uv))
+                {
+                    continue;
+                }
+                Vector3 pos = Mapper.GameToArenaLocal(new Vector2(d.X, d.Y), _arenaSideMeters, _worldSize)
+                    + new Vector3(0.0f, DecalLift, 0.0f);
+                Basis basis = FlatQuadBasis(d.Rotation, Mathf.Max(d.Width * k, 0.001f), Mathf.Max(d.Height * k, 0.001f));
+                _decals.SetInstanceTransform(_decalCursor, new Transform3D(basis, pos));
+                _decals.SetInstanceColor(_decalCursor, new Color(d.R, d.G, d.B, d.A));
+                _decals.SetInstanceCustomData(_decalCursor, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+                _decalCursor = (_decalCursor + 1) % DecalCap;
+                if (_decalCount < DecalCap)
+                {
+                    _decalCount++;
+                }
+            }
+            _decals.VisibleInstanceCount = _decalCount;
+        }
+
+        if (_corpses != null)
+        {
+            foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+            {
+                int frame = _corpseFrames.TryGetValue(c.CreatureTypeId, out int f) ? f : (c.CreatureTypeId & 0xF);
+                frame &= _corpseGrid * _corpseGrid - 1;
+                // Reference centres the corpse at top_left + scale*0.5 and rotates
+                // by heading - 90deg (grim.terrain_render corpse pass). Orientation
+                // convention needs an in-headset check (flag with the streaks).
+                Vector2 center = new(c.X + c.Scale * 0.5f, c.Y + c.Scale * 0.5f);
+                Vector3 pos = Mapper.GameToArenaLocal(center, _arenaSideMeters, _worldSize)
+                    + new Vector3(0.0f, CorpseLift, 0.0f);
+                float size = Mathf.Max(c.Scale * k, 0.002f);
+                Basis basis = FlatQuadBasis(c.Rotation - Mathf.Pi * 0.5f, size, size);
+                _corpses.SetInstanceTransform(_corpseCursor, new Transform3D(basis, pos));
+                _corpses.SetInstanceColor(_corpseCursor, new Color(c.R, c.G, c.B, c.A));
+                _corpses.SetInstanceCustomData(_corpseCursor, new Color(
+                    (frame % _corpseGrid) * _corpseUvScale,
+                    (frame / _corpseGrid) * _corpseUvScale,
+                    _corpseUvScale,
+                    0.0f));
+                _corpseCursor = (_corpseCursor + 1) % CorpseCap;
+                if (_corpseCount < CorpseCap)
+                {
+                    _corpseCount++;
+                }
+            }
+            _corpses.VisibleInstanceCount = _corpseCount;
+        }
+    }
+
+    /// <summary>Clear the accumulated terrain FX (blood/corpses). Call on session
+    /// restart so a fresh arena starts clean.</summary>
+    public void ResetTerrainFx()
+    {
+        _decalCursor = _decalCount = 0;
+        _corpseCursor = _corpseCount = 0;
+        if (_decals != null)
+        {
+            _decals.VisibleInstanceCount = 0;
+        }
+        if (_corpses != null)
+        {
+            _corpses.VisibleInstanceCount = 0;
+        }
+    }
+
+    /// <summary>A flat quad basis lying on the plane (normal +Y), rotated by
+    /// <paramref name="angle"/> about the up axis, with local width/height. Matches
+    /// the ground-effect convention used by RenderParticles.</summary>
+    private static Basis FlatQuadBasis(float angle, float width, float height)
+    {
+        float c = Mathf.Cos(angle);
+        float s = Mathf.Sin(angle);
+        return new Basis(
+            new Vector3(c, 0.0f, s) * width,
+            new Vector3(-s, 0.0f, c) * height,
+            new Vector3(0.0f, 1.0f, 0.0f));
     }
 
     /// <summary>One shared MultiMesh of soft round blobs drawn flat on the plane
@@ -594,10 +993,13 @@ public sealed partial class Diorama : Node3D
             layer.BeginPush();
         }
         _creatureFallback.BeginPush();
+        _energizerTimer = view.Header.EnergizerTimer;
         foreach (Sim.CreatureSnap c in view.Creatures)
         {
             Layer target = _creatureLayers.TryGetValue(c.TypeId, out Layer? l) ? l : _creatureFallback;
-            target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags);
+            target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags,
+                maxHp: c.MaxHp, lifecycleStage: c.LifecycleStage,
+                baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer);
         }
 
         _projectiles.BeginPush();
@@ -626,10 +1028,20 @@ public sealed partial class Diorama : Node3D
         _bonuses.BeginPush();
         foreach (Sim.BonusSnap b in view.Bonuses)
         {
-            _bonuses.Add(new Vector2(b.X, b.Y), 0.0f, 1.0f);
+            // Icon frame from bonus_id (bonuses.png 4x4); POINTS@1000 uses +1;
+            // WEAPON (and any unmapped id) falls back to frame 0 (the bubble).
+            int frame = _bonusIcons.TryGetValue(b.BonusId, out int f) ? f : 0;
+            if (b.BonusId == 1 && b.Amount == 1000)
+            {
+                frame += 1;
+            }
+            // Icons read ~32 game units in the reference (bonus_icon_src, 32*scale).
+            _bonuses.Add(new Vector2(b.X, b.Y), 0.0f, 32.0f, frame: frame);
         }
 
+        _freezeTimer = view.Header.FreezeTimer;
         RenderParticles(view);
+        RenderFreezeOverlay(view);
     }
 
     /// <summary>Write interpolated instance transforms for the current frame.
@@ -766,7 +1178,25 @@ public sealed partial class Diorama : Node3D
                 // phase wraps, so lerping across the seam would glitch; 60 Hz is
                 // already smooth). Custom data = (uvOffX, uvOffY, uvScale, 0).
                 int grid = layer.Grid;
-                int frame = CreatureAnim.SelectFrame(cur.AnimPhase, layer.BaseFrame, layer.MirrorLong, cur.Flags);
+                // Death staging (draw.py draw_creatures): a long-strip creature
+                // plays a death frame sequence driven by lifecycle_stage as it
+                // ramps 16 -> 0 (phase = base+15 - stage - 0.5), then a negative
+                // stage selects the corpse fallback frame (phase = -1). Mirroring
+                // is off while dying (stage < 16).
+                float phase = cur.AnimPhase;
+                if (CreatureAnim.IsLongStrip(cur.Flags))
+                {
+                    if (cur.LifecycleStage < 0.0f)
+                    {
+                        phase = -1.0f;
+                    }
+                    else if (cur.LifecycleStage < 16.0f)
+                    {
+                        phase = layer.BaseFrame + 0x0F - cur.LifecycleStage - 0.5f;
+                    }
+                }
+                bool mirror = layer.MirrorLong && cur.LifecycleStage >= 16.0f;
+                int frame = CreatureAnim.SelectFrame(phase, layer.BaseFrame, mirror, cur.Flags);
                 int cells = grid * grid;
                 frame = frame < 0 ? 0 : (frame >= cells ? cells - 1 : frame);
                 float inv = 1.0f / grid;
@@ -777,12 +1207,67 @@ public sealed partial class Diorama : Node3D
                     0.0f));
             }
 
+            if (layer.UvIndexed)
+            {
+                // Fixed atlas cell per instance (bonuses): custom data = UV cell.
+                int grid = layer.Grid;
+                int cells = grid * grid;
+                int frame = cur.Frame < 0 ? 0 : (cur.Frame >= cells ? cells - 1 : cur.Frame);
+                float inv = 1.0f / grid;
+                layer.Mesh.SetInstanceCustomData(i, new Color(
+                    (frame % grid) * inv,
+                    (frame / grid) * inv,
+                    inv,
+                    0.0f));
+            }
+
+            if (layer.Tinted)
+            {
+                layer.Mesh.SetInstanceColor(i, CreatureTint(cur));
+            }
+
             if (sprite && _needles != null)
             {
                 AddNeedle(arena, angle);
             }
         }
         layer.Mesh.VisibleInstanceCount = layer.CurrCount;
+    }
+
+    /// <summary>Per-creature draw tint (draw.py draw_creatures): the spawn-template
+    /// base tint (ABI v4 CreatureSnap color), then the energizer blend (weak
+    /// creatures, max_hp &lt; 500, lerp toward (0.5,0.5,1,1) while the bonus is
+    /// active), then a negative-lifecycle alpha fade, then the white hit-flash
+    /// brighten while the hit timer is running.</summary>
+    private Color CreatureTint(in Ent e)
+    {
+        Color c = e.BaseColor;
+        float r = c.R, g = c.G, b = c.B, a = c.A;
+        if (_energizerTimer > 0.0f && e.MaxHp < 500.0f)
+        {
+            // Native clamps the timer to [0,1] and lerps the whole RGBA toward
+            // (0.5, 0.5, 1.0, 1.0).
+            float t = Mathf.Clamp(_energizerTimer, 0.0f, 1.0f);
+            r = Mathf.Lerp(r, 0.5f, t);
+            g = Mathf.Lerp(g, 0.5f, t);
+            b = Mathf.Lerp(b, 1.0f, t);
+            a = Mathf.Lerp(a, 1.0f, t);
+        }
+        if (e.LifecycleStage < 0.0f)
+        {
+            a = Mathf.Max(0.0f, a + e.LifecycleStage * 0.1f);
+        }
+        if (e.HitFlash > 0.0f)
+        {
+            // White flash on hit (timer starts at 0.2): brighten toward white by
+            // the remaining fraction. First-pass approximation of the original's
+            // additive flash (no Python render reference) — tune in-headset.
+            float f = Mathf.Clamp(e.HitFlash / 0.2f, 0.0f, 1.0f);
+            r = Mathf.Lerp(r, 1.0f, f);
+            g = Mathf.Lerp(g, 1.0f, f);
+            b = Mathf.Lerp(b, 1.0f, f);
+        }
+        return new Color(r, g, b, a);
     }
 
     /// <summary>Add a flat round shadow blob on the plane at <paramref name="arena"/>,
@@ -878,12 +1363,36 @@ public sealed partial class Diorama : Node3D
         public float uv_scale { get; set; } = 1.0f;
     }
 
+    private sealed class CorpseDesc
+    {
+        public string sheet { get; set; } = "";
+        public int grid { get; set; } = 4;
+        public Dictionary<string, int> frames { get; set; } = new();
+        public int priority { get; set; } = -2;
+    }
+
+    private sealed class TerrainDesc
+    {
+        public Dictionary<string, string> slots { get; set; } = new();
+    }
+
+    private sealed class BonusDesc
+    {
+        public string sheet { get; set; } = "";
+        public int grid { get; set; } = 4;
+        public Dictionary<string, int> icons { get; set; } = new();
+        public int priority { get; set; } = 25;
+    }
+
     private sealed class SpriteManifest
     {
         public Dictionary<string, SpriteDesc>? creatures { get; set; }
         public SpriteDesc? player { get; set; }
         public Dictionary<string, EffectUv>? effects { get; set; }
         public string? effects_sheet { get; set; }
+        public CorpseDesc? corpses { get; set; }
+        public TerrainDesc? terrain { get; set; }
+        public BonusDesc? bonuses { get; set; }
     }
 
     private static SpriteManifest? LoadManifest()

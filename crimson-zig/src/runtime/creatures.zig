@@ -83,6 +83,12 @@ pub const CreatureState = struct {
     attack_cooldown: f32 = 0.0,
     last_hit_owner: owner_ref.OwnerRef = owner_local_player,
     flags: u32 = 0,
+    // Presentation-only (does not affect gameplay/RNG): per-creature tint RGBA
+    // multiplier (from the spawn template, CreatureInit.tint) and a white
+    // hit-flash timer set on damage. Exposed via the host ABI for rendering;
+    // the runtime never reads them back into gameplay logic.
+    color: [4]f32 = .{ 1.0, 1.0, 1.0, 1.0 },
+    hit_flash_timer: f32 = 0.0,
 };
 
 pub fn applyPoolResidue(
@@ -122,6 +128,9 @@ pub fn applyPoolResidue(
             .lifecycle_stage = slot.lifecycle_stage,
             .attack_cooldown = slot.attack_cooldown,
             .flags = @bitCast(slot.flags),
+            // Presentation-only fields the .crd residue already carries.
+            .color = .{ slot.tint_r, slot.tint_g, slot.tint_b, slot.tint_a },
+            .hit_flash_timer = slot.hit_flash_timer,
         };
     }
 }
@@ -229,6 +238,8 @@ pub const CreaturePool = struct {
             .attack_cooldown = 0.0,
             .last_hit_owner = owner_local_player,
             .flags = init.flags,
+            .color = init.tint,
+            .hit_flash_timer = 0.0,
         };
         return slot;
     }
@@ -1966,6 +1977,11 @@ pub const CreaturePool = struct {
 
         for (&self.entries, 0..) |*creature, idx| {
             if (!creature.active) continue;
+            // Hit-flash decay (presentation-only; creature_update_all decays it
+            // before the freeze gate). Never read back into gameplay/RNG.
+            if (creature.hit_flash_timer > 0.0) {
+                creature.hit_flash_timer = narrowF32(creature.hit_flash_timer - dt_f32);
+            }
             if (state.bonuses.freeze > 0.0) continue;
             if (!(creature.hp > 0.0)) {
                 applySelfDamageTickToDead(creature, dt_f32);
@@ -2931,6 +2947,9 @@ pub const CreaturePool = struct {
         if (!creature.active) return 0;
         // Native damage path records the incoming owner even on corpse hits.
         creature.last_hit_owner = owner;
+        // White hit-flash (presentation-only; creature_apply_damage sets 0.2 here,
+        // before the corpse check). Never read back into gameplay/RNG.
+        creature.hit_flash_timer = 0.2;
         if (!(creature.hp > 0.0)) {
             if (dt > 0.0) {
                 creature.lifecycle_stage -= dt * 15.0;

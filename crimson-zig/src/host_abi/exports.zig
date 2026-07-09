@@ -16,9 +16,10 @@ const crimson_zig = @import("crimson_zig");
 const game_ids = crimson_zig.game_ids;
 const live_runner = crimson_zig.live_runner;
 const state_mod = crimson_zig.state;
+const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 2;
+pub const abi_version: u32 = 5;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 pub const ok: i32 = 0;
@@ -86,6 +87,14 @@ pub const SnapshotHeader = extern struct {
     secondary_count: u32,
     bonus_count: u32,
     particle_count: u32,
+    // Global energizer bonus timer (state.bonuses.energizer). Lets the frontend
+    // render the energizer-blue creature tint + lifecycle fade at draw time
+    // (draw.py draw_creatures) without a per-creature color field. Read-only
+    // presentation data; no runtime/gameplay effect. Append-only (ABI v3).
+    energizer_timer: f32,
+    // Global freeze bonus timer (state.bonuses.freeze) for the per-creature
+    // freeze-shatter overlay (draw_freeze_overlay). Read-only. Append-only (ABI v5).
+    freeze_timer: f32,
 };
 
 pub const PlayerSnap = extern struct {
@@ -119,6 +128,14 @@ pub const CreatureSnap = extern struct {
     lifecycle_stage: f32,
     type_id: i32,
     flags: u32,
+    // Per-creature tint RGBA multiplier + white hit-flash timer (ABI v4+).
+    // Presentation-only; the frontend multiplies the sprite by (r,g,b,a) and
+    // brightens toward white while hit_flash_timer > 0.
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+    hit_flash_timer: f32,
 };
 
 pub const ProjectileSnap = extern struct {
@@ -187,6 +204,56 @@ pub const HitAudioSnap = extern struct {
     trigger_game_tune: u32,
 };
 
+// Static terrain generation info (ABI v3). The base ground is stamped once at
+// session start from three atlas slots seeded by terrain_seed; the frontend
+// reproduces (or approximates) it from these. Query-once, not per-tick.
+pub const TerrainInfo = extern struct {
+    terrain_slot_0: i32, // base atlas slot (ter/ sheet index)
+    terrain_slot_1: i32, // overlay atlas slot
+    terrain_slot_2: i32, // detail atlas slot
+    terrain_seed: u32, // rng.state at terrain generation
+    terrain_size: i32, // square terrain side, floor(world_size)
+    world_size: f32,
+};
+
+// Per-tick terrain FX drain (ABI v3), analogous to the audio-events drain.
+// Payload layout (packed, in order):
+//   TerrainFxHeader
+//   TerrainDecalSnap  [decal_count]   ground splats (blood/scorch)
+//   TerrainCorpseSnap [corpse_count]  rotated corpse stamps (creature death)
+// Describes the most recent tick only; drain after every tick and paint the
+// entries into a persistent decal layer (they are one-shot events, not state).
+pub const TerrainFxHeader = extern struct {
+    version: u32,
+    decal_count: u32,
+    corpse_count: u32,
+};
+
+pub const TerrainDecalSnap = extern struct {
+    effect_id: i32, // ter/ decal atlas frame
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    rotation: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+};
+
+pub const TerrainCorpseSnap = extern struct {
+    creature_type_id: i32, // bodyset/creature sheet id (7 = ping-pong fallback)
+    x: f32, // top-left x
+    y: f32, // top-left y
+    rotation: f32,
+    scale: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+};
+
 const HostSessionConfig = struct {
     seed: u32 = 1,
     game_mode: i32 = 1,
@@ -206,6 +273,7 @@ const SessionBox = struct {
     generation: u32,
     runner: live_runner.LiveRunner,
     last_audio: live_runner.FrameAudioEvents = .{},
+    last_terrain_fx: terrain_fx_mod.TerrainFxBatch = .{},
 };
 
 const max_sessions = 8;
@@ -449,6 +517,7 @@ pub export fn crimson_host_session_tick(
         return err_generic;
     };
     box.last_audio = update.audio;
+    box.last_terrain_fx = update.terrain_fx;
 
     if (out_result) |out| {
         const elapsed_bits: u64 = @bitCast(update.elapsed_ms_sim);
@@ -521,6 +590,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .secondary_count = 0,
         .bonus_count = 0,
         .particle_count = 0,
+        .energizer_timer = box.runner.session.state.bonuses.energizer,
+        .freeze_timer = box.runner.session.state.bonuses.freeze,
     };
 
     if (header.perk_pending_count > 0) {
@@ -606,6 +677,11 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .lifecycle_stage = entry.lifecycle_stage,
             .type_id = entry.type_id,
             .flags = entry.flags,
+            .r = entry.color[0],
+            .g = entry.color[1],
+            .b = entry.color[2],
+            .a = entry.color[3],
+            .hit_flash_timer = entry.hit_flash_timer,
         });
     }
     for (box.runner.session.projectiles.entries) |entry| {
@@ -727,6 +803,99 @@ pub export fn crimson_host_audio_events(handle: u64, buf: ?[*]u8, len: ?*u32) i3
     }
     for (audio.sfx_events[0..audio.sfx_event_count]) |sfx| {
         writeStruct(out, &offset, @as(i32, @intCast(@intFromEnum(sfx))));
+    }
+
+    len_ptr.* = required;
+    return ok;
+}
+
+/// Static terrain generation info (ABI v3). Query once after session create;
+/// the values never change for the life of the session.
+pub export fn crimson_host_terrain_info(handle: u64, out_info: ?*TerrainInfo) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    const out = out_info orelse {
+        setError("out_info is null");
+        return err_invalid_input;
+    };
+    const setup = box.runner.terrain_setup;
+    out.* = .{
+        .terrain_slot_0 = @intCast(setup.terrain_slots[0]),
+        .terrain_slot_1 = @intCast(setup.terrain_slots[1]),
+        .terrain_slot_2 = @intCast(setup.terrain_slots[2]),
+        .terrain_seed = setup.terrain_seed,
+        .terrain_size = box.runner.session.terrain_size,
+        .world_size = box.runner.session.world_size,
+    };
+    return ok;
+}
+
+/// Terrain FX (blood/scorch splats + corpse stamps) emitted during the last
+/// tick. Same buffer protocol as crimson_host_snapshot; drain after every tick.
+pub export fn crimson_host_terrain_fx(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    const len_ptr = len orelse {
+        setError("len is null");
+        return err_invalid_input;
+    };
+
+    const batch = box.last_terrain_fx;
+    const header: TerrainFxHeader = .{
+        .version = abi_version,
+        .decal_count = @intCast(batch.decal_count),
+        .corpse_count = @intCast(batch.corpse_count),
+    };
+
+    const required: u32 = @sizeOf(TerrainFxHeader) +
+        @sizeOf(TerrainDecalSnap) * header.decal_count +
+        @sizeOf(TerrainCorpseSnap) * header.corpse_count;
+
+    const out_ptr = buf orelse {
+        len_ptr.* = required;
+        return ok;
+    };
+    if (len_ptr.* < required) {
+        len_ptr.* = required;
+        setError("terrain fx buffer too small");
+        return err_buffer_too_small;
+    }
+
+    const out = out_ptr[0..len_ptr.*];
+    var offset: usize = 0;
+    writeStruct(out, &offset, header);
+    for (batch.decalsSlice()) |entry| {
+        writeStruct(out, &offset, TerrainDecalSnap{
+            .effect_id = entry.effect_id,
+            .x = entry.pos.x,
+            .y = entry.pos.y,
+            .width = entry.width,
+            .height = entry.height,
+            .rotation = entry.rotation,
+            .r = entry.color.r,
+            .g = entry.color.g,
+            .b = entry.color.b,
+            .a = entry.color.a,
+        });
+    }
+    for (batch.corpsesSlice()) |entry| {
+        writeStruct(out, &offset, TerrainCorpseSnap{
+            .creature_type_id = entry.creature_type_id,
+            .x = entry.top_left.x,
+            .y = entry.top_left.y,
+            .rotation = entry.rotation,
+            .scale = entry.scale,
+            .r = entry.color.r,
+            .g = entry.color.g,
+            .b = entry.color.b,
+            .a = entry.color.a,
+        });
     }
 
     len_ptr.* = required;

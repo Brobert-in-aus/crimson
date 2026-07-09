@@ -24,6 +24,7 @@
     <Compile Include="..\..\godot\src\Mapper.cs" />
     <Compile Include="..\..\godot\src\VrInput.cs" />
     <Compile Include="..\..\godot\src\Sim.cs" />
+    <Compile Include="..\..\godot\src\SimSession.cs" />
     <Compile Include="..\..\godot\src\CreatureAnim.cs" />
   </ItemGroup>
 </Project>

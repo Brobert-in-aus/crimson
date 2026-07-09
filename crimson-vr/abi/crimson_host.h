@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 2u
+#define CRIMSON_HOST_ABI_VERSION 5u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -129,6 +129,10 @@ typedef struct crimson_host_snapshot_header {
     uint32_t secondary_count;
     uint32_t bonus_count;
     uint32_t particle_count; /* ABI v2+; sprite-effect pool (blood/gibs/etc.) */
+    float energizer_timer;   /* ABI v3+; global energizer bonus timer, for the
+                              * energizer-blue creature tint + lifecycle fade */
+    float freeze_timer;      /* ABI v5+; global freeze bonus timer, for the
+                              * per-creature freeze-shatter overlay */
 } crimson_host_snapshot_header;
 
 typedef struct crimson_host_player_snap {
@@ -162,6 +166,14 @@ typedef struct crimson_host_creature_snap {
     float lifecycle_stage; /* 16.0 = alive (native death-timer convention) */
     int32_t type_id;
     uint32_t flags;
+    /* Per-creature tint RGBA multiplier + white hit-flash timer (ABI v4+).
+     * Presentation-only: multiply the sprite by (r,g,b,a); brighten toward white
+     * while hit_flash_timer > 0. */
+    float r;
+    float g;
+    float b;
+    float a;
+    float hit_flash_timer;
 } crimson_host_creature_snap;
 
 typedef struct crimson_host_projectile_snap {
@@ -236,6 +248,55 @@ typedef struct crimson_host_hit_audio {
     uint32_t trigger_game_tune;
 } crimson_host_hit_audio;
 
+/* Static terrain generation info (ABI v3). The base ground is stamped once at
+ * session start from three atlas slots seeded by terrain_seed; query once after
+ * create -- the values never change for the life of the session. */
+typedef struct crimson_host_terrain_info {
+    int32_t terrain_slot_0; /* base atlas slot (ter/ sheet index) */
+    int32_t terrain_slot_1; /* overlay atlas slot */
+    int32_t terrain_slot_2; /* detail atlas slot */
+    uint32_t terrain_seed;  /* rng.state at terrain generation */
+    int32_t terrain_size;   /* square terrain side, floor(world_size) */
+    float world_size;
+} crimson_host_terrain_info;
+
+/* Terrain FX drain payload (ABI v3), packed, in order:
+ *   crimson_host_terrain_fx_header
+ *   crimson_host_terrain_decal_snap  [decal_count]   ground splats (blood/scorch)
+ *   crimson_host_terrain_corpse_snap [corpse_count]  rotated corpse stamps
+ * Describes the most recent tick only; drain after every tick and paint the
+ * entries into a persistent decal layer (they are one-shot events, not state). */
+typedef struct crimson_host_terrain_fx_header {
+    uint32_t version;
+    uint32_t decal_count;
+    uint32_t corpse_count;
+} crimson_host_terrain_fx_header;
+
+typedef struct crimson_host_terrain_decal_snap {
+    int32_t effect_id; /* ter/ decal atlas frame */
+    float x;
+    float y;
+    float width;
+    float height;
+    float rotation;
+    float r;
+    float g;
+    float b;
+    float a;
+} crimson_host_terrain_decal_snap;
+
+typedef struct crimson_host_terrain_corpse_snap {
+    int32_t creature_type_id; /* bodyset/creature sheet id (7 = ping-pong fallback) */
+    float x;                  /* top-left x */
+    float y;                  /* top-left y */
+    float rotation;
+    float scale;
+    float r;
+    float g;
+    float b;
+    float a;
+} crimson_host_terrain_corpse_snap;
+
 /* ---- Functions ---- */
 
 uint32_t crimson_host_abi_version(void);
@@ -272,6 +333,14 @@ int32_t crimson_host_snapshot(uint64_t handle, uint8_t *buf, uint32_t *len);
 
 /* Same buffer protocol as crimson_host_snapshot. */
 int32_t crimson_host_audio_events(uint64_t handle, uint8_t *buf, uint32_t *len);
+
+/* Static terrain generation info (ABI v3). Query once after create. */
+int32_t crimson_host_terrain_info(uint64_t handle,
+                                  crimson_host_terrain_info *out_info);
+
+/* Terrain FX (blood/scorch splats + corpse stamps) from the last tick.
+ * Same buffer protocol as crimson_host_snapshot; drain after every tick. */
+int32_t crimson_host_terrain_fx(uint64_t handle, uint8_t *buf, uint32_t *len);
 
 /* Runs the native replay verifier on .crd bytes; writes its JSON report.
  * Same buffer protocol as crimson_host_snapshot. */

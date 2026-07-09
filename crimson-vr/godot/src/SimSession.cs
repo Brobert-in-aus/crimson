@@ -100,6 +100,37 @@ public readonly ref struct AudioEventsView
 }
 
 /// <summary>
+/// A zero-copy view over one packed terrain-fx payload (crimson_host_terrain_fx,
+/// see Sim.TerrainFxHeader). Spans alias the owning session's terrain-fx buffer,
+/// valid until the next <see cref="SimSession.CaptureTerrainFx"/> call.
+/// </summary>
+public readonly ref struct TerrainFxView
+{
+    public readonly Sim.TerrainFxHeader Header;
+    private readonly ReadOnlySpan<byte> _buf;
+    private readonly int _decalsOff;
+    private readonly int _corpsesOff;
+
+    public TerrainFxView(ReadOnlySpan<byte> buf)
+    {
+        Header = MemoryMarshal.Read<Sim.TerrainFxHeader>(buf);
+        _buf = buf;
+        int off = Unsafe.SizeOf<Sim.TerrainFxHeader>();
+        _decalsOff = off;
+        off += (int)Header.DecalCount * Unsafe.SizeOf<Sim.TerrainDecalSnap>();
+        _corpsesOff = off;
+    }
+
+    public ReadOnlySpan<Sim.TerrainDecalSnap> Decals
+        => Cast<Sim.TerrainDecalSnap>(_decalsOff, Header.DecalCount);
+    public ReadOnlySpan<Sim.TerrainCorpseSnap> Corpses
+        => Cast<Sim.TerrainCorpseSnap>(_corpsesOff, Header.CorpseCount);
+
+    private ReadOnlySpan<T> Cast<T>(int offset, uint count) where T : struct
+        => MemoryMarshal.Cast<byte, T>(_buf.Slice(offset, (int)count * Unsafe.SizeOf<T>()));
+}
+
+/// <summary>
 /// Owns one live simulation handle and drives it at the sim tick rate. Wraps
 /// the raw P/Invoke surface in Sim.cs with buffer management: ticks take a
 /// single-player <see cref="Sim.HostInput"/>, and <see cref="CaptureSnapshot"/>
@@ -112,6 +143,7 @@ public sealed class SimSession : IDisposable
     private readonly byte[][] _bufs = new byte[2][];
     private int _curSlot = -1;
     private byte[] _audioBuf = new byte[4096];
+    private byte[] _terrainFxBuf = new byte[8192];
 
     public ulong Handle { get; private set; }
     public Sim.TickResult LastResult { get; private set; }
@@ -187,6 +219,39 @@ public sealed class SimSession : IDisposable
             }
         }
         return new AudioEventsView(_audioBuf.AsSpan(0, (int)len));
+    }
+
+    /// <summary>Drain the terrain FX (blood/scorch splats + corpse stamps)
+    /// emitted during the last tick. The returned view is valid until the next
+    /// CaptureTerrainFx call. Grows the backing buffer on demand.</summary>
+    public TerrainFxView CaptureTerrainFx()
+    {
+        uint len = (uint)_terrainFxBuf.Length;
+        int rc = Sim.TerrainFx(Handle, _terrainFxBuf, ref len);
+        if (rc != Sim.Ok)
+        {
+            // Buffer too small: len now holds the required size. Grow and retry.
+            _terrainFxBuf = new byte[len];
+            len = (uint)_terrainFxBuf.Length;
+            rc = Sim.TerrainFx(Handle, _terrainFxBuf, ref len);
+            if (rc != Sim.Ok)
+            {
+                throw new InvalidOperationException($"terrain fx failed ({rc}): {Sim.LastError()}");
+            }
+        }
+        return new TerrainFxView(_terrainFxBuf.AsSpan(0, (int)len));
+    }
+
+    /// <summary>Query the static terrain generation info (slots + seed). Stable
+    /// for the life of the session; call once after construction.</summary>
+    public Sim.TerrainInfo TerrainInfo()
+    {
+        int rc = Sim.TerrainInfoNative(Handle, out Sim.TerrainInfo info);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException($"terrain info failed ({rc}): {Sim.LastError()}");
+        }
+        return info;
     }
 
     /// <summary>Tear down and recreate the session with the same config.</summary>

@@ -55,8 +55,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v2" {
-    try std.testing.expectEqual(@as(u32, 2), exports.crimson_host_abi_version());
+test "abi version reports v5" {
+    try std.testing.expectEqual(@as(u32, 5), exports.crimson_host_abi_version());
 }
 
 test "abi verify passthrough matches native verifier byte for byte" {
@@ -277,6 +277,119 @@ test "abi snapshot exposes sprite-effect particles" {
     }
     try std.testing.expect(max_particles > 0);
     try std.testing.expect(checked_entry);
+}
+
+test "abi creature snapshot carries tint and hit flash" {
+    const allocator = std.testing.allocator;
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    const buf = try allocator.alloc(u8, exports.snapshotMaxSize());
+    defer allocator.free(buf);
+
+    // Survival creatures spawn with an XP-derived tint (not pure white), and
+    // firing at them sets the white hit-flash timer. Over a firing run the ABI
+    // v4 creature color + hit_flash_timer must both show up and decode sanely.
+    var saw_tint = false;
+    var saw_flash = false;
+    for (0..900) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+
+        var len: u32 = @intCast(buf.len);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, buf.ptr, &len));
+
+        var header: exports.SnapshotHeader = undefined;
+        @memcpy(std.mem.asBytes(&header), buf[0..@sizeOf(exports.SnapshotHeader)]);
+        const off = @sizeOf(exports.SnapshotHeader) + @sizeOf(exports.PlayerSnap) * header.player_count;
+        for (0..header.creature_count) |ci| {
+            var c: exports.CreatureSnap = undefined;
+            @memcpy(std.mem.asBytes(&c), buf[off + ci * @sizeOf(exports.CreatureSnap) ..][0..@sizeOf(exports.CreatureSnap)]);
+            // Tint channels are valid [0,1] multipliers.
+            try std.testing.expect(c.r >= 0.0 and c.r <= 1.0);
+            try std.testing.expect(c.g >= 0.0 and c.g <= 1.0);
+            try std.testing.expect(c.b >= 0.0 and c.b <= 1.0);
+            try std.testing.expect(c.a >= 0.0 and c.a <= 1.0);
+            if (c.r != 1.0 or c.g != 1.0 or c.b != 1.0) saw_tint = true;
+            if (c.hit_flash_timer > 0.0) {
+                try std.testing.expect(c.hit_flash_timer <= 0.2 + 1e-4);
+                saw_flash = true;
+            }
+        }
+        if (saw_tint and saw_flash) break;
+    }
+    try std.testing.expect(saw_tint);
+    try std.testing.expect(saw_flash);
+}
+
+test "abi exposes static terrain info" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    var info: exports.TerrainInfo = undefined;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_terrain_info(handle, &info));
+    try std.testing.expectEqual(@as(f32, 1024.0), info.world_size);
+    try std.testing.expectEqual(@as(i32, 1024), info.terrain_size);
+    // Survival with no unlock uses the default {0,1,0} slot triplet.
+    try std.testing.expectEqual(@as(i32, 0), info.terrain_slot_0);
+    try std.testing.expectEqual(@as(i32, 1), info.terrain_slot_1);
+    try std.testing.expectEqual(@as(i32, 0), info.terrain_slot_2);
+
+    // Info is stable for the life of the session (query-once contract).
+    var info2: exports.TerrainInfo = undefined;
+    for (0..120) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+    }
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_terrain_info(handle, &info2));
+    try std.testing.expectEqual(info.terrain_seed, info2.terrain_seed);
+}
+
+test "abi drains terrain fx over a firing run" {
+    const allocator = std.testing.allocator;
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    // Terrain FX capacity is bounded (0x7F decals + 0x3F corpses); a 64 KiB
+    // scratch buffer comfortably holds a full tick's batch.
+    const buf = try allocator.alloc(u8, 64 * 1024);
+    defer allocator.free(buf);
+
+    // Firing at creatures produces blood splats and, on kills, corpse stamps.
+    // Over a firing run the terrain-fx drain must carry at least one entry that
+    // decodes to sane values. Pins that the ABI v3 terrain-fx stream works.
+    var saw_fx = false;
+    for (0..900) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+
+        var len: u32 = @intCast(buf.len);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_terrain_fx(handle, buf.ptr, &len));
+        try std.testing.expect(len >= @sizeOf(exports.TerrainFxHeader));
+
+        var header: exports.TerrainFxHeader = undefined;
+        @memcpy(std.mem.asBytes(&header), buf[0..@sizeOf(exports.TerrainFxHeader)]);
+        try std.testing.expectEqual(exports.abi_version, header.version);
+
+        if (header.decal_count > 0) {
+            var d: exports.TerrainDecalSnap = undefined;
+            @memcpy(std.mem.asBytes(&d), buf[@sizeOf(exports.TerrainFxHeader)..][0..@sizeOf(exports.TerrainDecalSnap)]);
+            try std.testing.expect(d.a > 0.0);
+            try std.testing.expect(d.width > 0.0);
+            saw_fx = true;
+            break;
+        }
+        if (header.corpse_count > 0) {
+            const off = @sizeOf(exports.TerrainFxHeader) +
+                @sizeOf(exports.TerrainDecalSnap) * header.decal_count;
+            var c: exports.TerrainCorpseSnap = undefined;
+            @memcpy(std.mem.asBytes(&c), buf[off..][0..@sizeOf(exports.TerrainCorpseSnap)]);
+            try std.testing.expect(c.scale > 0.0);
+            saw_fx = true;
+            break;
+        }
+    }
+    try std.testing.expect(saw_fx);
 }
 
 test "abi rejects invalid handles and configs" {

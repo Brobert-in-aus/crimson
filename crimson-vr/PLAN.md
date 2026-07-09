@@ -364,6 +364,13 @@ Notes:
 - **Terrain**: flat quad with the generated terrain texture; decals (blood,
   scorch) painted into a `SubViewport` decal layer composited over it —
   driven by the ABI decal event stream.
+- **Display mode / MR (2026-07-09):** on headsets that support passthrough
+  (Quest 3), the tabletop diorama sits in the player's real room via MR instead
+  of a skybox — `Main.DisplayMode.Auto` enables the OpenXR `ALPHA_BLEND`
+  environment blend mode + a transparent viewport when the runtime reports it
+  supported, else falls back to a dim procedural VR skybox. Quest APK export
+  preset now sets `meta_xr_features/passthrough=1` (Optional). On-device
+  passthrough visual is unverified (needs a Quest); PCVR/VD stays skybox.
 - **Creatures/players**: original sprites on quads, **lifted slightly above
   the plane and tilted toward vertical** (classic 2.5D billboard-at-fixed-tilt,
   not full camera-facing billboards — with a tabletop viewed from above, a
@@ -735,26 +742,56 @@ are non-positional); snapshot interpolation (render at headset refresh); the 2.5
 back-tilt was tried and rejected (flat reads better, `SpriteTiltDegrees = 0`).
 
 *Gaps — need an ABI change (append-only field + re-run the M1 gate):*
-- **Creature color/tint** — `CreatureSnap` carries no color, so creatures render
-  flat: no per-variant tints, energizer-blue, XP reddening, or **hit-flash**
-  (white flash on hit). Highest-impact visual gap after death animation.
+- **Creature color/tint — DONE (2026-07-09, ABI v4).** Full parity with
+  `draw.py draw_creatures`: per-creature **base tint** (spawn-template RGBA incl.
+  XP-reddening + rare-creature tints) + **energizer-blue** (weak creatures,
+  max_hp<500) + **lifecycle alpha fade** + white **hit-flash** on hit. Turned out
+  far simpler than feared: `CreatureInit.tint` was already computed per template;
+  the runtime change was wiring `spawnInit`/`applyPoolResidue` to store
+  `color` + `hit_flash_timer` on `CreatureState` (the `.crd` residue already
+  carried them), setting the flash on damage + decaying it per tick — all
+  additive, so the M1 gate stayed green. ABI v4 appends `r,g,b,a,hit_flash_timer`
+  to `CreatureSnap`; frontend multiplies the sprite by the tint + brightens toward
+  white during the flash. Hit-flash brighten curve is a first-pass (no Python
+  render reference) — tune in-headset. Full
+  actionable plan (incl. the de-risking finding that the `.crd` residue already
+  carries tint+hit_flash): `crimson-vr/notes/creature-tint-hitflash-plan.md`.
 - **Player legs** — torso only; legs + leg animation need a `move_phase` field.
-- **Terrain** — flat quad; no terrain texture and no blood/scorch ground decals
-  (needs a terrain seed + a decal event stream).
+- **Blood/scorch ground decals + corpse stamps — DONE (2026-07-09, ABI v3).**
+  New per-tick drain `crimson_host_terrain_fx` (blood/scorch splats + rotated
+  corpse stamps, analogous to the audio-events drain; no runtime change, snapshot
+  layout untouched so the M1 gate stayed green). Blood splats render from
+  particles.png (same effect_id->UV table as sprite-effects); corpses from
+  bodyset.png (4x4 grid, per-type frame). Persistent ring-buffer MultiMeshes under
+  the living sprites. Orientation/scale first-pass — tune in-headset.
+- **Terrain base texture — DONE (2026-07-09, first-pass).** The arena floor is a
+  PlaneMesh textured with the base terrain slot sheet (ABI terrain-info slots[0] ->
+  `ter_q{n}_base.png`, staged by the bake), extended past the playfield to cover
+  the off-arena spawn margin (§6). Skybox mode adds **thick grey fog** (rapid
+  view-distance falloff, FogSkyAffect greys the background); passthrough disables
+  fog. Faithful seed-driven stamp reproduction (vs the current tiled texture) +
+  fog density/floor-size are in-headset tuning follow-ups. See §6 "Display mode".
 - **Other effect pools** — only `EffectPool` is streamed; the flamethrower/
   bubblegun `ParticlePool` + `SpriteEffectPool` are not.
 
 *Gaps — frontend only:*
-- **Death animation + corpses** — `lifecycle_stage` is in the snapshot but ignored
-  (creatures pop out); the reference fades + swaps to a corpse frame
-  (negative-phase fallback in `creature_render_type`) then paints `bodyset.png`
-  corpse decals.
-- **Creature overlays** — freeze ice-block, monster-vision, poison/plague, aura
-  (`draw_creature_overlays`). Freeze *particles* already show via 6b.
+- **Death animation + corpses — DONE (2026-07-09).** Long-strip creatures now play
+  the death frame sequence driven by `lifecycle_stage` (16->0), then the corpse
+  fallback frame at negative stage, with the lifecycle alpha fade; `bodyset.png`
+  corpse stamps land via the ABI v3 terrain-fx stream. (Ping-pong creatures fade +
+  leave the type-7 corpse stamp.)
+- **Creature overlays** — **freeze-shatter DONE (2026-07-09, ABI v5):** the global
+  freeze timer is in the snapshot header and each creature wears a FREEZE_SHATTER
+  frame while frozen (`draw_freeze_overlay`). REMAINING: **poison** (red, gated by
+  the `SELF_DAMAGE_TICK` flag which is already in the snapshot -> frontend-only,
+  just needs the `poison_src` cell); **plague** (needs `plague_infected` exposed);
+  **monster-vision** (needs the player's MV perk exposed); aura.
 - **Projectiles/secondaries** — per-type glow streaks, not the faithful per-weapon
   render (`render/projectile_draw/`: bullet trails, plasma tail/head/aura, beams,
   sharpshooter laser).
-- **Bonuses** — colored quads; `bonuses.png` staged but unused (no bonus icons).
+- **Bonuses — DONE (2026-07-09):** real pickup icons from `bonuses.png` (4x4 grid,
+  bonus_id->icon via the baked table, POINTS@1000 +1, WEAPON falls back to the
+  bubble). Icon-only for now; the bubble container + pulse/rotate are refinements.
 - **Muzzle flash / explosions** — procedural additive glows, not the sprite-based
   flashes; they also read subtle (an effects-scale tuning pass is wanted; gibs
   faint).
@@ -763,7 +800,9 @@ back-tilt was tried and rejected (flat reads better, `SpriteTiltDegrees = 0`).
 
 **Remaining M3 slices (recommended order):** (1) creature **death + corpses**
 (frontend, high impact, uses `lifecycle_stage`); (2) creature **color/tint +
-hit-flash** (ABI); (3) **terrain + blood decals** (ABI). Then, lower impact:
+hit-flash** (its own runtime-touching change — see the note above; NOT just an
+ABI field); (3) **terrain base texture** quad (ABI terrain-info already exposed).
+[Blood/scorch decals + corpse stamps landed 2026-07-09 via ABI v3.] Then, lower impact:
 creature overlays; faithful projectile-registry render; bonus icons; muzzle/
 explosion sprites + effect-scale pass; music (loose-Ogg game-tune trigger);
 off-arena spawn-margin edge treatment (§6); other effect pools; combined-atlas

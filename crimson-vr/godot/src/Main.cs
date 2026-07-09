@@ -51,6 +51,12 @@ public partial class Main : Node3D
     private Node3D _rightGuide = null!;
     private Label3D _status = null!;
 
+    // Reticle textures projected onto the play plane: ui_aim = aim-hand crosshair,
+    // ui_cursor = move-hand pointer (staged by bake_assets.py; null -> plain quad).
+    private Texture2D? _aimTex;
+    private Texture2D? _cursorTex;
+    private const float ReticleSizeMeters = 0.05f; // first-pass; tune in-headset
+
     private SimSession? _sim;
     private Diorama _diorama = null!;
     private AudioBank _audio = null!;
@@ -65,6 +71,22 @@ public partial class Main : Node3D
     private readonly bool[] _prevGrip = new bool[2];
 
     private bool _xrActive;
+
+    // Display mode (PLAN §6 / MR): Auto uses passthrough when the headset supports
+    // it (Quest 3 etc. report ALPHA_BLEND as a supported environment blend mode),
+    // else a skybox. The tabletop diorama is a natural MR fit — in passthrough it
+    // sits in the player's real room. Forcing Skybox keeps the VR void; forcing
+    // Passthrough warns and falls back if unsupported. (A settings toggle is M4.)
+    public enum DisplayMode { Auto, Skybox, Passthrough }
+    private DisplayMode _displayMode = DisplayMode.Auto;
+    private XRInterface? _xrInterface;
+    private WorldEnvironment _worldEnv = null!;
+    private bool _passthroughActive;
+
+    // Skybox-mode grey fog (rapid view-distance falloff). First-pass; tune in-headset.
+    private static readonly Color FogGrey = new(0.55f, 0.55f, 0.58f);
+    private const float FogDensityValue = 0.35f;
+
     private bool _recenterPending = true;
     private bool _prevRecenterHeld;
     private int _framesSinceStart;
@@ -106,6 +128,12 @@ public partial class Main : Node3D
         try
         {
             _sim = new SimSession(SurvivalConfig);
+            // Static terrain generation info (ABI v3): slots pick the ground atlas
+            // sheets, seed drives the stamp layout. The terrain-base quad render is
+            // a follow-up; log it so the plumbing is exercised meanwhile.
+            Sim.TerrainInfo t = _sim.TerrainInfo();
+            _diorama.ApplyTerrainInfo(t); // texture the arena floor from the base slot
+            GD.Print($"CrimsonVR: terrain slots=({t.Slot0},{t.Slot1},{t.Slot2}) seed={t.TerrainSeed} size={t.TerrainSize}");
         }
         catch (System.Exception e)
         {
@@ -122,6 +150,7 @@ public partial class Main : Node3D
             GetViewport().UseXR = true;
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             _xrActive = true;
+            _xrInterface = xr; // BuildEnvironment applies passthrough once the env exists
             GD.Print("CrimsonVR: OpenXR initialized");
         }
         else
@@ -132,19 +161,93 @@ public partial class Main : Node3D
 
     private void BuildEnvironment()
     {
+        // VR skybox: a dim procedural gradient (dark room/void) rather than a flat
+        // clear color, so looking around VR mode has a little depth without pulling
+        // focus from the tabletop. Overridden to transparent when passthrough is on.
         var env = new Godot.Environment
         {
-            BackgroundMode = Godot.Environment.BGMode.Color,
-            BackgroundColor = new Color(0.05f, 0.06f, 0.08f),
+            BackgroundMode = Godot.Environment.BGMode.Sky,
+            Sky = MakeVrSky(),
+            // Ambient stays a fixed color (not sky-sourced) so it survives the
+            // passthrough switch, which clears the sky.
             AmbientLightSource = Godot.Environment.AmbientSource.Color,
             AmbientLightColor = new Color(0.4f, 0.4f, 0.45f),
             AmbientLightEnergy = 1.0f,
+            // Thick grey fog: rapid view-distance falloff so the diorama reads as
+            // sitting in a contained foggy space (and it masks the off-arena spawn
+            // margin, §6). FogSkyAffect greys the background sky to match. Disabled
+            // in passthrough (TrySetupPassthrough) so the real room shows through.
+            // Density/color are first-pass — tune in-headset.
+            FogEnabled = true,
+            FogLightColor = FogGrey,
+            FogLightEnergy = 1.0f,
+            FogDensity = FogDensityValue,
+            FogSkyAffect = 1.0f,
+            FogAerialPerspective = 0.0f,
         };
-        AddChild(new WorldEnvironment { Environment = env });
+        _worldEnv = new WorldEnvironment { Environment = env };
+        AddChild(_worldEnv);
 
         var light = new DirectionalLight3D { LightEnergy = 1.2f };
         light.RotationDegrees = new Vector3(-55.0f, 30.0f, 0.0f);
         AddChild(light);
+
+        TrySetupPassthrough();
+    }
+
+    private static Sky MakeVrSky()
+    {
+        var mat = new ProceduralSkyMaterial
+        {
+            SkyTopColor = new Color(0.02f, 0.03f, 0.06f),
+            SkyHorizonColor = new Color(0.08f, 0.09f, 0.13f),
+            GroundBottomColor = new Color(0.01f, 0.01f, 0.02f),
+            GroundHorizonColor = new Color(0.06f, 0.07f, 0.10f),
+            SunAngleMax = 1.0f,
+            UseDebanding = true,
+        };
+        return new Sky { SkyMaterial = mat };
+    }
+
+    /// <summary>Enable MR passthrough when the headset supports it (or when forced).
+    /// Composites the transparent app over the real world via the OpenXR ALPHA_BLEND
+    /// environment blend mode, so the tabletop diorama sits in the player's room.
+    /// No-ops (keeps the skybox) when XR is flat or passthrough is unsupported.
+    /// NOTE: the Quest APK also needs the passthrough feature enabled in the export
+    /// preset (meta plugin) for this to composite on-device.</summary>
+    private void TrySetupPassthrough()
+    {
+        if (_displayMode == DisplayMode.Skybox || !_xrActive || _xrInterface == null)
+        {
+            return;
+        }
+        Godot.Collections.Array modes = _xrInterface.GetSupportedEnvironmentBlendModes();
+        bool alphaBlend = false;
+        foreach (Variant m in modes)
+        {
+            if (m.As<long>() == (long)XRInterface.EnvironmentBlendModeEnum.AlphaBlend)
+            {
+                alphaBlend = true;
+                break;
+            }
+        }
+        if (!alphaBlend)
+        {
+            if (_displayMode == DisplayMode.Passthrough)
+            {
+                GD.PushWarning("CrimsonVR: passthrough requested but ALPHA_BLEND unsupported; using skybox");
+            }
+            return; // Auto: no passthrough hardware -> keep the skybox
+        }
+
+        _xrInterface.EnvironmentBlendMode = XRInterface.EnvironmentBlendModeEnum.AlphaBlend;
+        GetViewport().TransparentBg = true;
+        Godot.Environment env = _worldEnv.Environment;
+        env.BackgroundMode = Godot.Environment.BGMode.Color;
+        env.BackgroundColor = new Color(0.0f, 0.0f, 0.0f, 0.0f); // transparent -> passthrough shows through
+        env.FogEnabled = false; // no grey fog in MR — show the real room
+        _passthroughActive = true;
+        GD.Print("CrimsonVR: MR passthrough enabled (ALPHA_BLEND)");
     }
 
     private void BuildRig()
@@ -200,6 +303,8 @@ public partial class Main : Node3D
 
     private void BuildReticles()
     {
+        _aimTex = LoadReticleTex("ui_aim.png");
+        _cursorTex = LoadReticleTex("ui_cursor.png");
         _leftReticle = MakeReticle(new Color(0.2f, 0.5f, 1.0f));
         _rightReticle = MakeReticle(new Color(1.0f, 0.3f, 0.25f));
         _leftGuide = MakeGuide(new Color(0.2f, 0.5f, 1.0f, 0.35f));
@@ -210,14 +315,30 @@ public partial class Main : Node3D
         AddChild(_rightGuide);
     }
 
+    private static Texture2D? LoadReticleTex(string name)
+    {
+        string path = "res://assets/sprites/" + name;
+        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+    }
+
+    // Reticle = a flat textured quad on the play plane (the torus ring was
+    // redundant with the vertical guide line, so it's gone). The cursor/target
+    // texture is set per-frame by hand role in UpdateHandVisual; AlbedoColor tints
+    // it and carries the over-arena / trigger brighten. NoDepthTest keeps it on
+    // top like a cursor.
     private static Node3D MakeReticle(Color color)
         => new MeshInstance3D
         {
-            Mesh = new TorusMesh { InnerRadius = 0.018f, OuterRadius = 0.028f },
+            Mesh = new PlaneMesh { Size = new Vector2(ReticleSizeMeters, ReticleSizeMeters) },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = color,
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+                NoDepthTest = true,
+                RenderPriority = 50,
             },
         };
 
@@ -261,6 +382,7 @@ public partial class Main : Node3D
             if (++_deadTicks >= RestartDelayTicks)
             {
                 _sim.Restart();
+                _diorama.ResetTerrainFx(); // clear accumulated blood/corpses
                 _deadTicks = 0;
                 _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
             }
@@ -281,6 +403,10 @@ public partial class Main : Node3D
             _hud.Update(result, p);
         }
         _diorama.PushSnapshot(snap);
+
+        // Accumulate this tick's blood/scorch splats + corpse stamps (ABI v3).
+        TerrainFxView terrainFx = _sim.CaptureTerrainFx();
+        _diorama.RenderTerrainFx(terrainFx);
 
         // Play the audio this tick emitted, positioned relative to the player.
         AudioEventsView audio = _sim.CaptureAudio();
@@ -360,6 +486,9 @@ public partial class Main : Node3D
 
         var mesh = (MeshInstance3D)reticle;
         var material = (StandardMaterial3D)mesh.MaterialOverride;
+        // Aim hand shows the crosshair, move hand the cursor (roles swap with the
+        // hand-swap setting, so pick the texture by role each frame).
+        material.AlbedoTexture = isMoveHand ? _cursorTex : _aimTex;
         float triggerValue = hand.GetFloat("trigger");
         Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
         // Opaque reticle material: dim by darkening RGB (an alpha change would be
