@@ -138,15 +138,21 @@ TERRAIN_SLOT_FILES: dict[int, str] = {
 def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | None:
     """effect_id -> {uv_off:[x,y], uv_scale} for the particles.png sprite-effect
     atlas (EFFECT_ID_ATLAS_TABLE). Each effect_id occupies one cell of a
-    per-effect grid (size_code); we precompute the UV rect (with the native 2px
-    inset that avoids cell bleed) so the renderer just looks it up by the ABI
-    ParticleSnap.effect_id and feeds it as per-instance UV."""
+    per-effect grid (size_code); we precompute the UV rect so the renderer just
+    looks it up by the ABI ParticleSnap.effect_id and feeds it as per-instance UV.
+
+    The rect matches the native effect pool EXACTLY: origin at the cell corner,
+    size = cell - 2px, i.e. the 2px clamp trims the RIGHT/BOTTOM edges only
+    (grim draws Rectangle(x, y, cell_w-2, cell_h-2)). An earlier version inset
+    2px on EVERY side, which shifted the sample window and cropped art that runs
+    to the cell edge (freeze shards, glow) mid-gradient — that crop was the real
+    cause of the "square edge" artifacts, misread as linear-filter bleed."""
     if not particles_size:
         return None
     from src.crimson.effects_atlas import EFFECT_ID_ATLAS_TABLE, SIZE_CODE_GRID
 
     tex_w = float(particles_size[0])
-    inset = 2.0 / tex_w  # native clamps UVs to (cell - 2px)
+    clamp = 2.0 / tex_w  # native cell_size-2px clamp (right/bottom only)
     out: dict[str, dict] = {}
     for e in EFFECT_ID_ATLAS_TABLE:
         grid = SIZE_CODE_GRID[e.size_code]
@@ -154,8 +160,8 @@ def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | No
         col = e.frame % grid
         row = e.frame // grid
         out[str(e.effect_id)] = {
-            "uv_off": [col * cell + inset, row * cell + inset],
-            "uv_scale": cell - 2.0 * inset,
+            "uv_off": [col * cell, row * cell],
+            "uv_scale": cell - clamp,
         }
     return out
 

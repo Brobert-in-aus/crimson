@@ -541,17 +541,15 @@ public sealed partial class Diorama : Node3D
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
-                // Inset the atlas cell by 1px each side (matches the native effect
-                // pool's cell_size-2px clamp) so filter_linear can't bleed the cell
-                // edge / neighbour into the quad.
-                vec2 texel = 1.0 / vec2(textureSize(sheet, 0));
-                vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
+                // The manifest UV rect already matches the native sample window
+                // (cell corner, cell-2px right/bottom clamp) — no extra inset, and
+                // STRAIGHT alpha like the reference BLEND_ALPHA pass. The old
+                // shader-side inset + alpha-squaring were workarounds for the bake
+                // cropping edge-running art (since fixed at the source).
+                vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
                 ALBEDO = c.rgb * col.rgb;
-                // Square the texture alpha (as the additive pass does) so the soft
-                // cell edges fall to zero instead of leaving a visible square where
-                // the sprite's faint border meets the transparent quad.
-                ALPHA = c.a * c.a * col.a;
+                ALPHA = c.a * col.a;
             }
             """,
     };
@@ -570,16 +568,14 @@ public sealed partial class Diorama : Node3D
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
-                // Inset the cell 1px each side (native cell_size-2px clamp) so the
-                // additive blend doesn't add the bled cell edge as a visible square.
-                vec2 texel = 1.0 / vec2(textureSize(sheet, 0));
-                vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
+                // Manifest UV rect = native sample window; see ParticleShader.
+                vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
-                // Premultiplied so the additive add carries the life-fade (col.a) and
-                // the texture shape (c.a). Square the texture alpha so a soft cell's
-                // low-alpha square edges fade out (bright centre ~unchanged) instead
-                // of adding a faint visible square.
-                ALBEDO = c.rgb * col.rgb * (c.a * c.a) * col.a;
+                // Premultiplied into ALBEDO with ALPHA=1 so blend_add contributes
+                // src.rgb * src.a exactly like raylib's BLEND_ADDITIVE
+                // (GL_SRC_ALPHA, GL_ONE): texture shape (c.a) x life fade (col.a),
+                // each applied ONCE.
+                ALBEDO = c.rgb * col.rgb * c.a * col.a;
                 ALPHA = 1.0;
             }
             """,

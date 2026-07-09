@@ -341,6 +341,17 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
 
 ## Known render gaps / polish backlog (from in-headset testing + audit)
 
+- ~~Effect "square edge" workarounds~~ — **root-caused + made faithful
+  (2026-07-09)**: the bake's effect UV rect inset 2px on every side (native =
+  cell corner + 2px right/bottom clamp only), cropping edge-running art
+  (freeze shards through α≈226, glow through α=255) — THAT was the "square
+  edge", not filter bleed. The two workarounds it spawned (1px shader inset in
+  8521d3e4, texture-alpha squaring in 233b7018) dimmed/shrank every effect
+  (pickup ring, freeze shards visibly thin). Fixed at the source: bake emits
+  the native rect; both particle shaders restored to reference blend math
+  (alpha pass `c.a * col.a`, additive premultiplied `c.rgb*col.rgb*c.a*col.a`).
+  Verify in-headset that no edge artifact returns (any residual right/bottom
+  crop on full-bleed glow cells is native-faithful).
 - **Nuke** blast visual ~½ the effective radius (particle-scale work).
 - **[audit]** Verify muzzle-flash / detonation **double-draw** (synthetic
   `EmitFx` blobs vs restored effect-pool bursts) in-headset; if confirmed, drop
