@@ -889,8 +889,17 @@ public sealed partial class Diorama : Node3D
     }
 
     /// <summary>A flat quad basis lying on the plane (normal +Y), rotated by
-    /// <paramref name="angle"/> about the up axis, with local width/height. Matches
-    /// the ground-effect convention used by RenderParticles.</summary>
+    /// <paramref name="angle"/> about the up axis, with local width/height.
+    ///
+    /// FLAT-SPRITE ORIENTATION CONVENTION (read this before adding flat sprites):
+    /// the player sits on the arena's near (-z) edge and looks toward +z and down.
+    /// For a texture to read UPRIGHT from that view, its top must point to the FAR
+    /// (+z) edge. This basis does that (local +Y -> world +z), so use it for any
+    /// flat textured sprite on the plane (decals, corpses, bonuses, freeze). The
+    /// `RotX(-90)` FlatBasis maps texture-top to the NEAR (-z) edge -> UPSIDE DOWN;
+    /// it is only safe for solid-colour or radially-symmetric quads. Diegetic
+    /// panels/buttons that stand up or lie flat have the same gotcha (e.g. the flat
+    /// pause toggle needs an extra 180 about local Z to read upright).</summary>
     private static Basis FlatQuadBasis(float angle, float width, float height)
     {
         float c = Mathf.Cos(angle);
@@ -1167,6 +1176,15 @@ public sealed partial class Diorama : Node3D
                 // convention (validate in-headset; flip if streaks read sideways).
                 basis = StreakBasis(ForwardFromHeading(angle), length: meters * 2.6f, width: meters);
                 layer.Mesh.SetInstanceColor(i, ProjTint(cur.TypeId));
+            }
+            else if (layer.UvIndexed)
+            {
+                // Textured icons (bonuses): FlatQuadBasis reads upright (texture
+                // top -> +z far edge) from the player's downward view. The plain
+                // FlatBasis below maps texture-top to the near edge -> UPSIDE DOWN,
+                // so it's only for solid-colour fallbacks. See the FLAT-SPRITE
+                // ORIENTATION note on FlatQuadBasis.
+                basis = FlatQuadBasis(angle, meters, meters);
             }
             else
             {

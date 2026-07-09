@@ -744,10 +744,10 @@ public partial class Main : Node3D
         _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     }
 
-    // A point ~4 cm ahead of the grip (grip -Z faces out the controller front),
-    // used as the poke fingertip for physical menu buttons.
+    // The poke point is the grip position - i.e. the centre of the visible hand
+    // marker sphere, so the sphere the player sees IS the collider (no offset).
     private static Vector3 PokeTip(XRController3D hand)
-        => hand.GlobalPosition + hand.GlobalTransform.Basis.Z * -0.04f;
+        => hand.GlobalPosition;
 
     /// <summary>Shared vertical projection of a controller onto the arena plane
     /// (PLAN §4). Returns the clamped game-space point; also reports whether the

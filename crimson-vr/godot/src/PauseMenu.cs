@@ -40,7 +40,9 @@ public sealed partial class PauseMenu : Node3D
         _toggle = new VrButton();
         AddChild(_toggle);
         _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: s * 0.03f);
-        _toggle.Position = new Vector3(s * 0.62f, 0.02f, -s * 0.4f);
+        // Clear of the terrain floor (which extends ~0.65*s past centre); sit it
+        // out to the +x side so it never overlaps the play area.
+        _toggle.Position = new Vector3(s * 0.9f, 0.02f, -s * 0.35f);
         // Lie flat facing up. The extra 180 about local Z spins the label in-plane
         // so its top points away from the player (upright when looking down), not
         // toward them (which read upside down).

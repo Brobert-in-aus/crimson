@@ -34,13 +34,13 @@ public sealed partial class SettingsMenu : Node3D
         _swapState = handSwap;
         _debugState = debug;
 
-        Position = new Vector3(0.0f, s * 0.8f, 0.0f);
+        Position = new Vector3(0.0f, s * 0.85f, 0.0f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
-        float bw = s * 0.62f;
-        float bh = s * 0.14f;
-        float rowGap = s * 0.06f;
-        float top = s * 0.34f;
+        float bw = s * 0.7f;
+        float bh = s * 0.1f;
+        float pitch = s * 0.16f; // > bh, so rows never overlap
+        float y = s * 0.42f;     // top-down cursor
 
         var title = new Label3D
         {
@@ -48,52 +48,56 @@ public sealed partial class SettingsMenu : Node3D
             FontSize = 120,
             PixelSize = s / 260.0f,
             Modulate = new Color(0.9f, 0.9f, 0.95f),
-            Position = new Vector3(0.0f, top + bh, 0.0f),
+            Position = new Vector3(0.0f, y, 0.0f),
             NoDepthTest = true,
         };
         AddChild(title);
+        y -= pitch;
 
         // Hand-swap toggle.
         _handSwap = new VrButton();
         AddChild(_handSwap);
         _handSwap.Build(bw, bh, HandSwapText(), new Color(0.5f, 0.6f, 0.85f));
-        _handSwap.Position = new Vector3(0.0f, top, 0.0f);
+        _handSwap.Position = new Vector3(0.0f, y, 0.0f);
         _handSwap.OnPress += ToggleHandSwap;
+        y -= pitch;
 
-        // Dead-zone slider with a live value label above it.
+        // Dead-zone: a value label above its slider.
         _deadZoneLabel = new Label3D
         {
             Text = DeadZoneText(deadZone),
             FontSize = 90,
             PixelSize = s / 320.0f,
             Modulate = new Color(0.85f, 0.85f, 0.9f),
-            Position = new Vector3(0.0f, top - (bh + rowGap) + bh * 0.7f, 0.0f),
+            Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
             NoDepthTest = true,
         };
         AddChild(_deadZoneLabel);
 
         _deadZone = new VrSlider();
         AddChild(_deadZone);
-        _deadZone.Build(bw, s * 0.03f, 5.0f, 40.0f, deadZone);
-        _deadZone.Position = new Vector3(0.0f, top - (bh + rowGap) - bh * 0.2f, 0.0f);
+        _deadZone.Build(bw, s * 0.028f, 5.0f, 40.0f, deadZone);
+        _deadZone.Position = new Vector3(0.0f, y - s * 0.01f, 0.0f);
         _deadZone.OnValueChanged += v =>
         {
             _deadZoneLabel.Text = DeadZoneText(v);
             OnDeadZoneChanged?.Invoke(v);
         };
+        y -= pitch;
 
         // Debug-overlay toggle (poke-tip markers + creature facing needle).
         _debug = new VrButton();
         AddChild(_debug);
         _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f));
-        _debug.Position = new Vector3(0.0f, top - 2.0f * (bh + rowGap), 0.0f);
+        _debug.Position = new Vector3(0.0f, y, 0.0f);
         _debug.OnPress += ToggleDebug;
+        y -= pitch;
 
         // Back to the pause panel.
         _back = new VrButton();
         AddChild(_back);
         _back.Build(bw * 0.5f, bh, "Back", new Color(0.6f, 0.6f, 0.66f));
-        _back.Position = new Vector3(0.0f, top - 3.0f * (bh + rowGap), 0.0f);
+        _back.Position = new Vector3(0.0f, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
         Visible = false;

@@ -60,7 +60,7 @@ public sealed partial class VrButton : Node3D
         _halfW = width * 0.5f;
         _halfH = height * 0.5f;
         _proud = proud;
-        _pressDepth = proud * 0.45f; // pressed once pushed ~55% of the way in
+        _pressDepth = proud * 0.1f; // fires once pushed ~90% of the way in
         _baseColor = color;
         _pressedColor = color.Lerp(Colors.White, 0.55f);
 
@@ -92,20 +92,22 @@ public sealed partial class VrButton : Node3D
         };
         AddChild(_face);
 
-        if (!string.IsNullOrEmpty(text))
+        // Always create the label (even if empty) so SetText works later -
+        // checklist rows are built empty then filled, and without this they had
+        // no label node at all (blank buttons).
+        _label = new Label3D
         {
-            _label = new Label3D
-            {
-                Text = text,
-                FontSize = 96,
-                PixelSize = height / 220.0f, // scale text to the button
-                Modulate = new Color(0.05f, 0.05f, 0.06f),
-                Position = new Vector3(0.0f, 0.0f, _proud + 0.004f),
-                NoDepthTest = true,
-                Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
-            };
-            _face.AddChild(_label);
-        }
+            Text = text ?? string.Empty,
+            FontSize = 96,
+            PixelSize = height / 220.0f, // scale text to the button
+            Modulate = new Color(0.95f, 0.95f, 0.97f),
+            OutlineSize = 24,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
+            Position = new Vector3(0.0f, 0.0f, _proud + 0.004f),
+            NoDepthTest = true,
+            Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
+        };
+        _face.AddChild(_label);
     }
 
     public void SetText(string text)
@@ -129,6 +131,11 @@ public sealed partial class VrButton : Node3D
 
     /// <summary>Update the depress state from the controller probes. Call every
     /// rendered frame while the button is visible.</summary>
+    // The hand-marker sphere (this radius) is the collider: its leading surface,
+    // PokeRadius ahead of the tracked centre, pushes the button face in. So the
+    // visible sphere and the collision line up.
+    private const float PokeRadius = 0.02f;
+
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
         bool inside = false;
@@ -140,10 +147,11 @@ public sealed partial class VrButton : Node3D
                 continue;
             }
             Vector3 local = ToLocal(h.Tip);
-            if (Mathf.Abs(local.X) <= _halfW && Mathf.Abs(local.Y) <= _halfH && local.Z < _proud)
+            float surface = local.Z - PokeRadius; // sphere front toward the panel
+            if (Mathf.Abs(local.X) <= _halfW + PokeRadius && Mathf.Abs(local.Y) <= _halfH + PokeRadius && surface < _proud)
             {
                 inside = true;
-                frontZ = Mathf.Min(frontZ, local.Z);
+                frontZ = Mathf.Min(frontZ, surface);
             }
         }
 
