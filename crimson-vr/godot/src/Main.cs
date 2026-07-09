@@ -68,6 +68,7 @@ public partial class Main : Node3D
     private SettingsMenu _settingsMenu = null!;
     private bool _settingsOpen;
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
+    private StartPrompt _startPrompt = null!;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -152,6 +153,13 @@ public partial class Main : Node3D
         _settingsMenu.OnBack += CloseSettings;
         _settingsMenu.OnHandSwapChanged += v => _handSwap = v;
         _settingsMenu.OnDeadZoneChanged += v => _deadZone = v;
+
+        // First-run prompt: hold the sim until the player accepts (or calibrates,
+        // which is a later slice, so it just proceeds with the default for now).
+        _startPrompt = new StartPrompt();
+        _arenaRoot.AddChild(_startPrompt);
+        _startPrompt.Build(ArenaSideMeters);
+        _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
 
         try
         {
@@ -403,6 +411,12 @@ public partial class Main : Node3D
             return;
         }
 
+        // First-run prompt holds the sim until the player accepts.
+        if (_startPrompt.Pending)
+        {
+            return;
+        }
+
         // Death handling: hold for a moment, then restart the session (PLAN M2
         // "death -> restart").
         if (_sim.GameOver)
@@ -514,6 +528,12 @@ public partial class Main : Node3D
         probes[0] = MakeProbe(_leftHand);
         probes[1] = MakeProbe(_rightHand);
         ReadOnlySpan<HandProbe> p = probes;
+
+        if (_startPrompt.Pending)
+        {
+            _startPrompt.PollPoke(p);
+            return;
+        }
 
         _pauseMenu.PollPoke(p);
         if (_pauseMenu.IsPaused && _settingsOpen)
