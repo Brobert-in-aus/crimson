@@ -81,6 +81,43 @@ no click sound yet. (`UI_LEVELUP` is now used.)
   `ui_clockTable`, `ui_clockPointer`.
 - `ui_menuPanel` is staged but currently unused (dropped the full-screen panel).
 
+## Render-pipeline parity (draw-pass audit) — NEW
+
+The additive-pass bug (b5cea3c0) showed our earlier parity check was *feature/asset*
+level (what screens/textures/sounds are missing) and did **not** verify that each
+of the base game's **draw passes / blend modes** is reproduced. That's a different
+audit. Mapping `src/crimson/render/world/` to the diorama:
+
+| Base-game pass (`render/world`) | Blend | In VR? |
+|---|---|---|
+| ground / decals / corpses / shadows | alpha | Yes |
+| creatures (sprites + tint) | alpha | Yes |
+| **creature overlays** (`draw_creature_overlays`): monster-vision aura, plague/poison auras | alpha | **No** — plague/monster-vision auras not drawn |
+| projectiles / secondaries (glow streaks) | additive | Yes |
+| `draw_effect_pool` **alpha** pass (flags & 0x40): smoke, casings, blood | alpha | Yes |
+| `draw_effect_pool` **additive** pass (else): ring, flash, shockwave burst | additive | **Yes now** (b5cea3c0) — was dropped |
+| **`draw_particle_pool`** (`state.particles`, separate pool): additive glows/sparks | additive | **No** — this pool is **not exported over the ABI at all** |
+| bonus pickups + hover labels | alpha | Partial (icons yes, hover labels no) |
+| aim indicators / gauges / clock | alpha | Custom (VR reticles) |
+| HUD | alpha | Custom (non-faithful) |
+
+**What the additive-pass fix actually restored** (all were dark before — only the
+alpha smoke/blood/casings showed): explosion ring + bright flash + shockwave burst
+(nuke, rockets, grenades, barrels), **enemy hit-sparks** (`BURST`/`RING` on creature
+damage), and **projectile muzzle/impact flashes** (gauss/plasma/rocket `RING`+`BURST`
+in `projectiles/effects.py`). i.e. the whole "bright, glowy" combat-feedback layer.
+
+**Two render gaps this audit surfaced that remain:**
+1. **`state.particles` pool** (`draw_particle_pool`, additive glows/sparks, ~low
+   alpha) is a *second* particle system distinct from the effect pool, and it is
+   **not exported over the host ABI** — the diorama can't render what it never
+   receives. Needs an ABI addition (a second snapshot stream) like the effect pool.
+2. **Creature overlays** (`draw_creature_overlays`): the plague/poison aura and the
+   monster-vision (perk) aura per infected creature aren't drawn.
+
+**Lesson:** a feature/asset parity check misses render-pipeline correctness. Any
+base-game `begin_blend_mode` / draw pass should be explicitly matched in the diorama.
+
 ## Known render gaps / polish backlog (from in-headset testing)
 
 - **Nuke** blast visual ~½ the effective radius (particle-scale work).
