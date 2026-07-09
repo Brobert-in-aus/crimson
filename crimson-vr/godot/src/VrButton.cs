@@ -63,38 +63,75 @@ public sealed partial class VrButton : Node3D
     /// perk choice index or a menu action id). Purely for the caller's use.</summary>
     public int Payload;
 
-    public void Build(float width, float height, string? text, Color color, float proud = 0.012f)
+    // Shared ui_menuItem neon-bar plate (the original menu-button art), lazily
+    // loaded so plate-styled buttons match the main menu without per-call plumbing.
+    private static Texture2D? _sharedPlate;
+    private static bool _plateChecked;
+    private static Texture2D? SharedPlate()
+    {
+        if (!_plateChecked)
+        {
+            _plateChecked = true;
+            const string path = "res://assets/sprites/ui_menuItem.png";
+            _sharedPlate = ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        }
+        return _sharedPlate;
+    }
+
+    private bool _plate;
+
+    /// <param name="plate">Use the original ui_menuItem neon-bar plate as the button
+    /// face (dark textured bar + centred label, matching the main menu), instead of
+    /// the flat colour box. <paramref name="color"/> becomes a subtle accent tint.</param>
+    public void Build(float width, float height, string? text, Color color, float proud = 0.012f, bool plate = false)
     {
         _halfW = width * 0.5f;
         _halfH = height * 0.5f;
         _proud = proud;
         _pressDepth = proud * 0.1f; // fires once pushed ~90% of the way in
-        _baseColor = color;
-        _pressedColor = color.Lerp(Colors.White, 0.55f);
+        Texture2D? plateTex = plate ? SharedPlate() : null;
+        _plate = plateTex != null;
 
-        // Socket/backing at the panel surface (local Z = 0) so the button reads as
-        // recessed into a frame.
-        var socket = new MeshInstance3D
+        if (_plate)
         {
-            Mesh = new BoxMesh { Size = new Vector3(width * 1.08f, height * 1.08f, 0.004f) },
-            Position = new Vector3(0.0f, 0.0f, -0.002f),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(0.08f, 0.08f, 0.10f),
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            },
-        };
-        AddChild(socket);
+            // Plate style: the neon bar is its own dark background, so no socket.
+            // Base tint slightly dims the plate; pressed brightens it.
+            _baseColor = new Color(0.85f, 0.85f, 0.9f);
+            _pressedColor = Colors.White;
+        }
+        else
+        {
+            _baseColor = color;
+            _pressedColor = color.Lerp(Colors.White, 0.55f);
 
-        // The proud button face, moved along local Z by the poke.
+            // Socket/backing at the panel surface so the button reads as recessed.
+            AddChild(new MeshInstance3D
+            {
+                Mesh = new BoxMesh { Size = new Vector3(width * 1.08f, height * 1.08f, 0.004f) },
+                Position = new Vector3(0.0f, 0.0f, -0.002f),
+                MaterialOverride = new StandardMaterial3D
+                {
+                    AlbedoColor = new Color(0.08f, 0.08f, 0.10f),
+                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                },
+            });
+        }
+
+        // The proud button face, moved along local Z by the poke. A textured quad
+        // for the plate style, else a flat colour box.
         _mat = new StandardMaterial3D
         {
+            AlbedoTexture = plateTex,
             AlbedoColor = _baseColor,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = _plate ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         _face = new MeshInstance3D
         {
-            Mesh = new BoxMesh { Size = new Vector3(width, height, 0.006f) },
+            Mesh = _plate
+                ? new QuadMesh { Size = new Vector2(width, height) }
+                : new BoxMesh { Size = new Vector3(width, height, 0.006f) },
             Position = new Vector3(0.0f, 0.0f, _proud),
             MaterialOverride = _mat,
         };

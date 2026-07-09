@@ -16,6 +16,9 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class VrOptionsMenu : Node3D
 {
+    // Blue neon-ish title colour, like the original menu's headings.
+    private static readonly Color TitleColor = new(0.45f, 0.72f, 1.0f);
+
     private VrSegmentedSlider _sfx = null!;
     private VrSegmentedSlider _music = null!;
     private VrSegmentedSlider _detail = null!;
@@ -40,24 +43,10 @@ public sealed partial class VrOptionsMenu : Node3D
         float wp = s * 0.62f;
         float hp = s * 0.78f;
 
-        // Plain dark translucent panel behind the content. (The neon ui_menuPanel
-        // art is a wide 2:1 frame that stretched into a "tower" behind this taller
-        // VR layout, so we use a clean backing here; _ = panelTex keeps the caller
-        // signature stable for when a fitted panel skin is added.)
+        // No full-screen backing panel — the terrain shows through, matching the
+        // original menu. The buttons keep their own dark neon-bar plate. (panelTex
+        // is unused for now; kept in the signature for a future fitted panel skin.)
         _ = panelTex;
-        AddChild(new MeshInstance3D
-        {
-            Mesh = new QuadMesh { Size = new Vector2(wp, hp) },
-            Position = new Vector3(0.0f, 0.0f, -0.012f),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(0.06f, 0.07f, 0.11f, 0.88f),
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                RenderPriority = 20,
-            },
-        });
 
         float y = hp * 0.5f - s * 0.06f;
         AddChild(new Label3D
@@ -65,7 +54,9 @@ public sealed partial class VrOptionsMenu : Node3D
             Text = "Options",
             FontSize = 110,
             PixelSize = s / 1100.0f,
-            Modulate = new Color(0.92f, 0.92f, 0.97f),
+            Modulate = TitleColor,
+            OutlineSize = 24,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, y, 0.0f),
             NoDepthTest = true,
         });
@@ -89,13 +80,13 @@ public sealed partial class VrOptionsMenu : Node3D
         float bh = s * 0.075f;
         _vrSettings = new VrButton();
         AddChild(_vrSettings);
-        _vrSettings.Build(bw, bh, "VR Settings", new Color(0.5f, 0.6f, 0.85f));
+        _vrSettings.Build(bw, bh, "VR Settings", new Color(0.5f, 0.6f, 0.85f), plate: true);
         _vrSettings.Position = new Vector3(-(bw * 0.5f + s * 0.02f), y, 0.0f);
         _vrSettings.OnPress += () => OnVrSettings?.Invoke();
 
         _back = new VrButton();
         AddChild(_back);
-        _back.Build(bw, bh, "Back", new Color(0.6f, 0.6f, 0.66f));
+        _back.Build(bw, bh, "Back", new Color(0.6f, 0.6f, 0.66f), plate: true);
         _back.Position = new Vector3(bw * 0.5f + s * 0.02f, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
@@ -111,7 +102,9 @@ public sealed partial class VrOptionsMenu : Node3D
             Text = label,
             FontSize = 72,
             PixelSize = s / 1500.0f,
-            Modulate = new Color(0.85f, 0.85f, 0.9f),
+            Modulate = new Color(0.9f, 0.92f, 0.98f),
+            OutlineSize = 20,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
             NoDepthTest = true,
         });

@@ -47,7 +47,9 @@ public sealed partial class SettingsMenu : Node3D
             Text = "VR Settings",
             FontSize = 120,
             PixelSize = s / 1000.0f,
-            Modulate = new Color(0.9f, 0.9f, 0.95f),
+            Modulate = new Color(0.45f, 0.72f, 1.0f), // blue neon, like the OG headings
+            OutlineSize = 24,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, y, 0.0f),
             NoDepthTest = true,
         };
@@ -57,7 +59,7 @@ public sealed partial class SettingsMenu : Node3D
         // Hand-swap toggle.
         _handSwap = new VrButton();
         AddChild(_handSwap);
-        _handSwap.Build(bw, bh, HandSwapText(), new Color(0.5f, 0.6f, 0.85f));
+        _handSwap.Build(bw, bh, HandSwapText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
         _handSwap.Position = new Vector3(0.0f, y, 0.0f);
         _handSwap.OnPress += ToggleHandSwap;
         y -= pitch;
@@ -68,7 +70,9 @@ public sealed partial class SettingsMenu : Node3D
             Text = DeadZoneText(deadZone),
             FontSize = 90,
             PixelSize = s / 1200.0f,
-            Modulate = new Color(0.85f, 0.85f, 0.9f),
+            Modulate = new Color(0.9f, 0.92f, 0.98f),
+            OutlineSize = 20,
+            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
             NoDepthTest = true,
         };
@@ -88,7 +92,7 @@ public sealed partial class SettingsMenu : Node3D
         // Debug-overlay toggle (poke-tip markers + creature facing needle).
         _debug = new VrButton();
         AddChild(_debug);
-        _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f));
+        _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f), plate: true);
         _debug.Position = new Vector3(0.0f, y, 0.0f);
         _debug.OnPress += ToggleDebug;
         y -= pitch;
@@ -96,7 +100,7 @@ public sealed partial class SettingsMenu : Node3D
         // Back to the pause panel.
         _back = new VrButton();
         AddChild(_back);
-        _back.Build(bw * 0.5f, bh, "Back", new Color(0.6f, 0.6f, 0.66f));
+        _back.Build(bw * 0.5f, bh, "Back", new Color(0.6f, 0.6f, 0.66f), plate: true);
         _back.Position = new Vector3(0.0f, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
