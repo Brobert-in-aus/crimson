@@ -25,6 +25,8 @@ public sealed partial class VrCheckbox : Node3D
     private bool _state;
     private bool _pressed;
     private bool _armed;
+    private ulong _readyAtMs;
+    private const ulong ShowCooldownMs = 350;
 
     public event Action<bool>? OnToggled;
 
@@ -89,7 +91,7 @@ public sealed partial class VrCheckbox : Node3D
         {
             _armed = true;
         }
-        else if (_armed && !_pressed)
+        else if (_armed && !_pressed && Time.GetTicksMsec() >= _readyAtMs)
         {
             _state = !_state;
             Refresh();
@@ -102,5 +104,6 @@ public sealed partial class VrCheckbox : Node3D
     {
         _pressed = false;
         _armed = false;
+        _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
     }
 }

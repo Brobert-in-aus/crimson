@@ -37,6 +37,11 @@ public sealed partial class VrMenuItem : Node3D
     // Must be seen released once before it can fire again — stops an instant press
     // when the menu is (re)shown with a fingertip already inside the item volume.
     private bool _armed;
+    // Presses are also ignored for a short settle window after the item is shown,
+    // so a finger lingering (or arriving within a frame) where the item pops up
+    // can't trigger it (e.g. Back reappears the menu under the hand over Quit).
+    private ulong _readyAtMs;
+    private const ulong ShowCooldownMs = 350;
     private bool _enabled = true;
 
     private StandardMaterial3D _plateMat = null!;
@@ -165,18 +170,20 @@ public sealed partial class VrMenuItem : Node3D
         {
             _armed = true; // released -> may fire on the next press-down edge
         }
-        else if (_armed && !_pressed)
+        else if (_armed && !_pressed && Time.GetTicksMsec() >= _readyAtMs)
         {
             OnPress?.Invoke();
         }
         _pressed = nowPressed;
     }
 
-    /// <summary>Reset to the unpressed rest state (e.g. when the menu hides).</summary>
+    /// <summary>Reset to the unpressed rest state. Call when the menu is shown OR
+    /// hidden — it re-arms and starts the settle window.</summary>
     public void ResetPress()
     {
         _pressed = false;
         _armed = false; // require a release before the next press can fire
+        _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
         if (_group != null)
         {
             _group.Position = new Vector3(0.0f, 0.0f, _proud);

@@ -34,21 +34,24 @@ public sealed partial class VrOptionsMenu : Node3D
         float s, int sfx, int music, int detail, bool infoTexts,
         Texture2D? panelTex, Texture2D? rectOn, Texture2D? rectOff, Texture2D? checkOn, Texture2D? checkOff)
     {
-        Position = new Vector3(0.0f, s * 0.9f, 0.0f);
+        Position = new Vector3(0.0f, s * 0.95f, 0.0f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
-        float wp = s * 1.15f;
-        float hp = s * 1.5f;
+        float wp = s * 0.62f;
+        float hp = s * 0.78f;
 
-        // Panel background behind the content.
+        // Plain dark translucent panel behind the content. (The neon ui_menuPanel
+        // art is a wide 2:1 frame that stretched into a "tower" behind this taller
+        // VR layout, so we use a clean backing here; _ = panelTex keeps the caller
+        // signature stable for when a fitted panel skin is added.)
+        _ = panelTex;
         AddChild(new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(wp, hp) },
             Position = new Vector3(0.0f, 0.0f, -0.012f),
             MaterialOverride = new StandardMaterial3D
             {
-                AlbedoTexture = panelTex,
-                AlbedoColor = panelTex != null ? new Color(1, 1, 1, 0.96f) : new Color(0.08f, 0.09f, 0.13f, 0.92f),
+                AlbedoColor = new Color(0.06f, 0.07f, 0.11f, 0.88f),
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
@@ -56,34 +59,34 @@ public sealed partial class VrOptionsMenu : Node3D
             },
         });
 
-        float y = hp * 0.5f - s * 0.13f;
+        float y = hp * 0.5f - s * 0.06f;
         AddChild(new Label3D
         {
             Text = "Options",
-            FontSize = 120,
-            PixelSize = s / 240.0f,
-            Modulate = new Color(0.9f, 0.9f, 0.95f),
+            FontSize = 110,
+            PixelSize = s / 1100.0f,
+            Modulate = new Color(0.92f, 0.92f, 0.97f),
             Position = new Vector3(0.0f, y, 0.0f),
             NoDepthTest = true,
         });
-        y -= s * 0.17f;
+        y -= s * 0.13f;
 
         _sfx = AddSliderRow("Sound volume", s, y, 0, 10, sfx, rectOn, rectOff, v => OnSfxChanged?.Invoke(v));
-        y -= s * 0.19f;
+        y -= s * 0.13f;
         _music = AddSliderRow("Music volume", s, y, 0, 10, music, rectOn, rectOff, v => OnMusicChanged?.Invoke(v));
-        y -= s * 0.19f;
+        y -= s * 0.13f;
         _detail = AddSliderRow("Graphics detail", s, y, 1, 5, detail, rectOn, rectOff, v => OnDetailChanged?.Invoke(v));
-        y -= s * 0.19f;
+        y -= s * 0.12f;
 
         _infoTexts = new VrCheckbox();
         AddChild(_infoTexts);
-        _infoTexts.Build(s * 0.08f, "UI Info texts", infoTexts, checkOn, checkOff);
-        _infoTexts.Position = new Vector3(-s * 0.28f, y, 0.0f);
+        _infoTexts.Build(s * 0.045f, "UI Info texts", infoTexts, checkOn, checkOff);
+        _infoTexts.Position = new Vector3(-s * 0.16f, y, 0.0f);
         _infoTexts.OnToggled += b => OnInfoTextsChanged?.Invoke(b);
-        y -= s * 0.17f;
+        y -= s * 0.12f;
 
-        float bw = s * 0.42f;
-        float bh = s * 0.12f;
+        float bw = s * 0.26f;
+        float bh = s * 0.075f;
         _vrSettings = new VrButton();
         AddChild(_vrSettings);
         _vrSettings.Build(bw, bh, "VR Settings", new Color(0.5f, 0.6f, 0.85f));
@@ -107,14 +110,14 @@ public sealed partial class VrOptionsMenu : Node3D
         {
             Text = label,
             FontSize = 72,
-            PixelSize = s / 320.0f,
+            PixelSize = s / 1500.0f,
             Modulate = new Color(0.85f, 0.85f, 0.9f),
-            Position = new Vector3(0.0f, y + s * 0.055f, 0.0f),
+            Position = new Vector3(0.0f, y + s * 0.045f, 0.0f),
             NoDepthTest = true,
         });
         var slider = new VrSegmentedSlider();
         AddChild(slider);
-        slider.Build(s * 0.045f, min, max, value, rectOn, rectOff);
+        slider.Build(s * 0.03f, min, max, value, rectOn, rectOff);
         slider.Position = new Vector3(0.0f, y, 0.0f);
         slider.OnValueChanged += v => onChanged(v);
         return slider;
@@ -123,12 +126,11 @@ public sealed partial class VrOptionsMenu : Node3D
     public void SetShown(bool visible)
     {
         Visible = visible;
-        if (!visible)
-        {
-            _vrSettings.ResetPress();
-            _back.ResetPress();
-            _infoTexts.ResetPress();
-        }
+        // Re-arm + start the settle window on show AND hide, so a finger where a
+        // control appears can't instant-fire (e.g. VR Settings Back reopens this).
+        _vrSettings.ResetPress();
+        _back.ResetPress();
+        _infoTexts.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)

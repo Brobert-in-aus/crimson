@@ -48,6 +48,10 @@ public sealed partial class VrButton : Node3D
     // instant press when a panel is (re)shown with a fingertip already inside the
     // button volume (e.g. Back returns to a menu with the hand over Quit).
     private bool _armed;
+    // Presses are also ignored for a short settle window after the button is shown,
+    // so a finger arriving within a frame or two as the panel pops up can't fire.
+    private ulong _readyAtMs;
+    private const ulong ShowCooldownMs = 350;
 
     private Color _baseColor;
     private Color _pressedColor;
@@ -168,7 +172,7 @@ public sealed partial class VrButton : Node3D
         {
             _armed = true; // released -> may fire on the next press-down edge
         }
-        else if (_armed && !_pressed)
+        else if (_armed && !_pressed && Time.GetTicksMsec() >= _readyAtMs)
         {
             OnPress?.Invoke();
         }
@@ -181,6 +185,7 @@ public sealed partial class VrButton : Node3D
     {
         _pressed = false;
         _armed = false; // require a release before the next press can fire
+        _readyAtMs = Time.GetTicksMsec() + ShowCooldownMs;
         if (_face != null)
         {
             _face.Position = new Vector3(0.0f, 0.0f, _proud);

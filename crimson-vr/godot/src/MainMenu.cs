@@ -107,6 +107,12 @@ public sealed partial class MainMenu : Node3D
     {
         IsOpen = true;
         Visible = true;
+        // Re-arm + start the settle window so a finger lingering where an item pops
+        // up (e.g. returning from Options with the hand over Quit) can't instant-fire.
+        _play.ResetPress();
+        _options.ResetPress();
+        _statistics.ResetPress();
+        _quit.ResetPress();
     }
 
     public void Close()
