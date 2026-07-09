@@ -737,8 +737,13 @@ public partial class Main : Node3D
                 int score = _sim.LastResult.PlayerExperience;
                 _deathRank = HighscoreRank(score);
                 _audio.PlayUi(AudioBank.UiPanel);
+                // One composite death screen (base game_over.py two-phase panel):
+                // the results panel appears immediately; a ranking score raises it
+                // and puts the name-entry keyboard in front (phase 0), otherwise
+                // it opens straight in the buttons phase.
                 if (_deathRank < HighscoreTableMax)
                 {
+                    _gameOverPanel.ShowForNameEntry(_sim.LastResult, _deathRank);
                     _keyboard.Show(score);
                 }
                 else
@@ -972,13 +977,13 @@ public partial class Main : Node3D
             _startPrompt.PollPoke(p);
             return;
         }
-        if (_sim != null && _sim.GameOver && _keyboard.Active)
+        // Death screen: keyboard (name-entry phase) and panel can be up together.
+        if (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active))
         {
-            _keyboard.PollPoke(p);
-            return;
-        }
-        if (_sim != null && _sim.GameOver && _gameOverPanel.Active)
-        {
+            if (_keyboard.Active)
+            {
+                _keyboard.PollPoke(p);
+            }
             _gameOverPanel.PollPoke(p);
             return;
         }
@@ -1060,8 +1065,8 @@ public partial class Main : Node3D
         return rank;
     }
 
-    /// <summary>Keyboard phase done: record the name (empty = skip saving, like
-    /// the base game's blank-name guard) and move on to the results panel.</summary>
+    /// <summary>Name-entry phase done: record the name (empty = skip saving, like
+    /// the base game's blank-name guard) and reveal the panel's buttons phase.</summary>
     private void SubmitHighscoreName(string name)
     {
         if (_sim == null)
@@ -1075,7 +1080,7 @@ public partial class Main : Node3D
         }
         GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
         _keyboard.Dismiss();
-        _gameOverPanel.Show(_sim.LastResult, _deathRank);
+        _gameOverPanel.ShowButtons();
     }
 
     /// <summary>Results panel "Play Again": start a fresh run immediately.</summary>

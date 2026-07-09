@@ -12,13 +12,16 @@ namespace CrimsonVR;
 /// like the base game), most-used weapon icon + name (ABI v10), Frags and
 /// Hit % — plus Play Again / Main Menu poke buttons.
 ///
-/// Flow (driven by Main): death → short pacing delay → name entry on the
-/// virtual keyboard when the score ranks (base phase 0) → this panel (phase 1).
-/// The base game's High-scores button is omitted until the high-scores browser
-/// screen exists.
+/// Flow (driven by Main, matching the base game's two-phase panel): death →
+/// short pacing delay → the panel appears immediately. If the score ranks, the
+/// panel starts in the NAME-ENTRY phase — raised and pushed back so the virtual
+/// keyboard sits in front of it (the base game's "State your name, trooper!"
+/// input lives on the same panel) with the buttons hidden; Enter drops it to
+/// the standard spot and reveals the buttons. Unranked deaths skip straight to
+/// the buttons phase. The base game's High-scores button is omitted until the
+/// high-scores browser screen exists.
 ///
-/// A child of ArenaRoot in the same spot as the virtual keyboard (they are
-/// never up at once), so it inherits arena placement/scale/yaw.
+/// A child of ArenaRoot; inherits arena placement/scale/yaw.
 /// </summary>
 public sealed partial class GameOverPanel : Node3D
 {
@@ -29,6 +32,7 @@ public sealed partial class GameOverPanel : Node3D
     public event Action? OnPlayAgain;
     public event Action? OnMainMenu;
 
+    private bool _buttonsShown;
     private readonly List<VrButton> _buttons = new();
     private readonly Dictionary<int, (string Name, int IconIndex)> _weapons = new();
 
@@ -88,9 +92,35 @@ public sealed partial class GameOverPanel : Node3D
         Visible = false;
     }
 
-    /// <summary>Fill the card from the final tick stats and show the panel.
-    /// <paramref name="rank"/> is the 0-based insertion index into the local
-    /// highscore table (TableMax = didn't rank).</summary>
+    /// <summary>Show the panel raised + pushed back with buttons hidden, leaving
+    /// the keyboard slot in front free for name entry (base phase 0).</summary>
+    public void ShowForNameEntry(in Sim.TickResult result, int rank)
+    {
+        Show(result, rank);
+        _buttonsShown = false;
+        foreach (VrButton b in _buttons)
+        {
+            b.Visible = false;
+        }
+        Position = new Vector3(0.0f, _side * 1.32f, _side * 0.30f);
+    }
+
+    /// <summary>Name entry done: drop to the standard spot and reveal the
+    /// Play Again / Main Menu buttons (base phase 1).</summary>
+    public void ShowButtons()
+    {
+        Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        _buttonsShown = true;
+        foreach (VrButton b in _buttons)
+        {
+            b.Visible = true;
+            b.ResetPress();
+        }
+    }
+
+    /// <summary>Fill the card from the final tick stats and show the panel in
+    /// the buttons phase. <paramref name="rank"/> is the 0-based insertion index
+    /// into the local highscore table (TableMax = didn't rank).</summary>
     public void Show(in Sim.TickResult result, int rank)
     {
         _score.Text = $"Score: {result.PlayerExperience}";
@@ -125,8 +155,11 @@ public sealed partial class GameOverPanel : Node3D
         int ratio = fired > 0 ? hit * 100 / fired : 0;
         _hitRatio.Text = $"Hit %: {ratio}%";
 
+        Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        _buttonsShown = true;
         foreach (VrButton b in _buttons)
         {
+            b.Visible = true;
             b.ResetPress();
         }
         Active = true;
@@ -141,7 +174,9 @@ public sealed partial class GameOverPanel : Node3D
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
-        if (!Active)
+        // Name-entry phase has no pokeable elements (VrButton has no visibility
+        // guard of its own, so don't poll hidden buttons).
+        if (!Active || !_buttonsShown)
         {
             return;
         }

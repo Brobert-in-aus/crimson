@@ -530,40 +530,55 @@ public sealed partial class Diorama : Node3D
     // Particle shader: per-instance UV cell (INSTANCE_CUSTOM = off.xy, scale.z)
     // and per-instance rgba tint (COLOR). Alpha-blended (draw_effect_pool uses
     // BLEND_ALPHA), depth-write off so RenderPriority orders it above the world.
+    //
+    // BLEND-SPACE NOTE: the original composites in sRGB (display) space; Godot
+    // blends in linear. The same numbers blended in linear read visibly milkier
+    // for bright translucent sources (numerically fitted: mean err 0.086 -> 0.018
+    // over arena-toned backgrounds). The sampler takes RAW values (no
+    // source_color) so the shader can do the native display-referred tint math
+    // (c.rgb * col.rgb, both authored in sRGB), encode the color to linear with
+    // pow 2.2 (exact at full alpha), and approximate sRGB-space compositing by
+    // warping alpha with a luminance-dependent exponent (bright sources need
+    // less alpha in linear, dark sources more; fitted 1.6/0.6 endpoints).
     private Shader? _particleShader;
     private Shader ParticleShader => _particleShader ??= new Shader
     {
         Code = """
             shader_type spatial;
             render_mode unshaded, cull_disabled, depth_draw_never;
-            uniform sampler2D sheet : source_color, filter_linear;
+            uniform sampler2D sheet : filter_linear;
             varying vec4 inst;
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
-                // The manifest UV rect already matches the native sample window
-                // (cell corner, cell-2px right/bottom clamp) — no extra inset, and
-                // STRAIGHT alpha like the reference BLEND_ALPHA pass. The old
-                // shader-side inset + alpha-squaring were workarounds for the bake
-                // cropping edge-running art (since fixed at the source).
+                // Manifest UV rect = native sample window (cell corner, cell-2px
+                // right/bottom clamp) — no shader-side inset.
                 vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
-                ALBEDO = c.rgb * col.rgb;
-                ALPHA = c.a * col.a;
+                vec3 s = c.rgb * col.rgb;      // display-referred source color
+                ALBEDO = pow(s, vec3(2.2));
+                float a = clamp(c.a * col.a, 0.0, 1.0);
+                float lum = dot(min(s, vec3(1.0)), vec3(0.299, 0.587, 0.114));
+                ALPHA = pow(a, mix(0.6, 1.6, lum));
             }
             """,
     };
 
     // Additive variant for the non-alpha effect pass (flags & 0x40 == 0): the
     // explosion ring, bright flash and shockwave bursts, which draw_effect_pool
-    // renders with BLEND_ADDITIVE. Without this only the dark alpha smoke shows.
+    // renders with BLEND_ADDITIVE (GL_SRC_ALPHA, GL_ONE). Same blend-space note
+    // as ParticleShader: compute the native display-referred contribution
+    // (c.rgb * col.rgb * c.a * col.a, all sRGB-authored) and encode with the
+    // fitted pow 1.1 — the best dst-blind approximation of sRGB-space addition
+    // over arena-toned backgrounds (mean err 0.053; naive all-linear was 0.156,
+    // full pow 2.2 overshoots dim at 0.156-class errors the other way).
     private Shader? _particleShaderAdd;
     private Shader ParticleShaderAdd => _particleShaderAdd ??= new Shader
     {
         Code = """
             shader_type spatial;
             render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
-            uniform sampler2D sheet : source_color, filter_linear;
+            uniform sampler2D sheet : filter_linear;
             varying vec4 inst;
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
@@ -571,11 +586,8 @@ public sealed partial class Diorama : Node3D
                 // Manifest UV rect = native sample window; see ParticleShader.
                 vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
-                // Premultiplied into ALBEDO with ALPHA=1 so blend_add contributes
-                // src.rgb * src.a exactly like raylib's BLEND_ADDITIVE
-                // (GL_SRC_ALPHA, GL_ONE): texture shape (c.a) x life fade (col.a),
-                // each applied ONCE.
-                ALBEDO = c.rgb * col.rgb * c.a * col.a;
+                vec3 s = c.rgb * col.rgb * (c.a * col.a); // native additive term
+                ALBEDO = pow(s, vec3(1.1));
                 ALPHA = 1.0;
             }
             """,

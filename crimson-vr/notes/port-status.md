@@ -52,9 +52,12 @@ tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
   Expert/Master, neon hover items). Intentional VR substitution; noted so the
   banner isn't counted twice as "unused art".
 - **Game-over / results screen** (2026-07-09, ABI v10): death → ~1.2 s pacing
-  delay (stand-in for the base death VO + death-timer) → highscore name entry
-  on the virtual keyboard **only when the score ranks** (base top-100 gate;
-  ours is the local top-10) → results panel with the `ui_textReaper` banner,
+  delay (stand-in for the base death VO + death-timer) → the results panel
+  appears immediately as ONE composite death screen (base two-phase panel):
+  when the score ranks (base top-100 gate; ours is the local top-10) the panel
+  opens raised/pushed back with the virtual keyboard in front ("State your
+  name, trooper!", buttons hidden), then drops to the buttons phase on Enter;
+  unranked deaths open straight in the buttons phase — with the `ui_textReaper` banner,
   score, rank ordinal, game time as mm:ss + the animated
   `ui_clockTable`/`ui_clockPointer` gauge (6°/s), most-used weapon icon
   (`ui_wicons`) + display name (weapons table baked into the sprite manifest),
@@ -350,8 +353,21 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
   (pickup ring, freeze shards visibly thin). Fixed at the source: bake emits
   the native rect; both particle shaders restored to reference blend math
   (alpha pass `c.a * col.a`, additive premultiplied `c.rgb*col.rgb*c.a*col.a`).
-  Verify in-headset that no edge artifact returns (any residual right/bottom
-  crop on full-bleed glow cells is native-faithful).
+  **Follow-up (same day, post-screenshot):** the remaining milkiness is
+  BLEND-SPACE — the original composites in sRGB, Godot in linear; the same
+  numbers blended in linear read brighter for translucent sources. Both
+  particle shaders now sample RAW (no `source_color`), do the native
+  display-referred tint math, and approximate sRGB-space compositing with
+  numerically fitted curves (alpha pass: luma-dependent alpha exponent
+  0.6→1.6, mean err 0.086→0.018 for white sources; additive: pow 1.1 on the
+  display product, err 0.053 vs 0.156 all-linear). Fitted against arena-toned
+  backgrounds — revisit constants if the ground palette changes. Verify
+  in-headset that no edge artifact returns (any residual right/bottom crop on
+  full-bleed glow cells is native-faithful). Note the giant freeze/reflex
+  pickup sphere (`spawn_ring`, lifetime 1 s, scale 45×/s) natively out-grows
+  the screen in ~0.3 s — the diorama shows its whole life; if it still reads
+  as too dominant, that's a VR-view adaptation question (clip/fade at arena
+  bounds), not blend math.
 - **Nuke** blast visual ~½ the effective radius (particle-scale work).
 - **[audit]** Verify muzzle-flash / detonation **double-draw** (synthetic
   `EmitFx` blobs vs restored effect-pool bursts) in-headset; if confirmed, drop

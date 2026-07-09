@@ -68,12 +68,15 @@ public sealed partial class VirtualKeyboard : Node3D
         Visible = false;
     }
 
-    /// <summary>Show the keyboard with a score context in the prompt.</summary>
+    /// <summary>Show the keyboard for highscore name entry. The score/results
+    /// context lives on the GameOverPanel behind it, so the prompt is the base
+    /// game's phase-0 line (game_over.py).</summary>
     public void Show(int score)
     {
+        _ = score;
         _text.Clear();
         UpdateDisplay();
-        _prompt.Text = $"Game over - score {score}. Enter your name:";
+        _prompt.Text = "State your name, trooper!";
         foreach (VrButton k in _keys)
         {
             k.ResetPress();
