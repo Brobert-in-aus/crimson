@@ -16,33 +16,24 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes.
+    // validation surface changes. Trimmed 2026-07-09: items validated in past
+    // sessions (creature tint/anim, HUD, menus, haptics, persistence...) and
+    // dead entries (grab-drag slider, unreachable passthrough) removed; now
+    // covers this round's effect/fog/death-screen fixes + still-open audits.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("tint", "Creature base tint (variant colors)"),
-        ("hitflash", "Hit-flash (white on hit)"),
-        ("death", "Death animation + fade"),
-        ("corpses", "Corpse stamps on ground"),
-        ("blood", "Blood / scorch decals"),
-        ("bonusicons", "Bonus pickup icons"),
-        ("freeze", "Freeze overlay (ice)"),
-        ("energizer", "Energizer blue tint"),
-        ("floor", "Terrain floor texture"),
-        ("fog", "Grey fog falloff"),
-        ("passthrough", "MR passthrough (Quest)"),
-        ("reticles", "Cursor / crosshair reticles"),
-        ("streaks", "Projectile streak orientation"),
-        ("muzzle", "Muzzle / explosion fx"),
-        ("perk", "Perk menu poke-to-pick"),
-        ("pause", "Pause / resume"),
-        ("handswap", "Hand-swap toggle"),
-        ("deadzone", "Dead-zone slider grab-drag"),
-        ("firstrun", "First-run prompt"),
-        ("keyboard", "Highscore keyboard"),
-        ("hapfire", "Haptic: fire pulse"),
-        ("haphit", "Haptic: hit pulse"),
-        ("hapreload", "Haptic: reload tick"),
-        ("persist", "Settings persist on relaunch"),
+        ("fogsquare", "No square around big effects"),
+        ("pickupfx", "Pickup sparks: clean edges"),
+        ("freezering", "Freeze/pickup ring look"),
+        ("fxdensity", "Effect opacity (shards/smoke)"),
+        ("fognear", "Fog: none within 3m, grey far"),
+        ("deathpanel", "Death screen: panel + keyboard"),
+        ("deathstats", "Death stats: score/rank/time/clock"),
+        ("deathroutes", "Play Again / Main Menu buttons"),
+        ("auras", "Creature auras (poison/plague/vision)"),
+        ("glowpool", "Flamer/bubblegun glow pool"),
+        ("corpseorient", "Corpse stamp orientation"),
+        ("uisfx", "UI click SFX + perk fade"),
     };
 
     private const int PerPage = 6;
