@@ -75,10 +75,10 @@ public sealed partial class MainMenu : Node3D
             AddChild(logo);
         }
 
-        // Vertical item stack. Item height = width/8 (plate aspect); pitch leaves a
-        // gap so proud plates never overlap.
-        float itemW = s * 0.8f;
-        float pitch = itemW * VrMenuItemHeightFactor() * 1.5f;
+        // Vertical item stack. Items are the cropped plate (aspect ~3.6:1, matching
+        // the submenu buttons); pitch leaves a gap so proud plates never overlap.
+        float itemW = s * 0.5f;
+        float pitch = itemW * VrMenuItemHeightFactor() * 1.3f;
         float y = s * 0.22f;
 
         _play = MakeItem(itemW, itemTex, labelTex, RowPlay, y); y -= pitch;
@@ -97,7 +97,7 @@ public sealed partial class MainMenu : Node3D
         Visible = false;
     }
 
-    private static float VrMenuItemHeightFactor() => 64.0f / 512.0f;
+    private static float VrMenuItemHeightFactor() => 64.0f / 230.0f; // cropped plate aspect
 
     private VrMenuItem MakeItem(float width, Texture2D? itemTex, Texture2D? labelTex, int row, float y)
     {

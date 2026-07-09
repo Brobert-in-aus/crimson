@@ -195,7 +195,8 @@ public partial class Main : Node3D
         // VR Settings submenu (opened from Options): hand-swap + dead-zone + debug.
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
-        _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug);
+        _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
+            LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };

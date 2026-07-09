@@ -14,8 +14,12 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class SettingsMenu : Node3D
 {
+    // Dead zone shown as segmented pips like the Options sliders: value 0-10 maps
+    // to 0-40 game units (4 per pip).
+    private const int DeadZoneStep = 4;
+
     private VrButton _handSwap = null!;
-    private VrSlider _deadZone = null!;
+    private VrSegmentedSlider _deadZone = null!;
     private Label3D _deadZoneLabel = null!;
     private VrButton _back = null!;
 
@@ -28,7 +32,7 @@ public sealed partial class SettingsMenu : Node3D
     public event Action<float>? OnDeadZoneChanged;
     public event Action<bool>? OnDebugChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
@@ -79,14 +83,16 @@ public sealed partial class SettingsMenu : Node3D
         };
         AddChild(_deadZoneLabel);
 
-        _deadZone = new VrSlider();
+        _deadZone = new VrSegmentedSlider();
         AddChild(_deadZone);
-        _deadZone.Build(bw, s * 0.028f, 5.0f, 40.0f, deadZone);
+        int dzValue = Mathf.Clamp(Mathf.RoundToInt(deadZone / DeadZoneStep), 0, 10);
+        _deadZone.Build(s * 0.03f, 0, 10, dzValue, rectOn, rectOff);
         _deadZone.Position = new Vector3(0.0f, y - s * 0.01f, 0.0f);
         _deadZone.OnValueChanged += v =>
         {
-            _deadZoneLabel.Text = DeadZoneText(v);
-            OnDeadZoneChanged?.Invoke(v);
+            float units = v * DeadZoneStep;
+            _deadZoneLabel.Text = DeadZoneText(units);
+            OnDeadZoneChanged?.Invoke(units);
         };
         y -= pitch;
 
@@ -116,7 +122,6 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.ResetPress();
         _debug.ResetPress();
         _back.ResetPress();
-        _deadZone.ResetGrab();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
@@ -128,7 +133,7 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.PollPoke(probes);
         _debug.PollPoke(probes);
         _back.PollPoke(probes);
-        _deadZone.PollGrab(probes);
+        _deadZone.PollPoke(probes);
     }
 
     private void ToggleHandSwap()

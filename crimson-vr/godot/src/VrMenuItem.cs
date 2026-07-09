@@ -19,14 +19,17 @@ namespace CrimsonVR;
 public sealed partial class VrMenuItem : Node3D
 {
     // Plate art aspect: ui_menuItem.png is 512x64, so height = width/8.
-    private const float PlateAspect = 64.0f / 512.0f;
+    // ui_menuItem is a rail (left) + button plate (right); we crop to the plate
+    // region (UV x 0.55-1.0, ~230x64 px) so items match the submenu buttons — plate
+    // only, no rail. Aspect is that region: height = width * 64/230.
+    private const float PlateUvX0 = 0.55f;
+    private const float PlateUvW = 0.45f;
+    private const float PlateAspect = 64.0f / 230.0f;
     // ui_itemTexts.png atlas: 128x256, one label row is 122x32 (visible 28 tall).
     private const float AtlasW = 128.0f;
     private const float AtlasH = 256.0f;
     private const float LabelRectW = 122.0f;
     private const float LabelRectH = 32.0f;
-    // Plate centre within the ui_menuItem art (rail left, plate right; measured).
-    private const float PlateCentreUv = 0.766f;
     // The hand-marker sphere (this radius) is the collider — matches VrButton.
     private const float PokeRadius = 0.02f;
 
@@ -66,9 +69,16 @@ public sealed partial class VrMenuItem : Node3D
         _group = new Node3D { Position = new Vector3(0.0f, 0.0f, _proud) };
         AddChild(_group);
 
-        // The plate (ui_menuItem). Falls back to a translucent grey slab if the
-        // art isn't staged, so the menu still works without user-supplied assets.
+        // The plate (ui_menuItem), cropped to the plate region so the item is just
+        // the button plate (no rail), matching the submenu buttons. Falls back to a
+        // translucent grey slab if the art isn't staged.
         _plateMat = FlatTexMat(plateTex, new Color(0.55f, 0.57f, 0.65f, 0.9f), priority: 30);
+        if (plateTex != null)
+        {
+            _plateMat.TextureRepeat = false;
+            _plateMat.Uv1Scale = new Vector3(PlateUvW, 1.0f, 1.0f);
+            _plateMat.Uv1Offset = new Vector3(PlateUvX0, 0.0f, 0.0f);
+        }
         var plate = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
@@ -101,9 +111,8 @@ public sealed partial class VrMenuItem : Node3D
             var label = new MeshInstance3D
             {
                 Mesh = new QuadMesh { Size = new Vector2(labelW, labelH) },
-                // ui_menuItem is a rail on the left + the button plate on the right
-                // (plate centre ~UV 0.766); sit the label on the plate, not the rail.
-                Position = new Vector3((PlateCentreUv - 0.5f) * width, 0.0f, 0.002f),
+                // Plate is cropped to fill the item, so the label centres on it.
+                Position = new Vector3(0.0f, 0.0f, 0.002f),
                 MaterialOverride = _labelMat,
             };
             _group.AddChild(label);
@@ -151,7 +160,8 @@ public sealed partial class VrMenuItem : Node3D
         }
         bool inside = false;         // over the face AND pushed in past the rest depth
         bool overFootprint = false;  // fingertip within the button's X/Y area (any depth)
-        float frontZ = _proud; // least-pressed default
+        float frontZ = _proud;       // least-pressed default
+        float nearestSurface = float.MaxValue; // closest fingertip depth over the footprint
         foreach (HandProbe h in probes)
         {
             if (!h.Valid)
@@ -163,6 +173,7 @@ public sealed partial class VrMenuItem : Node3D
             {
                 overFootprint = true;
                 float surface = local.Z - PokeRadius; // sphere front toward the panel
+                nearestSurface = Mathf.Min(nearestSurface, surface);
                 if (surface < _proud)
                 {
                     inside = true;
@@ -175,10 +186,11 @@ public sealed partial class VrMenuItem : Node3D
         _group.Position = new Vector3(0.0f, 0.0f, z);
 
         bool nowPressed = inside && z <= _pressDepth;
-        // Arm only once the fingertip has LEFT the button's footprint entirely, so a
-        // hand resting over a button (e.g. when a menu reopens under it) must be
-        // moved clear before the button can fire again.
-        if (!overFootprint)
+        // Re-arm only once the fingertip has fully LEFT the item's dead-zone volume:
+        // laterally out of the footprint, OR pulled back past a clearance of 2x the
+        // item depth in front of the rest face (see VrButton).
+        bool inDeadZone = overFootprint && nearestSurface <= _proud + _proud * 2.0f;
+        if (!inDeadZone)
         {
             _armed = true;
         }

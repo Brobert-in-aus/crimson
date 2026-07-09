@@ -18,6 +18,7 @@ public sealed partial class VrSegmentedSlider : Node3D
 {
     private const float PokeRadius = 0.02f;   // matches the hand-marker sphere
     private const float PressDepth = 0.008f;  // fingertip must be within this of the face
+    private const float ActiveProud = 0.012f; // active pips sit proud; inactive behind
 
     private MeshInstance3D[] _cells = Array.Empty<MeshInstance3D>();
     private StandardMaterial3D[] _cellMats = Array.Empty<StandardMaterial3D>();
@@ -83,6 +84,9 @@ public sealed partial class VrSegmentedSlider : Node3D
             bool on = i < _value;
             _cellMats[i].AlbedoTexture = on ? _onTex : _offTex;
             _cellMats[i].AlbedoColor = on ? Colors.White : new Color(1.0f, 1.0f, 1.0f, 0.5f);
+            // Active pips sit proud toward the player, inactive pips recessed behind.
+            float x = -_stripHalfW + (i + 0.5f) * _cellW;
+            _cells[i].Position = new Vector3(x, 0.0f, on ? ActiveProud : 0.0f);
         }
     }
 

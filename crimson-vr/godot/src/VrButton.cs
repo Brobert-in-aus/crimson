@@ -201,7 +201,8 @@ public sealed partial class VrButton : Node3D
     {
         bool inside = false;         // over the face AND pushed in past the rest depth
         bool overFootprint = false;  // fingertip within the button's X/Y area (any depth)
-        float frontZ = _proud; // least-pressed default
+        float frontZ = _proud;       // least-pressed default
+        float nearestSurface = float.MaxValue; // closest fingertip depth over the footprint
         foreach (HandProbe h in probes)
         {
             if (!h.Valid)
@@ -213,6 +214,7 @@ public sealed partial class VrButton : Node3D
             {
                 overFootprint = true;
                 float surface = local.Z - PokeRadius; // sphere front toward the panel
+                nearestSurface = Mathf.Min(nearestSurface, surface);
                 if (surface < _proud)
                 {
                     inside = true;
@@ -226,10 +228,13 @@ public sealed partial class VrButton : Node3D
 
         bool nowPressed = inside && z <= _pressDepth;
         _mat.AlbedoColor = nowPressed ? _pressedColor : _baseColor;
-        // Arm only once the fingertip has LEFT the button's footprint entirely, so a
-        // hand resting over a button (e.g. when a menu reopens under it) must be
-        // moved clear before the button can fire again.
-        if (!overFootprint)
+        // Re-arm only once the fingertip has fully LEFT the button's dead-zone
+        // volume: laterally out of the footprint, OR pulled back past a clearance
+        // of 2x the button depth in front of the rest face. So a hand resting/
+        // hovering just above a button (e.g. after pressing Back, or when a menu
+        // reopens under it) must be deliberately moved clear before it can fire.
+        bool inDeadZone = overFootprint && nearestSurface <= _proud + DeadZoneClearance;
+        if (!inDeadZone)
         {
             _armed = true;
         }
@@ -239,6 +244,8 @@ public sealed partial class VrButton : Node3D
         }
         _pressed = nowPressed;
     }
+
+    private float DeadZoneClearance => _proud * 2.0f; // 2x button depth of clearance in front
 
     /// <summary>Reset to the unpressed rest state (e.g. when the menu hides, so a
     /// held poke doesn't re-fire when it reappears).</summary>
