@@ -501,6 +501,9 @@ public sealed partial class Diorama : Node3D
         DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
         RenderPriority = renderPriority,
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        // Fog runs after the fragment and ADDS under additive blending, painting
+        // the quad footprint as a faint square (see ParticleShaderAdd).
+        DisableFog = true,
     };
 
     /// <summary>Additive glow streak layer (projectiles/secondaries): a soft blob
@@ -545,7 +548,7 @@ public sealed partial class Diorama : Node3D
     {
         Code = """
             shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
             uniform sampler2D sheet : filter_linear;
             varying vec4 inst;
             varying vec4 col;
@@ -577,12 +580,18 @@ public sealed partial class Diorama : Node3D
     {
         Code = """
             shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
+            render_mode unshaded, cull_disabled, depth_draw_never, blend_add, fog_disabled;
             uniform sampler2D sheet : filter_linear;
             varying vec4 inst;
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
             void fragment() {
+                // fog_disabled is LOAD-BEARING on every additive material: the
+                // pipeline applies distance fog AFTER the fragment shader, lifting
+                // even ALBEDO=0 fragments to fog_color*fog_amount — under blend_add
+                // that ADDS a faint uniform wash over the quad's whole footprint,
+                // which read as a translucent SQUARE around big effects (freeze/
+                // pickup ring) and square edges on the pickup burst sparks.
                 // Manifest UV rect = native sample window; see ParticleShader.
                 vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);

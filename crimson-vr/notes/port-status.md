@@ -368,6 +368,17 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
   the screen in ~0.3 s — the diorama shows its whole life; if it still reads
   as too dominant, that's a VR-view adaptation question (clip/fade at arena
   bounds), not blend math.
+  **Root cause #3 — the actual "square around the effect" (user screenshot
+  diff): FOG on additive materials.** Godot applies distance fog AFTER the
+  fragment shader, lifting even ALBEDO=0 fragments to fog_color×fog_amount;
+  under `blend_add` that ADDS a faint uniform wash over the quad's entire
+  footprint — a translucent square around the pickup/freeze ring and square
+  edges on the pickup burst sparks, regardless of texture alpha (verified:
+  imported texture alpha is exactly 0 there; the wash was uniform in the
+  screenshot pixel-diff). Fixed with `fog_disabled` on both particle shaders
+  and `DisableFog` on the additive glow StandardMaterial (streaks + EmitFx).
+  Alpha-blend materials can't leak this way (zero alpha contributes nothing
+  in mix blending).
 - **Nuke** blast visual ~½ the effective radius (particle-scale work).
 - **[audit]** Verify muzzle-flash / detonation **double-draw** (synthetic
   `EmitFx` blobs vs restored effect-pool bursts) in-headset; if confirmed, drop
