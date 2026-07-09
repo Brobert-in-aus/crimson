@@ -873,6 +873,14 @@ screen-space overlays:
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
 virtual keyboard), the grab-drag slider, haptic feel, and menu placement/reach.
 
+**In-headset validation tools (2026-07-09).** To work that backlog on-device:
+a **`ValidationChecklist`** (opened from the pause menu) - a paged, poke-cyclable
+untested/pass/fail list of every headless-only feature (M3 visuals + M4 menus),
+persisted in UserSettings so results survive relaunch; and a **debug toggle**
+(settings menu, persisted) that surfaces hidden/subtle things - controller
+poke-tip markers (validate where a poke registers) + the creature facing needle
+(`Diorama.SetDebug`). Extend both as new things need eyes.
+
 Deferred to their own later slices (flagged, not M4-blocking): seated
 reach-envelope calibration (§5), the arena-size adjustment UI, player-centered
 follow-mode toggle (§5).

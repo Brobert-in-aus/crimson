@@ -19,16 +19,20 @@ public sealed partial class SettingsMenu : Node3D
     private Label3D _deadZoneLabel = null!;
     private VrButton _back = null!;
 
+    private VrButton _debug = null!;
     private bool _swapState;
+    private bool _debugState;
 
     public event Action? OnBack;
     public event Action<bool>? OnHandSwapChanged;
     public event Action<float>? OnDeadZoneChanged;
+    public event Action<bool>? OnDebugChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
+        _debugState = debug;
 
         Position = new Vector3(0.0f, s * 0.8f, 0.0f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
@@ -78,11 +82,18 @@ public sealed partial class SettingsMenu : Node3D
             OnDeadZoneChanged?.Invoke(v);
         };
 
+        // Debug-overlay toggle (poke-tip markers + creature facing needle).
+        _debug = new VrButton();
+        AddChild(_debug);
+        _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f));
+        _debug.Position = new Vector3(0.0f, top - 2.0f * (bh + rowGap), 0.0f);
+        _debug.OnPress += ToggleDebug;
+
         // Back to the pause panel.
         _back = new VrButton();
         AddChild(_back);
         _back.Build(bw * 0.5f, bh, "Back", new Color(0.6f, 0.6f, 0.66f));
-        _back.Position = new Vector3(0.0f, top - 2.0f * (bh + rowGap), 0.0f);
+        _back.Position = new Vector3(0.0f, top - 3.0f * (bh + rowGap), 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
         Visible = false;
@@ -94,6 +105,7 @@ public sealed partial class SettingsMenu : Node3D
         if (!visible)
         {
             _handSwap.ResetPress();
+            _debug.ResetPress();
             _back.ResetPress();
             _deadZone.ResetGrab();
         }
@@ -106,6 +118,7 @@ public sealed partial class SettingsMenu : Node3D
             return;
         }
         _handSwap.PollPoke(probes);
+        _debug.PollPoke(probes);
         _back.PollPoke(probes);
         _deadZone.PollGrab(probes);
     }
@@ -117,7 +130,16 @@ public sealed partial class SettingsMenu : Node3D
         OnHandSwapChanged?.Invoke(_swapState);
     }
 
+    private void ToggleDebug()
+    {
+        _debugState = !_debugState;
+        _debug.SetText(DebugText());
+        OnDebugChanged?.Invoke(_debugState);
+    }
+
     private string HandSwapText() => _swapState ? "Movement: Right hand" : "Movement: Left hand";
+
+    private string DebugText() => _debugState ? "Debug overlays: ON" : "Debug overlays: off";
 
     private static string DeadZoneText(float v) => $"Dead zone: {v:0} units";
 }

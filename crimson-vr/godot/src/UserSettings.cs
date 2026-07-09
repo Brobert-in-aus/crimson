@@ -24,7 +24,10 @@ public sealed class UserSettings
     public bool HandSwap;
     public float DeadZone = VrInput.DefaultDeadZoneGameUnits;
     public bool FirstRunDone;
+    public bool Debug;
     public readonly List<HighscoreEntry> Highscores = new();
+    // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
+    public readonly Dictionary<string, int> Checklist = new();
 
     public void Load()
     {
@@ -36,6 +39,7 @@ public sealed class UserSettings
         HandSwap = cf.GetValue("input", "hand_swap", HandSwap).AsBool();
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
+        Debug = cf.GetValue("dev", "debug", Debug).AsBool();
 
         Highscores.Clear();
         string hs = cf.GetValue("game", "highscores", string.Empty).AsString();
@@ -54,6 +58,26 @@ public sealed class UserSettings
                 // Corrupt highscore blob -> start fresh, keep the scalar settings.
             }
         }
+
+        Checklist.Clear();
+        string ck = cf.GetValue("dev", "checklist", string.Empty).AsString();
+        if (!string.IsNullOrEmpty(ck))
+        {
+            try
+            {
+                Dictionary<string, int>? map = JsonSerializer.Deserialize<Dictionary<string, int>>(ck);
+                if (map != null)
+                {
+                    foreach (KeyValuePair<string, int> kv in map)
+                    {
+                        Checklist[kv.Key] = kv.Value;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
     }
 
     public void Save()
@@ -63,6 +87,8 @@ public sealed class UserSettings
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
+        cf.SetValue("dev", "debug", Debug);
+        cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
         cf.Save(ConfigPath);
     }
 

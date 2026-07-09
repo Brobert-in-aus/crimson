@@ -71,6 +71,10 @@ public partial class Main : Node3D
     private StartPrompt _startPrompt = null!;
     private VirtualKeyboard _keyboard = null!;
     private readonly UserSettings _settings = new();
+    private ValidationChecklist _checklist = null!;
+    private bool _checklistOpen;
+    private bool _debug;
+    private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
 
     // Hand roles: default left = movement, right = aim/fire (PLAN §1); swap is a
@@ -160,10 +164,36 @@ public partial class Main : Node3D
         // Settings (MVP): hand-swap + dead-zone, opened from the pause menu.
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
-        _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone);
+        _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug);
         _settingsMenu.OnBack += CloseSettings;
         _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
+        _settingsMenu.OnDebugChanged += SetDebug;
+
+        // Validation checklist (opened from the pause menu), results persisted.
+        _checklist = new ValidationChecklist();
+        _arenaRoot.AddChild(_checklist);
+        _checklist.Build(ArenaSideMeters, _settings.Checklist);
+        _checklist.OnItemChanged += (id, state) => { _settings.Checklist[id] = state; _settings.Save(); };
+        _checklist.OnClose += CloseChecklist;
+        _pauseMenu.OnChecklist += OpenChecklist;
+
+        // Debug poke-tip markers (world-space); shown only in debug mode.
+        for (int i = 0; i < _pokeMarkers.Length; i++)
+        {
+            _pokeMarkers[i] = new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.008f, Height = 0.016f },
+                MaterialOverride = new StandardMaterial3D
+                {
+                    AlbedoColor = new Color(1.0f, 0.9f, 0.2f),
+                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                },
+                Visible = false,
+            };
+            AddChild(_pokeMarkers[i]);
+        }
+        SetDebug(_settings.Debug); // apply the saved debug state to the diorama
 
         // First-run prompt: hold the sim until the player accepts (or calibrates,
         // which is a later slice, so it just proceeds with the default for now).
@@ -574,6 +604,28 @@ public partial class Main : Node3D
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
             PollMenuPoke();
         }
+        if (_debug)
+        {
+            UpdatePokeMarkers();
+        }
+    }
+
+    /// <summary>Debug: show a marker at each controller's poke tip so the physical
+    /// poke point is visible against the menu buttons.</summary>
+    private void UpdatePokeMarkers()
+    {
+        UpdateMarker(0, _leftHand);
+        UpdateMarker(1, _rightHand);
+    }
+
+    private void UpdateMarker(int index, XRController3D hand)
+    {
+        bool tracking = hand.GetHasTrackingData();
+        _pokeMarkers[index].Visible = tracking;
+        if (tracking)
+        {
+            _pokeMarkers[index].GlobalPosition = PokeTip(hand);
+        }
     }
 
     /// <summary>Feed controller tips to the diegetic menus (poke) each rendered
@@ -602,6 +654,10 @@ public partial class Main : Node3D
         {
             _settingsMenu.PollPoke(p);
         }
+        if (_pauseMenu.IsPaused && _checklistOpen)
+        {
+            _checklist.PollPoke(p);
+        }
         if (_perkMenu.Active)
         {
             _perkMenu.PollPoke(p);
@@ -612,11 +668,18 @@ public partial class Main : Node3D
             }
         }
 
-        // Settings is only valid while paused (e.g. the toggle was poked off
-        // underneath the overlay); reconcile.
-        if (_settingsOpen && !_pauseMenu.IsPaused)
+        // The settings/checklist overlays are only valid while paused (e.g. the
+        // pause toggle was poked off underneath one); reconcile.
+        if (!_pauseMenu.IsPaused)
         {
-            CloseSettings();
+            if (_settingsOpen)
+            {
+                CloseSettings();
+            }
+            if (_checklistOpen)
+            {
+                CloseChecklist();
+            }
         }
     }
 
@@ -639,6 +702,38 @@ public partial class Main : Node3D
         if (_pauseMenu.IsPaused)
         {
             _pauseMenu.SetPanelVisible(true);
+        }
+    }
+
+    private void OpenChecklist()
+    {
+        _checklistOpen = true;
+        _pauseMenu.SetPanelVisible(false);
+        _checklist.SetShown(true);
+    }
+
+    private void CloseChecklist()
+    {
+        _checklistOpen = false;
+        _checklist.SetShown(false);
+        if (_pauseMenu.IsPaused)
+        {
+            _pauseMenu.SetPanelVisible(true);
+        }
+    }
+
+    private void SetDebug(bool on)
+    {
+        _debug = on;
+        _settings.Debug = on;
+        _settings.Save();
+        _diorama.SetDebug(on);
+        if (!on)
+        {
+            foreach (MeshInstance3D m in _pokeMarkers)
+            {
+                m.Visible = false;
+            }
         }
     }
 

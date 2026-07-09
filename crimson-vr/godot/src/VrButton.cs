@@ -116,6 +116,17 @@ public sealed partial class VrButton : Node3D
         }
     }
 
+    /// <summary>Recolor the button (e.g. a checklist item changing pass/fail).</summary>
+    public void SetColor(Color color)
+    {
+        _baseColor = color;
+        _pressedColor = color.Lerp(Colors.White, 0.55f);
+        if (_mat != null && !_pressed)
+        {
+            _mat.AlbedoColor = _baseColor;
+        }
+    }
+
     /// <summary>Update the depress state from the controller probes. Call every
     /// rendered frame while the button is visible.</summary>
     public void PollPoke(ReadOnlySpan<HandProbe> probes)

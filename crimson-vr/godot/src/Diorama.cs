@@ -139,8 +139,11 @@ public sealed partial class Diorama : Node3D
     // that facing is validated correct (needle points along the raw forward,
     // which is 90 deg off the sprite art's baked facing — expected). Flip on to
     // recalibrate a new sheet.
-    private static readonly bool DebugFacing = false;
+    private bool _debug;
     private const int NeedleCap = 8192;
+
+    /// <summary>Toggle debug overlays (the magenta creature facing needle).</summary>
+    public void SetDebug(bool on) => _debug = on;
 
     // 2.5D presentation (PLAN §6). A fixed back-tilt was tried (leaning sprites
     // toward the player so they read as "standing"), but in-headset it looked
@@ -315,26 +318,25 @@ public sealed partial class Diorama : Node3D
         BuildDecals(manifest);
         BuildCorpses(manifest);
 
-        if (DebugFacing)
+        // Facing needle: always built (hidden) so the debug toggle can enable it
+        // at runtime; emission is gated on _debug (SetDebug).
+        _needles = new MultiMesh
         {
-            _needles = new MultiMesh
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = NeedleCap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D
+        {
+            Multimesh = _needles,
+            MaterialOverride = new StandardMaterial3D
             {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
-                InstanceCount = NeedleCap,
-                VisibleInstanceCount = 0,
-            };
-            AddChild(new MultiMeshInstance3D
-            {
-                Multimesh = _needles,
-                MaterialOverride = new StandardMaterial3D
-                {
-                    AlbedoColor = new Color(1.0f, 0.0f, 1.0f),
-                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                },
-            });
-        }
+                AlbedoColor = new Color(1.0f, 0.0f, 1.0f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            },
+        });
     }
 
     private Layer BuildColorLayer(int capacity, Color color, float lift, float sizeScale, int renderPriority = 8)
@@ -1226,7 +1228,7 @@ public sealed partial class Diorama : Node3D
                 layer.Mesh.SetInstanceColor(i, CreatureTint(cur));
             }
 
-            if (sprite && _needles != null)
+            if (sprite && _debug && _needles != null)
             {
                 AddNeedle(arena, angle);
             }

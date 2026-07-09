@@ -21,12 +21,14 @@ public sealed partial class PauseMenu : Node3D
     private Node3D _panel = null!;
     private VrButton _resume = null!;
     private VrButton _settings = null!;
+    private VrButton _checklist = null!;
     private VrButton _quit = null!;
 
     public bool IsPaused { get; private set; }
 
     public event Action? OnQuit;
     public event Action? OnSettings;
+    public event Action? OnChecklist;
 
     public void Build(float arenaSideMeters)
     {
@@ -57,9 +59,11 @@ public sealed partial class PauseMenu : Node3D
         float gap = s * 0.05f;
         _resume = MakeButton(_panel, "Resume", new Color(0.4f, 0.8f, 0.45f), bw, bh, 0, gap);
         _settings = MakeButton(_panel, "Settings", new Color(0.5f, 0.6f, 0.85f), bw, bh, 1, gap);
-        _quit = MakeButton(_panel, "Quit", new Color(0.85f, 0.35f, 0.3f), bw, bh, 2, gap);
+        _checklist = MakeButton(_panel, "Checklist", new Color(0.6f, 0.55f, 0.8f), bw, bh, 2, gap);
+        _quit = MakeButton(_panel, "Quit", new Color(0.85f, 0.35f, 0.3f), bw, bh, 3, gap);
         _resume.OnPress += () => SetPaused(false);
         _settings.OnPress += () => OnSettings?.Invoke();
+        _checklist.OnPress += () => OnChecklist?.Invoke();
         _quit.OnPress += () => OnQuit?.Invoke();
     }
 
@@ -97,6 +101,7 @@ public sealed partial class PauseMenu : Node3D
         {
             _resume.PollPoke(probes);
             _settings.PollPoke(probes);
+            _checklist.PollPoke(probes);
             _quit.PollPoke(probes);
         }
     }
