@@ -120,12 +120,6 @@ public sealed partial class Diorama : Node3D
 
     private const int PlayerCap = 4;
     private const int CreatureCapPerType = 1024;
-    // A bullet lodged in a creature that is now dying (dropped to the ground) is
-    // itself dropped to the ground if it sits within this game-space radius of a
-    // dying creature — otherwise it floats at the shooter plane over the corpse.
-    private const float StuckBulletRadiusGame = 34.0f;
-    private readonly Vector2[] _dyingPos = new Vector2[2048];
-    private int _dyingCount;
     private const int ProjectileCap = 8192;
     private const int SecondaryCap = 2048;
     private const int BonusCap = 256;
@@ -293,7 +287,7 @@ public sealed partial class Diorama : Node3D
     private readonly Dictionary<int, string> _terrainSlots = new(); // slot -> sheet
     private const float FloorMarginScale = 1.3f; // floor size vs playfield side
     private const float FloorY = -0.001f;        // just below the decal plane
-    private const float FloorTile = 4.0f;        // ground texture repeats across the floor
+    private const float FloorTile = 6.0f;        // ground texture repeats across the floor
 
     // Bonus icons (bonuses.png, 4x4 grid): bonus_id -> icon frame. Rendered on
     // the _bonuses layer via per-instance UV (Layer.UvIndexed). Icon-only for now
@@ -554,7 +548,10 @@ public sealed partial class Diorama : Node3D
                 vec2 cell = UV * (inst.z - 2.0 * texel) + inst.xy + texel;
                 vec4 c = texture(sheet, cell);
                 ALBEDO = c.rgb * col.rgb;
-                ALPHA = c.a * col.a;
+                // Square the texture alpha (as the additive pass does) so the soft
+                // cell edges fall to zero instead of leaving a visible square where
+                // the sprite's faint border meets the transparent quad.
+                ALPHA = c.a * c.a * col.a;
             }
             """,
     };
@@ -972,7 +969,11 @@ public sealed partial class Diorama : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             Uv1Scale = new Vector3(FloorTile, FloorTile, 1.0f),
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+            // Nearest (not Linear) so the pixel-art terrain reads crisp — Linear
+            // over-smoothed the base tile into a flat green blur, hiding its
+            // grass/dirt detail. (Faithful dirt-patch placement would need the
+            // grim ground generator; this at least surfaces the base texture.)
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
         };
         float s = _arenaSideMeters * FloorMarginScale;
         _floor = new MeshInstance3D
@@ -1299,39 +1300,26 @@ public sealed partial class Diorama : Node3D
         }
         _creatureFallback.BeginPush();
         _energizerTimer = view.Header.EnergizerTimer;
-        _dyingCount = 0;
         foreach (Sim.CreatureSnap c in view.Creatures)
         {
             Layer target = _creatureLayers.TryGetValue(c.TypeId, out Layer? l) ? l : _creatureFallback;
             target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags,
                 maxHp: c.MaxHp, lifecycleStage: c.LifecycleStage,
                 baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer);
-            // Record dying creatures (dropped to the ground) so stuck bullets on
-            // them can be dropped too.
-            if (c.LifecycleStage < 16.0f && _dyingCount < _dyingPos.Length)
-            {
-                _dyingPos[_dyingCount++] = new Vector2(c.X, c.Y);
-            }
         }
 
         _projectiles.BeginPush();
-        float stuckR2 = StuckBulletRadiusGame * StuckBulletRadiusGame;
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
         {
-            // A bullet sitting on a dying creature is flagged (AnimPhase = -1, unused
-            // for streak layers) so InterpolateLayer drops it to the ground with the
-            // corpse instead of floating at the shooter plane.
-            bool grounded = false;
-            for (int d = 0; d < _dyingCount; d++)
+            // Cull projectiles the instant they stop moving: life_timer < 0.4 is the
+            // sim's own "hit and lingering" gate (projectiles.zig), where the bullet
+            // no longer advances. This removes the bullets that used to float on
+            // corpses / hang in the air (ABI v9).
+            if (pr.LifeTimer < 0.4f)
             {
-                Vector2 delta = new Vector2(pr.X, pr.Y) - _dyingPos[d];
-                if (delta.LengthSquared() <= stuckR2)
-                {
-                    grounded = true;
-                    break;
-                }
+                continue;
             }
-            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: grounded ? -1.0f : 0.0f, typeId: pr.TypeId);
+            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: 0.0f, typeId: pr.TypeId);
         }
 
         _secondaries.BeginPush();
@@ -1515,13 +1503,6 @@ public sealed partial class Diorama : Node3D
             // otherwise the dying sprite fades at the raised enemy lift while the
             // corpse stamps at ground, reading as two vertically-separated bodies.
             if (cur.LifecycleStage < 16.0f)
-            {
-                pos.Y = CorpseLift;
-            }
-            // A bullet flagged as lodged in a dying creature (AnimPhase < 0 for
-            // streak layers) drops to the ground too, so it settles onto the corpse
-            // rather than floating at the shooter plane after its target dies.
-            if (layer.Streak && cur.AnimPhase < 0.0f)
             {
                 pos.Y = CorpseLift;
             }

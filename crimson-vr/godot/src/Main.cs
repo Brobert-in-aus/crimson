@@ -321,6 +321,7 @@ public partial class Main : Node3D
     private void ReturnToMenu()
     {
         _keyboard.Dismiss();
+        _perkMenu.ForceHide(); // don't leave perk cards floating over the main menu
         _pauseMenu.ForceResume();
         _sim?.Restart();
         _diorama.ResetTerrainFx();
@@ -518,8 +519,32 @@ public partial class Main : Node3D
         _origin.AddChild(_leftHand);
         _origin.AddChild(_rightHand);
 
-        _leftHand.AddChild(MakeHandMarker(new Color(0.2f, 0.5f, 1.0f)));
-        _rightHand.AddChild(MakeHandMarker(new Color(1.0f, 0.3f, 0.25f)));
+        _handMarkers[0] = MakeHandMarker(new Color(0.2f, 0.5f, 1.0f));
+        _handMarkers[1] = MakeHandMarker(new Color(1.0f, 0.3f, 0.25f));
+        _leftHand.AddChild(_handMarkers[0]);
+        _rightHand.AddChild(_handMarkers[1]);
+    }
+
+    // The physical poke spheres on the controllers. Shown only when a poke UI is up
+    // (menus/perk pick/keyboard); hidden during combat, where they just clutter the
+    // view over the aiming reticles/guides.
+    private readonly MeshInstance3D[] _handMarkers = new MeshInstance3D[2];
+
+    private void UpdateHandMarkers()
+    {
+        bool pokeUi = MenuOwnsScreen
+            || _pauseMenu.IsPaused
+            || _perkMenu.Active
+            || _startPrompt.Pending
+            || (_sim != null && _sim.GameOver && _keyboard.Active);
+        if (_handMarkers[0] != null)
+        {
+            _handMarkers[0].Visible = pokeUi;
+        }
+        if (_handMarkers[1] != null)
+        {
+            _handMarkers[1].Visible = pokeUi;
+        }
     }
 
     private static MeshInstance3D MakeHandMarker(Color color)
@@ -567,7 +592,7 @@ public partial class Main : Node3D
             // closer diorama still reads as the focus. Grey fog fades the distance.
             AlbedoColor = terrainTex != null ? new Color(0.9f, 0.9f, 0.9f) : new Color(0.22f, 0.22f, 0.25f),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest, // crisp pixel terrain (match arena floor)
             Uv1Scale = new Vector3(WorldFloorTiles, WorldFloorTiles, 1.0f),
         };
         _worldFloor = new MeshInstance3D
@@ -840,6 +865,7 @@ public partial class Main : Node3D
         // Menus must respond regardless of sim state (so the player can interact
         // and report even if the native lib failed to load).
         PollMenuPoke();
+        UpdateHandMarkers();
         if (_debug)
         {
             UpdatePokeMarkers();

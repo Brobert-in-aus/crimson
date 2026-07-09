@@ -55,6 +55,28 @@ public sealed partial class PerkMenu : Node3D
     /// <summary>Reveal the cards (from the level-up button).</summary>
     public void Open() => _opened = true;
 
+    /// <summary>Force the whole perk pick hidden + reset. Needed when quitting a
+    /// mission with a pick open: the sim tick that would clear it via Update() stops
+    /// running once the main menu owns the screen, so the cards would otherwise
+    /// linger over the menu.</summary>
+    public void ForceHide()
+    {
+        Pending = false;
+        _opened = false;
+        Chosen = -1;
+        _count = 0;
+        _setSig = int.MinValue;
+        Visible = false;
+        _descPanel.Visible = false;
+        for (int i = 0; i < _cards.Length; i++)
+        {
+            _cards[i].Visible = false;
+            _cards[i].ResetPress();
+            _help[i].Visible = false;
+            _help[i].ResetPress();
+        }
+    }
+
     public void Build(float arenaSideMeters)
     {
         LoadPerkNames();

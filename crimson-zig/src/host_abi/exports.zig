@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 8;
+pub const abi_version: u32 = 9;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -162,11 +162,15 @@ pub const ProjectileSnap = extern struct {
     y: f32,
     angle: f32,
     type_id: i32,
-    // Velocity (ABI v6) so the host can tell a moving bullet from one that has
-    // stopped/lodged in a creature (used to drop a stuck bullet to the ground
-    // when its target dies).
+    // Velocity (ABI v6). NOTE: this is a fixed-magnitude direction (cos,sin)*1.5,
+    // NOT effective speed — it does not go to zero when a projectile stops, so use
+    // life_timer (below) to detect a stopped/lingering projectile.
     vx: f32,
     vy: f32,
+    // Projectile life timer (ABI v9). A projectile with life_timer < 0.4 has hit
+    // and entered "linger" mode: it no longer moves (projectiles.zig update). The
+    // host uses this to cull bullets the instant they stop.
+    life_timer: f32,
 };
 
 pub const SecondarySnap = extern struct {
@@ -758,6 +762,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .type_id = entry.type_id,
             .vx = entry.vel.x,
             .vy = entry.vel.y,
+            .life_timer = entry.life_timer,
         });
     }
     for (box.runner.session.secondary_projectiles.entries) |entry| {

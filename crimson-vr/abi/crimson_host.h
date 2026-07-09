@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 8u
+#define CRIMSON_HOST_ABI_VERSION 9u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -189,8 +189,9 @@ typedef struct crimson_host_projectile_snap {
     float y;
     float angle;
     int32_t type_id;
-    float vx; /* ABI v6+; velocity — ~0 means stopped/lodged in a target */
+    float vx; /* ABI v6+; fixed-magnitude direction (cos,sin)*1.5, NOT speed */
     float vy;
+    float life_timer; /* ABI v9+; < 0.4 => hit & lingering (stopped moving) */
 } crimson_host_projectile_snap;
 
 typedef struct crimson_host_secondary_snap {

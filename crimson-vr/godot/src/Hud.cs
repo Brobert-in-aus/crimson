@@ -18,14 +18,28 @@ namespace CrimsonVR;
 public sealed partial class Hud : Node3D
 {
     // Native HUD coordinates (ui/hud.py). Elements are positioned by their native
-    // top-left + size; the mapping centres the HUD bounding box on the panel.
+    // top-left + size. Horizontally the bbox is centred on the panel; vertically the
+    // HUD's TOP edge (native y = 0) is anchored at the panel origin (NativeCenterY =
+    // 0) so the whole HUD hangs DOWN from the arena's near edge rather than
+    // extending up over the play surface.
     private const float NativeCenterX = 222.0f; // bbox x in [-68, 512]
-    private const float NativeCenterY = 56.0f;  // bbox y in [0, 113]
+    private const float NativeCenterY = 0.0f;   // top edge at the origin -> hangs down
     private const float NativeSpan = 580.0f;    // bbox width (-68..512)
 
+    // Ammo bars enlarged for VR readability (native was 6-wide / 6-step / 16-tall).
     private const int AmmoBarMax = 20;         // HUD_AMMO_BAR_CLAMP
-    private const float AmmoBarStep = 6.0f;    // HUD_AMMO_BAR_STEP
+    private const float AmmoBarStep = 11.0f;
+    private const float AmmoBarW = 10.0f;
+    private const float AmmoBarH = 30.0f;
+    private const float AmmoBaseX = 318.0f;
+    private const float AmmoBaseY = 17.0f;
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
+
+    // Health bar stretched much taller than the native 9px sliver so it reads in VR.
+    private const float HealthBarX = 64.0f;
+    private const float HealthBarY = 18.0f;
+    private const float HealthBarH = 28.0f;
+    private const float HeartBase = 40.0f; // heart quad base size (native ~32)
 
     private float _u;      // metres per native HUD unit
     private float _side;
@@ -62,11 +76,12 @@ public sealed partial class Hud : Node3D
         // The HUD top bar spans ~1.15x the arena width; scale native units to fit.
         _u = arenaSideMeters * 1.15f / NativeSpan;
 
-        // Near edge, tilted up toward a seated player (shallower than the old panel
-        // since the faithful HUD is taller). Arena is yawed so the player's side is
-        // local -z; the 180 yaw turns the art to face them.
-        Position = new Vector3(0.0f, 0.03f, -(half + arenaSideMeters * 0.08f));
-        RotationDegrees = new Vector3(-40.0f, 180.0f, 0.0f);
+        // Anchor the HUD's TOP edge at the arena's near edge and hang it DOWN /
+        // toward the seated player (tilted to face up), so it never covers the play
+        // surface. Arena is yawed so the player's side is local -z; the 180 yaw
+        // turns the art to face them.
+        Position = new Vector3(0.0f, 0.01f, -(half + arenaSideMeters * 0.01f));
+        RotationDegrees = new Vector3(-45.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
         _indLife = Load("ui_indLife");
@@ -78,20 +93,20 @@ public sealed partial class Hud : Node3D
         // Survival XP panel (ind_panel), behind its text.
         TexQuad(Load("ui_indPanel"), -68.0f, 60.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
 
-        // Pulsing heart (updated each frame).
-        _heart = TexQuad(Load("ui_lifeHeart"), 27.0f - 16.0f, 21.0f - 16.0f, 32.0f, 32.0f, new Color(1, 1, 1, 0.8f), priority: 43);
+        // Pulsing heart (updated each frame), vertically centred in the bar.
+        _heart = TexQuad(Load("ui_lifeHeart"), 27.0f - HeartBase * 0.5f, 32.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43);
 
-        // Health bar: dim full background + bright left-aligned fill (both ind_life).
-        TexQuad(_indLife, 64.0f, 16.0f, HealthBarW, 9.0f, new Color(1, 1, 1, 0.5f), priority: 42);
-        _healthFill = TexQuad(_indLife, 64.0f, 16.0f, HealthBarW, 9.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _healthFillMat);
+        // Health bar (tall): dim full background + bright left-aligned fill (both ind_life).
+        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1, 1, 1, 0.5f), priority: 42);
+        _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1, 1, 1, 0.8f), priority: 43, out _healthFillMat);
 
         // Weapon icon (wicons sub-cell, set per weapon in Update).
-        _weaponIcon = TexQuad(_wicons, 220.0f, 2.0f, 64.0f, 32.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _weaponMat);
+        _weaponIcon = TexQuad(_wicons, 206.0f, 6.0f, 96.0f, 48.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _weaponMat);
 
-        // Ammo bars (per-shot), textured by ammo class in Update.
+        // Ammo bars (per-shot, enlarged), textured by ammo class in Update.
         for (int i = 0; i < AmmoBarMax; i++)
         {
-            _ammoBars[i] = TexQuad(null, 300.0f + i * AmmoBarStep, 10.0f, 6.0f, 16.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _ammoMats[i]);
+            _ammoBars[i] = TexQuad(null, AmmoBaseX + i * AmmoBarStep, AmmoBaseY, AmmoBarW, AmmoBarH, new Color(1, 1, 1, 0.8f), priority: 43, out _ammoMats[i]);
             _ammoBars[i].Visible = false;
         }
 
@@ -113,8 +128,8 @@ public sealed partial class Hud : Node3D
         float pulse = (Mathf.Pow(sp, 4.0f) * 4.0f + 14.0f);
         if (_heart != null)
         {
-            float d = pulse * 2.0f * _u;
-            _heart.Scale = new Vector3(d / (32.0f * _u), d / (32.0f * _u), 1.0f);
+            float d = pulse * 2.0f; // native diameter (units); quad base is HeartBase
+            _heart.Scale = new Vector3(d / HeartBase, d / HeartBase, 1.0f);
         }
 
         // Health fill (left ratio of the bar, left-aligned).
@@ -124,8 +139,8 @@ public sealed partial class Hud : Node3D
             _healthFill.Visible = hr > 0.001f;
             _healthFill.Scale = new Vector3(Mathf.Max(hr, 0.001f), 1.0f, 1.0f);
             // Re-anchor the (centre-based) quad so its left edge stays at the bar left.
-            float cx = 64.0f + HealthBarW * 0.5f * hr;
-            _healthFill.Position = new Vector3(LocalX(cx), LocalY(16.0f + 4.5f), _healthFill.Position.Z);
+            float cx = HealthBarX + HealthBarW * 0.5f * hr;
+            _healthFill.Position = new Vector3(LocalX(cx), LocalY(HealthBarY + HealthBarH * 0.5f), _healthFill.Position.Z);
             _healthFillMat.Uv1Scale = new Vector3(hr, 1.0f, 1.0f);
         }
 
