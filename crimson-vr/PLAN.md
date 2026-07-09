@@ -852,16 +852,26 @@ screen-space overlays:
    probes are a fixed `[left,right]` `HandProbe` span (tip + grip) so a grab keeps
    stable hand identity. Arena scale/height are their own deferred slices; not
    persisted yet (slice 9). Headless-verified; grab feel + layout need eyes.
-5. **First run** — show the default arena + a "calibrate or accept" prompt. (The
-   seated reach calibration itself + the arena-size UI are their own later slices.)
-6. **Highscore name entry** via an in-VR **virtual keyboard**.
-7. **Haptics** (fire / player-hit / reload).
-8. **Replay recording** on by default -> standard `.crd` in the runtime replays
-   dir. Best-practice choice: add the deferred in-ABI recorder
-   (`crimson_host_replay_begin/finish`) backed by a **Zig msgpack `.crd` encoder**,
-   so the recorded format lives in the same deterministic native stack as the
-   verifier (no C#-side format drift). Its own slice (carries the encoder cost).
-9. **Settings persistence.**
+5. **First run — BUILT (2026-07-09).** `StartPrompt`: default arena + a poke
+   Accept/Calibrate prompt, holds the sim until accepted; Calibrate is a stub
+   (seated calibration is a later slice). Returning players skip it (persistence).
+6. **Highscore name entry — BUILT (2026-07-09).** `VirtualKeyboard` (A-Z + Space/
+   Del/Enter poke keys) on death; Enter submits the name (empty = skip) and
+   restarts. Score = player_experience for now.
+7. **Haptics — BUILT (2026-07-09).** Fire pulse (aim hand, from shot audio
+   events), strong both-hand pulse on damage, reload-complete tick, via the OpenXR
+   "haptic" action. On-device feel + action binding need eyes.
+8. **Replay recording — DEFERRED (mini-milestone).** The one invasive-ABI slice.
+   Fully mapped: `crimson-vr/notes/replay-recording-plan.md` (reuses the existing
+   Zig msgpack encoder + `replay_runner` to fill verify-exact `claimed_stats`; a
+   record->verify gate test is the oracle). Its own attended slice.
+9. **Settings persistence — BUILT (2026-07-09).** `UserSettings` (Godot ConfigFile
+   under user://): hand-swap, dead-zone, first-run-done, highscores; loaded at
+   startup, saved on change. Arena scale/height not stored (deferred slices).
+
+**M4 in-headset validation backlog (all slices 1-9 are headless-verified only):**
+the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
+virtual keyboard), the grab-drag slider, haptic feel, and menu placement/reach.
 
 Deferred to their own later slices (flagged, not M4-blocking): seated
 reach-envelope calibration (§5), the arena-size adjustment UI, player-centered
