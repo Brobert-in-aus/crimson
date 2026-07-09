@@ -1273,6 +1273,17 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Copy one sim snapshot into the layers' current buffers, rolling
     /// the previous current into prev. Call once per sim tick.</summary>
+    // Gauss/ion beam ProjectileTypeIds (game_ids.zig): these linger deliberately as
+    // a persisting beam after a hit, so they're exempt from the stopped-bullet cull.
+    private static bool IsLingerBeam(int typeId) => typeId switch
+    {
+        0x06 => true, // gauss_gun
+        0x15 => true, // ion_rifle
+        0x16 => true, // ion_minigun
+        0x17 => true, // ion_cannon
+        _ => false,
+    };
+
     public void PushSnapshot(in SnapshotView view)
     {
         _players.BeginPush();
@@ -1314,8 +1325,9 @@ public sealed partial class Diorama : Node3D
             // Cull projectiles the instant they stop moving: life_timer < 0.4 is the
             // sim's own "hit and lingering" gate (projectiles.zig), where the bullet
             // no longer advances. This removes the bullets that used to float on
-            // corpses / hang in the air (ABI v9).
-            if (pr.LifeTimer < 0.4f)
+            // corpses / hang in the air (ABI v9). Exempt the gauss/ion beams, whose
+            // linger IS a deliberate persisting-beam visual, not a stuck bullet.
+            if (pr.LifeTimer < 0.4f && !IsLingerBeam(pr.TypeId))
             {
                 continue;
             }

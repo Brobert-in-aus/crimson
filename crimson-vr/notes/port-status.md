@@ -91,7 +91,7 @@ audit. Mapping `src/crimson/render/world/` to the diorama:
 
 | Base-game pass (`render/world`) | Blend | In VR? |
 |---|---|---|
-| ground / decals / corpses / shadows | alpha | Yes |
+| ground / decals / corpses / shadows | alpha | Partial — decals/corpses/shadows yes; **ground only tiles the base slot**, not the seeded base+overlay+detail composite (see below) |
 | creatures (sprites + tint) | alpha | Yes |
 | **creature overlays** (`draw_creature_overlays`): monster-vision aura, plague/poison auras | alpha | **Yes now** (ABI v7) — poison/plague/monster-vision auras drawn |
 | projectiles / secondaries (glow streaks) | additive | Yes |
@@ -118,6 +118,18 @@ in `projectiles/effects.py`). i.e. the whole "bright, glowy" combat-feedback lay
 
 **Lesson:** a feature/asset parity check misses render-pipeline correctness. Any
 base-game `begin_blend_mode` / draw pass should be explicitly matched in the diorama.
+
+**Ground generator (NEW gap — same trap).** The terrain floor was marked "implemented"
+(above + the table), but that masked a fidelity gap: the diorama only **tiles the
+base terrain slot** (`ter_qN_base`, Nearest-filtered for crispness), whereas the
+base game builds the ground with grim's **seeded generator** compositing all three
+slots — base + overlay (`tex1`) + detail — into a 1024² bitmap with the dirt/grass
+patches placed by `terrain_seed` (`world/render_resources.py`
+`schedule_ground_generation`, `terrain_slots.resolve_terrain_slots`). The ABI already
+ships the 3 slot ids + seed (`crimson_host_terrain_info`, v3); reproducing the patch
+placement needs a port of the grim ground-gen algorithm (bake a composite texture per
+seed at load, or a runtime detail-blend approximation). Until then the arena floor
+reads flatter than the original. Not yet scheduled.
 
 ## Known render gaps / polish backlog (from in-headset testing)
 
