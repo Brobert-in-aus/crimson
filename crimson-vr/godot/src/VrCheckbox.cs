@@ -75,6 +75,7 @@ public sealed partial class VrCheckbox : Node3D
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
         bool nowPressed = false;
+        bool overFootprint = false;
         foreach (HandProbe h in probes)
         {
             if (!h.Valid)
@@ -82,16 +83,21 @@ public sealed partial class VrCheckbox : Node3D
                 continue;
             }
             Vector3 local = ToLocal(h.Tip);
-            if (Mathf.Abs(local.X) <= _half + PokeRadius && Mathf.Abs(local.Y) <= _half + PokeRadius && local.Z - PokeRadius <= PressDepth)
+            if (Mathf.Abs(local.X) <= _half + PokeRadius && Mathf.Abs(local.Y) <= _half + PokeRadius)
             {
-                nowPressed = true;
+                overFootprint = true;
+                if (local.Z - PokeRadius <= PressDepth)
+                {
+                    nowPressed = true;
+                }
             }
         }
-        if (!nowPressed)
+        // Arm only once the fingertip has left the box footprint entirely.
+        if (!overFootprint)
         {
             _armed = true;
         }
-        else if (_armed && !_pressed && Time.GetTicksMsec() >= _readyAtMs)
+        else if (nowPressed && !_pressed && _armed && Time.GetTicksMsec() >= _readyAtMs)
         {
             _state = !_state;
             Refresh();

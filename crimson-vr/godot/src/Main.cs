@@ -521,7 +521,9 @@ public partial class Main : Node3D
         var mat = new StandardMaterial3D
         {
             AlbedoTexture = terrainTex,
-            AlbedoColor = terrainTex != null ? new Color(0.6f, 0.6f, 0.62f) : new Color(0.22f, 0.22f, 0.25f),
+            // Full-colour grass/dirt like the base game; only a hair dimmed so the
+            // closer diorama still reads as the focus. Grey fog fades the distance.
+            AlbedoColor = terrainTex != null ? new Color(0.9f, 0.9f, 0.9f) : new Color(0.22f, 0.22f, 0.25f),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
             Uv1Scale = new Vector3(WorldFloorTiles, WorldFloorTiles, 1.0f),

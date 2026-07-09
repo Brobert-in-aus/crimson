@@ -741,6 +741,9 @@ public sealed partial class Diorama : Node3D
         if (ResourceLoader.Exists(path) && ResourceLoader.Load<Texture2D>(path) is Texture2D tex)
         {
             _floorMaterial.AlbedoTexture = tex;
+            // Drop the dark neutral-grey fallback tint so the grass/dirt shows at
+            // full colour (AlbedoColor multiplies the texture).
+            _floorMaterial.AlbedoColor = Colors.White;
         }
         else
         {

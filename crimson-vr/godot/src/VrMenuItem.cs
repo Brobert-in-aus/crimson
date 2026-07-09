@@ -145,7 +145,8 @@ public sealed partial class VrMenuItem : Node3D
         {
             return;
         }
-        bool inside = false;
+        bool inside = false;         // over the face AND pushed in past the rest depth
+        bool overFootprint = false;  // fingertip within the button's X/Y area (any depth)
         float frontZ = _proud; // least-pressed default
         foreach (HandProbe h in probes)
         {
@@ -154,11 +155,15 @@ public sealed partial class VrMenuItem : Node3D
                 continue;
             }
             Vector3 local = ToLocal(h.Tip);
-            float surface = local.Z - PokeRadius; // sphere front toward the panel
-            if (Mathf.Abs(local.X) <= _halfW + PokeRadius && Mathf.Abs(local.Y) <= _halfH + PokeRadius && surface < _proud)
+            if (Mathf.Abs(local.X) <= _halfW + PokeRadius && Mathf.Abs(local.Y) <= _halfH + PokeRadius)
             {
-                inside = true;
-                frontZ = Mathf.Min(frontZ, surface);
+                overFootprint = true;
+                float surface = local.Z - PokeRadius; // sphere front toward the panel
+                if (surface < _proud)
+                {
+                    inside = true;
+                    frontZ = Mathf.Min(frontZ, surface);
+                }
             }
         }
 
@@ -166,11 +171,14 @@ public sealed partial class VrMenuItem : Node3D
         _group.Position = new Vector3(0.0f, 0.0f, z);
 
         bool nowPressed = inside && z <= _pressDepth;
-        if (!nowPressed)
+        // Arm only once the fingertip has LEFT the button's footprint entirely, so a
+        // hand resting over a button (e.g. when a menu reopens under it) must be
+        // moved clear before the button can fire again.
+        if (!overFootprint)
         {
-            _armed = true; // released -> may fire on the next press-down edge
+            _armed = true;
         }
-        else if (_armed && !_pressed && Time.GetTicksMsec() >= _readyAtMs)
+        else if (nowPressed && !_pressed && _armed && Time.GetTicksMsec() >= _readyAtMs)
         {
             OnPress?.Invoke();
         }
