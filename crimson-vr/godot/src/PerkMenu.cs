@@ -96,7 +96,7 @@ public sealed partial class PerkMenu : Node3D
 
     /// <summary>Feed the current controller-tip world positions to the visible
     /// cards each rendered frame.</summary>
-    public void PollPoke(ReadOnlySpan<Vector3> tips)
+    public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
         if (!Active)
         {
@@ -104,7 +104,7 @@ public sealed partial class PerkMenu : Node3D
         }
         for (int i = 0; i < _count; i++)
         {
-            _cards[i].PollPoke(tips);
+            _cards[i].PollPoke(probes);
         }
     }
 

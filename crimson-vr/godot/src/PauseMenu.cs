@@ -87,16 +87,21 @@ public sealed partial class PauseMenu : Node3D
         }
     }
 
-    /// <summary>Feed controller tips each rendered frame. The toggle is always
-    /// live; the panel buttons only while paused.</summary>
-    public void PollPoke(ReadOnlySpan<Vector3> tips)
+    /// <summary>Feed controller probes each rendered frame. The toggle is always
+    /// live; the panel buttons only while paused and the panel is showing (the
+    /// settings overlay hides it).</summary>
+    public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
-        _toggle.PollPoke(tips);
-        if (IsPaused)
+        _toggle.PollPoke(probes);
+        if (IsPaused && _panel.Visible)
         {
-            _resume.PollPoke(tips);
-            _settings.PollPoke(tips);
-            _quit.PollPoke(tips);
+            _resume.PollPoke(probes);
+            _settings.PollPoke(probes);
+            _quit.PollPoke(probes);
         }
     }
+
+    /// <summary>Show/hide the pause panel without changing the paused state — used
+    /// to overlay the settings menu while staying paused.</summary>
+    public void SetPanelVisible(bool visible) => _panel.Visible = visible;
 }

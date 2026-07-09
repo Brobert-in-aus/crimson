@@ -65,6 +65,9 @@ public partial class Main : Node3D
     private PerkMenu _perkMenu = null!;
     private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
     private PauseMenu _pauseMenu = null!;
+    private SettingsMenu _settingsMenu = null!;
+    private bool _settingsOpen;
+    private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -140,6 +143,15 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_pauseMenu);
         _pauseMenu.Build(ArenaSideMeters);
         _pauseMenu.OnQuit += () => GetTree().Quit();
+        _pauseMenu.OnSettings += OpenSettings;
+
+        // Settings (MVP): hand-swap + dead-zone, opened from the pause menu.
+        _settingsMenu = new SettingsMenu();
+        _arenaRoot.AddChild(_settingsMenu);
+        _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone);
+        _settingsMenu.OnBack += CloseSettings;
+        _settingsMenu.OnHandSwapChanged += v => _handSwap = v;
+        _settingsMenu.OnDeadZoneChanged += v => _deadZone = v;
 
         try
         {
@@ -415,7 +427,7 @@ public partial class Main : Node3D
         HandSample left = SampleHand(_leftHand, 0);
         HandSample right = SampleHand(_rightHand, 1);
         (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
-        Sim.HostInput input = VrInput.Build(move, aim, _playerGame);
+        Sim.HostInput input = VrInput.Build(move, aim, _playerGame, _deadZone);
 
         // Perk pick: while perks are pending (from the prior tick), pause the sim
         // (perk_menu_active) and, once a card is poked, feed the choice index. The
@@ -498,27 +510,53 @@ public partial class Main : Node3D
     /// pending. The tip is a point just ahead of the grip pose (controller front).</summary>
     private void PollMenuPoke()
     {
-        Span<Vector3> tips = stackalloc Vector3[2];
-        int n = 0;
-        if (_leftHand.GetHasTrackingData())
-        {
-            tips[n++] = PokeTip(_leftHand);
-        }
-        if (_rightHand.GetHasTrackingData())
-        {
-            tips[n++] = PokeTip(_rightHand);
-        }
-        ReadOnlySpan<Vector3> t = tips[..n];
+        Span<HandProbe> probes = stackalloc HandProbe[2];
+        probes[0] = MakeProbe(_leftHand);
+        probes[1] = MakeProbe(_rightHand);
+        ReadOnlySpan<HandProbe> p = probes;
 
-        _pauseMenu.PollPoke(t);
+        _pauseMenu.PollPoke(p);
+        if (_pauseMenu.IsPaused && _settingsOpen)
+        {
+            _settingsMenu.PollPoke(p);
+        }
         if (_perkMenu.Active)
         {
-            _perkMenu.PollPoke(t);
+            _perkMenu.PollPoke(p);
             if (_perkMenu.Chosen >= 0)
             {
                 _perkChoice = _perkMenu.Chosen;
                 _perkMenu.Chosen = -1;
             }
+        }
+
+        // Settings is only valid while paused (e.g. the toggle was poked off
+        // underneath the overlay); reconcile.
+        if (_settingsOpen && !_pauseMenu.IsPaused)
+        {
+            CloseSettings();
+        }
+    }
+
+    private HandProbe MakeProbe(XRController3D hand)
+        => hand.GetHasTrackingData()
+            ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold)
+            : default;
+
+    private void OpenSettings()
+    {
+        _settingsOpen = true;
+        _pauseMenu.SetPanelVisible(false);
+        _settingsMenu.SetShown(true);
+    }
+
+    private void CloseSettings()
+    {
+        _settingsOpen = false;
+        _settingsMenu.SetShown(false);
+        if (_pauseMenu.IsPaused)
+        {
+            _pauseMenu.SetPanelVisible(true);
         }
     }
 

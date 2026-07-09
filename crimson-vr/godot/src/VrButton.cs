@@ -3,6 +3,23 @@ using Godot;
 
 namespace CrimsonVR;
 
+/// <summary>One controller's per-frame menu probe: whether it's tracking, its
+/// poke-tip world position, and whether its grip is squeezed (for grab-drag).
+/// Passed as a fixed [left, right] span so grabs keep a stable hand identity.</summary>
+public readonly struct HandProbe
+{
+    public readonly bool Valid;
+    public readonly Vector3 Tip;
+    public readonly bool Grip;
+
+    public HandProbe(bool valid, Vector3 tip, bool grip)
+    {
+        Valid = valid;
+        Tip = tip;
+        Grip = grip;
+    }
+}
+
 /// <summary>
 /// A diegetic physical push-button for VR menus (PLAN M4 UI model): a button that
 /// sits PROUD of its panel along local +Z and is POKED with a controller tip —
@@ -99,15 +116,19 @@ public sealed partial class VrButton : Node3D
         }
     }
 
-    /// <summary>Update the depress state from world-space poke points (controller
-    /// tips). Call every rendered frame while the button is visible.</summary>
-    public void PollPoke(ReadOnlySpan<Vector3> tipsGlobal)
+    /// <summary>Update the depress state from the controller probes. Call every
+    /// rendered frame while the button is visible.</summary>
+    public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
         bool inside = false;
         float frontZ = _proud; // least-pressed default
-        foreach (Vector3 tipG in tipsGlobal)
+        foreach (HandProbe h in probes)
         {
-            Vector3 local = ToLocal(tipG);
+            if (!h.Valid)
+            {
+                continue;
+            }
+            Vector3 local = ToLocal(h.Tip);
             if (Mathf.Abs(local.X) <= _halfW && Mathf.Abs(local.Y) <= _halfH && local.Z < _proud)
             {
                 inside = true;

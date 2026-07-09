@@ -844,8 +844,14 @@ screen-space overlays:
    freezing the sim (Main stops ticking) and raises a Resume / Settings / Quit
    panel above the arena. Resume + Quit functional; Settings wired to `OnSettings`
    but unhooked until slice 4. Headless-verified; poke feel/placement need eyes.
-4. **Settings (MVP)** — top-level menu; arena scale/height/hand-swap/dead-zone as
-   **submenus**. Live-adjust where cheap. Persisted.
+4. **Settings (MVP) — BUILT (2026-07-09, in-headset pending).** `SettingsMenu`
+   (opened from the pause Settings button, overlays the pause panel while staying
+   paused) with a **hand-swap toggle** + a **dead-zone grab-drag slider**, applied
+   live (`_handSwap`, `_deadZone` -> VrInput.Build). New `VrSlider` primitive:
+   grab the knob with the grip, drag along the track, value maps to a range;
+   probes are a fixed `[left,right]` `HandProbe` span (tip + grip) so a grab keeps
+   stable hand identity. Arena scale/height are their own deferred slices; not
+   persisted yet (slice 9). Headless-verified; grab feel + layout need eyes.
 5. **First run** — show the default arena + a "calibrate or accept" prompt. (The
    seated reach calibration itself + the arena-size UI are their own later slices.)
 6. **Highscore name entry** via an in-VR **virtual keyboard**.
