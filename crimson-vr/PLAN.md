@@ -839,8 +839,11 @@ screen-space overlays:
    `perk_menu_active` while `perk_pending_count > 0`. Headless can't trigger it
    (no XP/levels, no tracked hands) — needs in-headset validation of poke feel,
    card layout/reach, and the pause/resume flow.
-3. **Pause menu** — a side-of-arena, arena-parallel pause button (always
-   pressable); opens resume / settings / quit above the arena.
+3. **Pause menu — BUILT (2026-07-09, in-headset pending).** `PauseMenu`: a flat
+   (arena-parallel) pause toggle off the +x side, always pokeable; pauses by
+   freezing the sim (Main stops ticking) and raises a Resume / Settings / Quit
+   panel above the arena. Resume + Quit functional; Settings wired to `OnSettings`
+   but unhooked until slice 4. Headless-verified; poke feel/placement need eyes.
 4. **Settings (MVP)** — top-level menu; arena scale/height/hand-swap/dead-zone as
    **submenus**. Live-adjust where cheap. Persisted.
 5. **First run** — show the default arena + a "calibrate or accept" prompt. (The

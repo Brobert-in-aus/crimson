@@ -64,6 +64,7 @@ public partial class Main : Node3D
     private Hud _hud = null!;
     private PerkMenu _perkMenu = null!;
     private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
+    private PauseMenu _pauseMenu = null!;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     private int _deadTicks;
 
@@ -132,6 +133,13 @@ public partial class Main : Node3D
         _perkMenu = new PerkMenu();
         _arenaRoot.AddChild(_perkMenu);
         _perkMenu.Build(ArenaSideMeters);
+
+        // Pause: an always-live flat toggle beside the arena; resume/settings/quit
+        // above it while paused. Settings is unhooked until the settings slice.
+        _pauseMenu = new PauseMenu();
+        _arenaRoot.AddChild(_pauseMenu);
+        _pauseMenu.Build(ArenaSideMeters);
+        _pauseMenu.OnQuit += () => GetTree().Quit();
 
         try
         {
@@ -397,6 +405,13 @@ public partial class Main : Node3D
             return;
         }
 
+        // Paused: freeze the sim (stop advancing). _Process still renders the last
+        // frame and polls the pause panel so Resume/Quit work.
+        if (_pauseMenu.IsPaused)
+        {
+            return;
+        }
+
         HandSample left = SampleHand(_leftHand, 0);
         HandSample right = SampleHand(_rightHand, 1);
         (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
@@ -474,19 +489,15 @@ public partial class Main : Node3D
         if (_sim != null)
         {
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
-            PollPerkPoke();
+            PollMenuPoke();
         }
     }
 
-    /// <summary>Feed controller tips to the perk cards (poke) each rendered frame
-    /// and latch a choice for the next sim tick. The tip is a point just ahead of
-    /// the grip pose (roughly the controller's front).</summary>
-    private void PollPerkPoke()
+    /// <summary>Feed controller tips to the diegetic menus (poke) each rendered
+    /// frame. The pause toggle is always live; the perk cards only while a pick is
+    /// pending. The tip is a point just ahead of the grip pose (controller front).</summary>
+    private void PollMenuPoke()
     {
-        if (!_perkMenu.Active)
-        {
-            return;
-        }
         Span<Vector3> tips = stackalloc Vector3[2];
         int n = 0;
         if (_leftHand.GetHasTrackingData())
@@ -497,11 +508,17 @@ public partial class Main : Node3D
         {
             tips[n++] = PokeTip(_rightHand);
         }
-        _perkMenu.PollPoke(tips[..n]);
-        if (_perkMenu.Chosen >= 0)
+        ReadOnlySpan<Vector3> t = tips[..n];
+
+        _pauseMenu.PollPoke(t);
+        if (_perkMenu.Active)
         {
-            _perkChoice = _perkMenu.Chosen;
-            _perkMenu.Chosen = -1;
+            _perkMenu.PollPoke(t);
+            if (_perkMenu.Chosen >= 0)
+            {
+                _perkChoice = _perkMenu.Chosen;
+                _perkMenu.Chosen = -1;
+            }
         }
     }
 
