@@ -58,6 +58,37 @@ inline fn projectileTravelBudgetFromTypeId(type_id: ProjectileTypeId) f32 {
     return weapon_data.weapon_stats.get(weaponIdFromProjectileTypeId(type_id)).travel_budget;
 }
 
+fn debugShowcaseNextWeapon(current: WeaponId) WeaponId {
+    // Debug fx showcase only: advance through the real weapon ids in id order,
+    // skipping `none` and the unused gaps, wrapping after the last weapon.
+    var raw = @intFromEnum(current);
+    var guard: usize = 0;
+    while (guard < 64) : (guard += 1) {
+        raw += 1;
+        if (raw > @intFromEnum(WeaponId.nuke_launcher)) {
+            raw = @intFromEnum(WeaponId.pistol);
+        }
+        const id: WeaponId = @enumFromInt(raw);
+        switch (id) {
+            .none,
+            .unknown_34,
+            .unknown_35,
+            .unknown_36,
+            .unknown_37,
+            .unknown_38,
+            .unknown_39,
+            .unknown_40,
+            .unknown_46,
+            .unknown_47,
+            .unknown_48,
+            .unknown_49,
+            => continue,
+            else => return id,
+        }
+    }
+    return current;
+}
+
 pub const TickInputFlags = struct {
     fire_down: bool = false,
     fire_pressed: bool = false,
@@ -251,6 +282,18 @@ pub fn stepPlayerForTickWithEffects(
         input_flags.move_mode != movement_control_mouse_point_click and
         input_flags.single_player_mode and
         player.weapon.reload_timer == 0.0;
+    // Debug fx showcase: a reload press cycles to the next real weapon so the
+    // whole arsenal can be toured in one run. Deliberately outside
+    // manual_reload_allowed: VR runs move_mode 4 (point-click), which has no
+    // manual reload. The new weapon arrives with a full clip, ready to fire.
+    if (state.debug_fx_showcase and input_flags.reload_pressed) {
+        player_runtime.weaponAssignPlayerWithState(
+            player,
+            debugShowcaseNextWeapon(player.weapon.weapon_id),
+            state,
+        );
+    }
+
     if (manual_reload_allowed) {
         player_runtime.playerStartReload(player, state);
     }

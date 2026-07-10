@@ -1192,7 +1192,10 @@ public partial class Main : Node3D
         _debug = on;
         _settings.Debug = on;
         _settings.Save();
-        _diorama.SetDebug(on);
+        // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
+        // per-creature facing needle, a one-off sprite-calibration tool. The
+        // settings debug flag means "fx showcase" now; flip the needle on in
+        // code if a new sheet ever needs recalibrating.
         if (!on)
         {
             foreach (MeshInstance3D m in _pokeMarkers)

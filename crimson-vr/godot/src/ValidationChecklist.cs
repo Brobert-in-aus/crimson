@@ -16,15 +16,18 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-10 again (comfort round all
-    // green); now covers the tweak round: HUD scoreboard at the far edge with
-    // the doubled HP bar, lowered keyboard, new reticle roles, the corrected
-    // perk name, and this panel's own doubled buttons.
+    // validation surface changes. Covers the light round (HUD raise, arena
+    // border, aim line-clamp), the projectile-variants slice, and the new
+    // debug weapon-tour behaviors (reload cycles weapons, Sharpshooter laser
+    // from spawn).
     private static readonly (string Id, string Label)[] Items =
     {
         ("hudup", "HUD raised one panel-height"),
         ("arenaedge", "Playfield border strip visible"),
         ("aimclamp", "Off-arena cursor stays on aim line"),
+        ("wpncycle", "Reload cycles weapons (debug)"),
+        ("lasersight", "Laser sight from spawn (debug)"),
+        ("projfx", "Per-weapon projectile visuals"),
     };
 
     private const int PerPage = 4;

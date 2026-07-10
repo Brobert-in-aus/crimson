@@ -387,6 +387,10 @@ public sealed partial class AudioBank : Node3D
         _next = (_next + 1) % _pool.Length;
         p.Stream = _levelUpStream;
         p.Position = Vector3.Zero;
+        // +6 dB (double amplitude): the cue is easy to miss at pool volume.
+        // Pool players are shared round-robin, so every play path stamps its
+        // own VolumeDb rather than inheriting the previous cue's.
+        p.VolumeDb = _sfxVolumeDb + 6.0f;
         p.Play();
     }
 
@@ -423,6 +427,7 @@ public sealed partial class AudioBank : Node3D
         _next = (_next + 1) % _pool.Length;
         p.Stream = stream;
         p.Position = Vector3.Zero;
+        p.VolumeDb = _sfxVolumeDb;
         p.Play();
     }
 
@@ -437,6 +442,7 @@ public sealed partial class AudioBank : Node3D
         _next = (_next + 1) % _pool.Length;
         player.Stream = stream;
         player.Position = localPos;
+        player.VolumeDb = _sfxVolumeDb;
         player.Play();
     }
 

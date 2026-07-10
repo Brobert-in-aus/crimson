@@ -155,7 +155,12 @@ public sealed partial class Diorama
     private MultiMesh? _projsAtlasAlphaMesh; // projs.png per-instance cell, alpha
     private MultiMesh? _ionStripMesh;
     private MultiMesh? _plagueMesh;
-    private Vector3 _glowUv; // particles.png GLOW cell (effect id 12) from the manifest
+    // particles.png GLOW cell (EffectId.GLOW = 0x0D = 13) from the manifest.
+    // Every reference projectile draw (plasma/beam/rocket/detonation) samples
+    // this soft round glow; id 12 next door is EXPLOSION_BURST — using it
+    // stamps a translucent explosion copy under every glow.
+    private Vector3 _glowUv;
+    private const int ProjGlowEffectId = 13;
 
     private int _trailN;
     private int _bulletHeadN;
@@ -273,7 +278,7 @@ public sealed partial class Diorama
         Texture2D? bullet = LoadSprite("bullet16");
         Texture2D? particles = LoadSprite("particles");
 
-        if (_effectUv.TryGetValue(GlowNormalEffectId, out Vector3 g))
+        if (_effectUv.TryGetValue(ProjGlowEffectId, out Vector3 g))
         {
             _glowUv = g;
         }
@@ -318,10 +323,76 @@ public sealed partial class Diorama
         return new Vector3(frame % grid * inv, frame / grid * inv, inv);
     }
 
+    // Native clips projectile draws to the screen. The diorama has no screen
+    // edge, so anything that outlives its on-arena flight (rockets, piercing
+    // gauss rounds) would keep drawing bright glows and huge stretched trails
+    // out on the fogged ground plane. Clip to the visible floor slab instead.
+    private float DrawBoundsMargin => _worldSize * (FloorMarginScale - 1.0f) * 0.5f;
+
+    private bool OutsideDrawBounds(Vector2 game)
+    {
+        float m = DrawBoundsMargin;
+        return game.X < -m || game.X > _worldSize + m || game.Y < -m || game.Y > _worldSize + m;
+    }
+
+    // One Liang-Barsky boundary: clip parameter range [t0, t1] against p*t <= q.
+    private static bool ClipEdge(float p, float q, ref float t0, ref float t1)
+    {
+        if (Mathf.Abs(p) < 1e-9f)
+        {
+            return q >= 0.0f;
+        }
+        float r = q / p;
+        if (p < 0.0f)
+        {
+            if (r > t1)
+            {
+                return false;
+            }
+            if (r > t0)
+            {
+                t0 = r;
+            }
+        }
+        else
+        {
+            if (r < t0)
+            {
+                return false;
+            }
+            if (r < t1)
+            {
+                t1 = r;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>Clamp a game-space segment to the draw bounds; false = fully outside.</summary>
+    private bool ClampToDrawBounds(ref Vector2 a, ref Vector2 b)
+    {
+        float min = -DrawBoundsMargin;
+        float max = _worldSize + DrawBoundsMargin;
+        Vector2 d = b - a;
+        float t0 = 0.0f;
+        float t1 = 1.0f;
+        if (!ClipEdge(-d.X, a.X - min, ref t0, ref t1)
+            || !ClipEdge(d.X, max - a.X, ref t0, ref t1)
+            || !ClipEdge(-d.Y, a.Y - min, ref t0, ref t1)
+            || !ClipEdge(d.Y, max - a.Y, ref t0, ref t1))
+        {
+            return false;
+        }
+        Vector2 start = a + d * t0;
+        b = a + d * t1;
+        a = start;
+        return true;
+    }
+
     private void EmitAtlasSprite(MultiMesh? mesh, ref int n, int cap, Vector2 game, float sizeUnits,
         float rotation, Color color, Vector3 uv)
     {
-        if (mesh == null || n >= cap || sizeUnits <= 1e-3f)
+        if (mesh == null || n >= cap || sizeUnits <= 1e-3f || OutsideDrawBounds(game))
         {
             return;
         }
@@ -338,7 +409,7 @@ public sealed partial class Diorama
     private void EmitStretch(MultiMesh? mesh, ref int n, int cap, Vector2 startGame, Vector2 endGame,
         float halfWidthUnits, Color color, float customX = 0.0f, bool custom = true)
     {
-        if (mesh == null || n >= cap)
+        if (mesh == null || n >= cap || !ClampToDrawBounds(ref startGame, ref endGame))
         {
             return;
         }

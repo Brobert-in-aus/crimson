@@ -235,6 +235,13 @@ pub const DeterministicSession = struct {
 
         creatures_mod.applyPoolResidue(&session.creatures, config.initial_creature_pool);
         player_runtime.resetPlayers(session.players(), config.world_size, null);
+        // Debug fx showcase: spawn with Sharpshooter so the laser sight is
+        // visible from the first frame for every weapon under test.
+        if (config.debug_fx_showcase) {
+            for (session.players()) |*player| {
+                player.perk_counts.set(game_ids.PerkId.sharpshooter, 1);
+            }
+        }
         session.creatures.capture_spawn_events_authoritative = options.capture_spawn_events_authoritative;
         session.creatures.effects = &session.effects;
 
