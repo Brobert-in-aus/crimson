@@ -147,6 +147,8 @@ public sealed partial class Diorama
     private const int ProjsAtlasAlphaCap = 320;
     private const int IonStripCap = 256;
     private const int PlagueCap = 320;
+    private const int SpriteFxCap = 384; // sprite_effect_pool_size (0x180)
+    private const int PlayerAuraCap = 4;
 
     private MultiMesh? _trailMesh;
     private MultiMesh? _bulletHeadMesh;
@@ -155,12 +157,23 @@ public sealed partial class Diorama
     private MultiMesh? _projsAtlasAlphaMesh; // projs.png per-instance cell, alpha
     private MultiMesh? _ionStripMesh;
     private MultiMesh? _plagueMesh;
+    // Sprite-effect pool (ABI v13): muzzle puffs / rocket exhaust / smoke, all
+    // drawn as the EXPLOSION_PUFF cell, plain alpha, between secondaries (20)
+    // and the effect pool (23) like the native pass order.
+    private MultiMesh? _spriteFxMesh;
+    // Radioactive aura: additive, priority 14 = under the player sprite (15).
+    private MultiMesh? _playerAuraMesh;
     // particles.png GLOW cell (EffectId.GLOW = 0x0D = 13) from the manifest.
     // Every reference projectile draw (plasma/beam/rocket/detonation) samples
     // this soft round glow; id 12 next door is EXPLOSION_BURST — using it
     // stamps a translucent explosion copy under every glow.
     private Vector3 _glowUv;
     private const int ProjGlowEffectId = 13;
+    // particles.png cells for the player passes + sprite-effect pool.
+    private const int PlayerAuraEffectId = 16; // EffectId.AURA (trooper.py:107)
+    private const int ShieldRingEffectId = 2;  // EffectId.SHIELD_RING (trooper.py:198)
+    private const int SpriteFxEffectId = 17;   // EffectId.EXPLOSION_PUFF (draw_sprite_effect_pool)
+    private Vector3 _spriteFxUv; // FULL cell — sprite effects skip the 2px clamp
 
     private int _trailN;
     private int _bulletHeadN;
@@ -169,6 +182,8 @@ public sealed partial class Diorama
     private int _projsAlphaN;
     private int _ionStripN;
     private int _plagueN;
+    private int _spriteFxN;
+    private int _playerAuraN;
 
     // Trail shader: quad stretched tail->head (local +Y = head end). Instance
     // COLOR = head rgba; CUSTOM.x = tail alpha. Alpha ramps tail->head over the
@@ -305,6 +320,17 @@ public sealed partial class Diorama
         if (particles != null && _glowUv != Vector3.Zero)
         {
             _projGlowMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, particles, priority: 20), ProjGlowCap);
+        }
+        if (particles != null && _effectUv.TryGetValue(SpriteFxEffectId, out Vector3 puff))
+        {
+            // The manifest rect carries the effect pool's (cell - 2px) clamp;
+            // sprite effects sample the full cell, so widen by 2px in UV space.
+            _spriteFxUv = new Vector3(puff.X, puff.Y, puff.Z + 2.0f / particles.GetWidth());
+            _spriteFxMesh = BuildProjMesh(ProjShaderMat(ParticleShader, particles, priority: 22), SpriteFxCap);
+        }
+        if (particles != null && _effectUv.ContainsKey(PlayerAuraEffectId))
+        {
+            _playerAuraMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, particles, priority: 14), PlayerAuraCap);
         }
         if (projs != null)
         {
@@ -447,6 +473,8 @@ public sealed partial class Diorama
         _projsAlphaN = 0;
         _ionStripN = 0;
         _plagueN = 0;
+        _spriteFxN = 0;
+        _playerAuraN = 0;
 
         float elapsedMs = view.Header.ElapsedMsSim;
         bool ionMaster = false;
@@ -463,6 +491,7 @@ public sealed partial class Diorama
                 EmitStretch(_trailMesh, ref _trailN, TrailCap, pp + dir * 15.0f, pp + dir * 512.0f,
                     halfWidthUnits: 1.0f, new Color(1.0f, 0.0f, 0.0f, 0.2f), customX: 0.5f);
             }
+            RenderPlayerFx(p0, elapsedMs);
         }
 
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
@@ -473,6 +502,15 @@ public sealed partial class Diorama
         {
             DrawSecondary(s);
         }
+        // Sprite-effect pool: native gates it on fx_detail >= 2.
+        if (_graphicsDetail >= 2)
+        {
+            foreach (Sim.SpriteEffectSnap fx in view.SpriteEffects)
+            {
+                EmitAtlasSprite(_spriteFxMesh, ref _spriteFxN, SpriteFxCap, new Vector2(fx.X, fx.Y),
+                    fx.Scale, fx.Rotation, new Color(fx.R, fx.G, fx.B, fx.A), _spriteFxUv);
+            }
+        }
 
         Flush(_trailMesh, _trailN);
         Flush(_bulletHeadMesh, _bulletHeadN);
@@ -481,6 +519,49 @@ public sealed partial class Diorama
         Flush(_projsAtlasAlphaMesh, _projsAlphaN);
         Flush(_ionStripMesh, _ionStripN);
         Flush(_plagueMesh, _plagueN);
+        Flush(_spriteFxMesh, _spriteFxN);
+        Flush(_playerAuraMesh, _playerAuraN);
+    }
+
+    /// <summary>Player-anchored effect passes (trooper.py): the Radioactive
+    /// green aura under the body and the counter-rotating shield-ring pair
+    /// above it while the shield bonus runs.</summary>
+    private void RenderPlayerFx(in Sim.PlayerSnap p, float elapsedMs)
+    {
+        float t = elapsedMs * 0.001f;
+        var pos = new Vector2(p.X, p.Y);
+
+        // trooper.py:107-132 — AURA cell, additive, 100u, pulsing alpha. Drawn
+        // regardless of health (the native pass sits before the alive check).
+        if ((p.PerkFlags & Sim.PlayerSnap.PerkFlagRadioactive) != 0
+            && _effectUv.TryGetValue(PlayerAuraEffectId, out Vector3 auraUv))
+        {
+            float auraAlpha = (Mathf.Sin(t) + 1.0f) * 0.1875f + 0.25f;
+            EmitAtlasSprite(_playerAuraMesh, ref _playerAuraN, PlayerAuraCap, pos, 100.0f, 0.0f,
+                new Color(77 / 255f, 153 / 255f, 77 / 255f, auraAlpha), auraUv);
+        }
+
+        // trooper.py:198-243 — SHIELD_RING pair, additive, centred 3u along the
+        // aim heading; strength pulses and ramps out with the last second.
+        if (p.ShieldTimer > 1e-3f && p.Health > 0.0f
+            && _effectUv.TryGetValue(ShieldRingEffectId, out Vector3 ringUv))
+        {
+            float strength = (Mathf.Sin(t) + 1.0f) * 0.25f + p.ShieldTimer;
+            if (p.ShieldTimer < 1.0f)
+            {
+                strength *= p.ShieldTimer;
+            }
+            strength = Mathf.Min(1.0f, strength);
+            float offDir = p.AimHeading - Mathf.Pi * 0.5f;
+            Vector2 centre = pos + new Vector2(Mathf.Cos(offDir), Mathf.Sin(offDir)) * 3.0f;
+            var rgb = new Color(91 / 255f, 180 / 255f, 1.0f, 1.0f);
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, centre,
+                (Mathf.Sin(t * 3.0f) + 17.5f) * 2.0f, t * 2.0f,
+                new Color(rgb.R, rgb.G, rgb.B, strength * 0.4f), ringUv);
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, centre,
+                (Mathf.Sin(t * 3.0f) * 4.0f + 24.0f) * 2.0f, t * -2.0f,
+                new Color(rgb.R, rgb.G, rgb.B, strength * 0.3f), ringUv);
+        }
     }
 
     private static void Flush(MultiMesh? mesh, int n)

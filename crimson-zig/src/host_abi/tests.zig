@@ -55,8 +55,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v12" {
-    try std.testing.expectEqual(@as(u32, 12), exports.crimson_host_abi_version());
+test "abi version reports v13" {
+    try std.testing.expectEqual(@as(u32, 13), exports.crimson_host_abi_version());
 }
 
 test "abi verify passthrough matches native verifier byte for byte" {
@@ -276,6 +276,51 @@ test "abi snapshot exposes sprite-effect particles" {
         }
     }
     try std.testing.expect(max_particles > 0);
+    try std.testing.expect(checked_entry);
+}
+
+test "abi snapshot exposes the sprite-effect pool stream" {
+    const allocator = std.testing.allocator;
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    const buf = try allocator.alloc(u8, exports.snapshotMaxSize());
+    defer allocator.free(buf);
+
+    // Every pistol shot spawns two muzzle-puff sprite effects
+    // (spawnNativeFireMuzzleSprites), so a firing run must surface entries in
+    // the ABI v13 sprite-effect stream, packed after the glow pool.
+    var max_sprites: u32 = 0;
+    var checked_entry = false;
+    for (0..900) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+
+        var len: u32 = @intCast(buf.len);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, buf.ptr, &len));
+
+        var header: exports.SnapshotHeader = undefined;
+        @memcpy(std.mem.asBytes(&header), buf[0..@sizeOf(exports.SnapshotHeader)]);
+        if (header.sprite_effect_count > max_sprites) max_sprites = header.sprite_effect_count;
+
+        if (header.sprite_effect_count > 0 and !checked_entry) {
+            const off = @sizeOf(exports.SnapshotHeader) +
+                @sizeOf(exports.PlayerSnap) * header.player_count +
+                @sizeOf(exports.CreatureSnap) * header.creature_count +
+                @sizeOf(exports.ProjectileSnap) * header.projectile_count +
+                @sizeOf(exports.SecondarySnap) * header.secondary_count +
+                @sizeOf(exports.BonusSnap) * header.bonus_count +
+                @sizeOf(exports.ParticleSnap) * header.particle_count +
+                @sizeOf(exports.ParticleGlowSnap) * header.glow_count;
+            var s: exports.SpriteEffectSnap = undefined;
+            @memcpy(std.mem.asBytes(&s), buf[off..][0..@sizeOf(exports.SpriteEffectSnap)]);
+            try std.testing.expect(s.scale > 0.0);
+            try std.testing.expect(s.a >= 0.0 and s.a <= 1.0);
+            try std.testing.expect(s.x >= -128.0 and s.x <= 1152.0);
+            checked_entry = true;
+        }
+    }
+    try std.testing.expect(max_sprites > 0);
     try std.testing.expect(checked_entry);
 }
 

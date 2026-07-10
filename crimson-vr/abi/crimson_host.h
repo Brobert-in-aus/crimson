@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 12u
+#define CRIMSON_HOST_ABI_VERSION 13u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -117,6 +117,7 @@ typedef struct crimson_host_tick_result {
  *   crimson_host_bonus_snap     [bonus_count]
  *   crimson_host_particle_snap  [particle_count]   (ABI v2+; effect pool)
  *   crimson_host_particle_glow_snap [glow_count]   (ABI v7+; flame/bubblegun pool)
+ *   crimson_host_sprite_effect_snap [sprite_effect_count] (ABI v13+; sprite-effect pool)
  */
 typedef struct crimson_host_snapshot_header {
     uint32_t magic;   /* CRIMSON_HOST_SNAPSHOT_MAGIC */
@@ -143,6 +144,9 @@ typedef struct crimson_host_snapshot_header {
                               * draw the yellow aura over every creature */
     uint32_t glow_count;     /* ABI v7+; flame/bubblegun particle-pool entries
                               * packed after the effect pool */
+    uint32_t sprite_effect_count; /* ABI v13+; sprite-effect pool entries
+                                   * (muzzle puffs / rocket exhaust / smoke)
+                                   * packed after the glow pool */
 } crimson_host_snapshot_header;
 
 typedef struct crimson_host_player_snap {
@@ -268,6 +272,22 @@ typedef struct crimson_host_particle_glow_snap {
     float age; /* alpha multiplier (0..1) */
     int32_t style_id;
 } crimson_host_particle_glow_snap;
+
+/* One live sprite effect (session.sprite_effects) — the THIRD effect system
+ * (muzzle puffs, rocket exhaust, explosion smoke). draw_sprite_effect_pool
+ * renders every entry as the EXPLOSION_PUFF atlas cell (FULL cell rect, no 2px
+ * clamp) with plain alpha blending, size = scale world units, rotation in
+ * radians, tinted (r,g,b,a). Skipped below fx_detail 2. (ABI v13+.) */
+typedef struct crimson_host_sprite_effect_snap {
+    float x;
+    float y;
+    float scale;
+    float rotation;
+    float r;
+    float g;
+    float b;
+    float a;
+} crimson_host_sprite_effect_snap;
 
 /* Audio payload layout (packed, in order):
  *   crimson_host_audio_header

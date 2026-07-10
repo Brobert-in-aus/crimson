@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 12;
+    public const uint ExpectedAbiVersion = 13;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -99,6 +99,7 @@ public static partial class Sim
         public float FreezeTimer;    // ABI v5+: global freeze bonus timer
         public uint MonsterVision;   // ABI v7+: 1 => draw yellow aura on all creatures
         public uint GlowCount;       // ABI v7+: flame/bubblegun particle-pool entries
+        public uint SpriteEffectCount; // ABI v13+: sprite-effect pool entries (after glows)
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -227,6 +228,24 @@ public static partial class Sim
         public float TintB;
         public float Age; // alpha multiplier (0..1)
         public int StyleId;
+    }
+
+    // One live sprite effect (session.sprite_effects), the THIRD effect system:
+    // muzzle puffs, rocket exhaust, explosion smoke. Every entry draws the
+    // EXPLOSION_PUFF atlas cell (FULL cell, no 2px clamp), plain alpha blend,
+    // size = Scale world units, Rotation radians, tinted RGBA. Skipped below
+    // fx-detail 2. ABI v13+.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SpriteEffectSnap
+    {
+        public float X;
+        public float Y;
+        public float Scale;
+        public float Rotation;
+        public float R;
+        public float G;
+        public float B;
+        public float A;
     }
 
     // Audio events drained per tick (crimson_host_audio_events). Header then

@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 12;
+pub const abi_version: u32 = 13;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -115,6 +115,12 @@ pub const SnapshotHeader = extern struct {
     // the effect pool. This is a SECOND particle system distinct from the effect
     // pool (draw_particle_pool). Append-only (ABI v7).
     glow_count: u32,
+    // Number of active sprite effects (session.sprite_effects, the THIRD pool:
+    // muzzle puffs / rocket exhaust / explosion smoke) packed after the glow
+    // pool. draw_sprite_effect_pool renders every entry as the EXPLOSION_PUFF
+    // atlas cell (full cell, NO 2px clamp), plain alpha blend, gated on
+    // fx_detail >= 2. Append-only (ABI v13).
+    sprite_effect_count: u32,
 };
 
 pub const PlayerSnap = extern struct {
@@ -260,6 +266,23 @@ pub const ParticleGlowSnap = extern struct {
     tint_b: f32, // Particle.scale_z
     age: f32, // alpha multiplier (0..1)
     style_id: i32,
+};
+
+// One live entry of the sprite-effect pool (session.sprite_effects), the THIRD
+// effect system (muzzle puffs, rocket exhaust, explosion smoke). Mirrors what
+// draw_sprite_effect_pool reads: pos, scale (quad side in world units),
+// rotation (radians), and the entry's rgba color. Every entry draws the same
+// EXPLOSION_PUFF atlas cell — full cell rect (no 2px clamp, unlike the effect
+// pool) — with plain alpha blending. Packed after the glow pool (ABI v13).
+pub const SpriteEffectSnap = extern struct {
+    x: f32,
+    y: f32,
+    scale: f32,
+    rotation: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
 };
 
 pub const AudioHeader = extern struct {
@@ -635,7 +658,8 @@ pub fn snapshotMaxSize() u32 {
         @sizeOf(SecondarySnap) * crimson_zig.secondary_projectiles.secondary_projectile_pool_size +
         @sizeOf(BonusSnap) * crimson_zig.bonuses.bonus_pool_size +
         @sizeOf(ParticleSnap) * crimson_zig.effects.effect_pool_size +
-        @sizeOf(ParticleGlowSnap) * crimson_zig.particles.particle_pool_size;
+        @sizeOf(ParticleGlowSnap) * crimson_zig.particles.particle_pool_size +
+        @sizeOf(SpriteEffectSnap) * crimson_zig.effects.sprite_effect_pool_size;
     return @intCast(total);
 }
 
@@ -681,6 +705,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .freeze_timer = box.runner.session.state.bonuses.freeze,
         .monster_vision = 0,
         .glow_count = 0,
+        .sprite_effect_count = 0,
     };
 
     // Monster Vision is a per-player perk that draws a yellow aura over every
@@ -731,6 +756,10 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     for (box.runner.session.particles.entries) |entry| {
         if (entry.active) header.glow_count += 1;
     }
+    // Live sprite effects (draw_sprite_effect_pool's `active` gate).
+    for (box.runner.session.sprite_effects.entries) |entry| {
+        if (entry.active) header.sprite_effect_count += 1;
+    }
 
     const required: u32 = @sizeOf(SnapshotHeader) +
         @sizeOf(PlayerSnap) * header.player_count +
@@ -739,7 +768,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         @sizeOf(SecondarySnap) * header.secondary_count +
         @sizeOf(BonusSnap) * header.bonus_count +
         @sizeOf(ParticleSnap) * header.particle_count +
-        @sizeOf(ParticleGlowSnap) * header.glow_count;
+        @sizeOf(ParticleGlowSnap) * header.glow_count +
+        @sizeOf(SpriteEffectSnap) * header.sprite_effect_count;
 
     const out_ptr = buf orelse {
         len_ptr.* = required;
@@ -889,6 +919,19 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .tint_b = entry.scale_z,
             .age = entry.age,
             .style_id = @intFromEnum(entry.style_id),
+        });
+    }
+    for (box.runner.session.sprite_effects.entries) |entry| {
+        if (!entry.active) continue;
+        writeStruct(out, &offset, SpriteEffectSnap{
+            .x = entry.pos.x,
+            .y = entry.pos.y,
+            .scale = entry.scale,
+            .rotation = entry.rotation,
+            .r = entry.color.r,
+            .g = entry.color.g,
+            .b = entry.color.b,
+            .a = entry.color.a,
         });
     }
 

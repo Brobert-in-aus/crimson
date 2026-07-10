@@ -235,8 +235,8 @@ effect-pool) → bonuses → labels → aim indicators → arrows → cursor.
 |---|---|---|
 | ground / decals / corpses / shadows | alpha (+darken sub-pass) | Partial — decals/corpses/shadows yes; **ground only tiles the base slot** (see ground-generator section); **[audit]** base bakes decals/corpses permanently into the 1024² ground RT with a two-pass corpse **shadow darken** (ZERO/INV_SRC_ALPHA, `terrain_render.py:506-539`) — VR ring-buffers quads and skips the darken pass. |
 | **player trooper** **[audit]** | alpha | **Approximated & was untracked as a pass.** Base: separate leg frame from `move_phase` + torso with **recoil offset**, per-part shadows, 2P tint, dead-frame ramp (`trooper.py:72-296`). VR: single static aimed torso (`Diorama.cs:16` — "leg animation needs a move-phase ABI field; deferred"). |
-| **player shield ring** **[audit]** | additive | **Missing.** Two counter-rotating pulsing `SHIELD_RING` quads while `shield_timer>0` (`trooper.py:198-243`). Needs shield timer over ABI. |
-| **player radioactive aura** **[audit]** | additive | **Missing.** Pulsing green `AURA` under Radioactive-perk players (`trooper.py:107-132`). |
+| **player shield ring** **[audit]** | additive | **DONE 2026-07-10** (`DioramaProjectiles.RenderPlayerFx`) — counter-rotating pulsing `SHIELD_RING` pair, centred 3u along aim, strength ramp on the last second, native sizes/tint/alphas; shield timer came over ABI v11. In-headset validation pending. |
+| **player radioactive aura** **[audit]** | additive | **DONE 2026-07-10** (`RenderPlayerFx`) — pulsing green `AURA` (100u, native alpha curve) on a priority-14 mesh so it draws UNDER the player sprite (15); drawn regardless of health like the native pass. In-headset validation pending. |
 | **Sharpshooter laser sight** **[audit]** | additive | **Missing.** Red gradient trail quad 15→512u along aim (`projectiles.py:110-180`), drawn first in the projectile pass. |
 | creatures (sprites + tint) | alpha | Yes — energizer tint / lifecycle fade / death staging / hit-flash verified. Creature **shadow** sub-pass (tinted silhouette 1.07×, `creatures.py:55-68`) approximated by a generic soft blob. |
 | creature overlays (poison/plague/monster-vision auras) | alpha | Yes (ABI v7) — **[audit]** but fixed-size (90/80/60) regardless of creature `Size`; boss auras don't scale (`Diorama.cs:693-743`). |
@@ -245,7 +245,7 @@ effect-pool) → bonuses → labels → aim indicators → arrows → cursor.
 | `draw_effect_pool` alpha pass (flags & 0x40): smoke, casings, blood | alpha | Yes |
 | `draw_effect_pool` additive pass: ring, flash, shockwave burst | additive | Yes (b5cea3c0) — restored explosion ring/flash/shockwave, enemy hit-sparks, projectile muzzle/impact flashes. |
 | `draw_particle_pool` (`state.particles`): additive glows/sparks | additive | Yes (ABI v7) — `RenderGlowPool` big/normal/bubblegun sub-passes; formulae verified. |
-| **`draw_sprite_effect_pool`** (`state.sprite_effects`) **[audit]** | alpha | **Missing — a THIRD pool, untracked.** `EXPLOSION_PUFF` quads gated on `fx_detail_2` (`effects.py:118-164`), spawned e.g. by bubblegun hits. **Not in the ABI** (no stream; `crimson_host.h:113-132`). |
+| **`draw_sprite_effect_pool`** (`state.sprite_effects`) **[audit]** | alpha | **DONE 2026-07-10 (ABI v13)** — `SpriteEffectSnap` stream packed after the glow pool (gate test pins it); rendered as `EXPLOSION_PUFF` quads, FULL cell rect (this pool skips the effect pool's 2px clamp), plain alpha, priority 22 (between secondaries and the effect pool, native order), gated on graphics detail ≥2 like `fx_detail_2`. In-headset validation pending. |
 | muzzle flash | additive | **Approximated [audit].** Base: `muzzle_flash.png` at recoil offset, **suppressed** by weapon flag 0x8, half-size by 0x4 (`trooper.py:245-273`). VR: generic soft blob for any `MuzzleFlashAlpha>0.01`, flags ignored (`EmitFx`, `Diorama.cs:1407-1419`). **Possible double-draw**: the synthetic blob + the real effect-pool muzzle burst (restored by b5cea3c0) may both render — verify in-headset. Same question for `EmitFx` detonation blobs vs effect-pool ring/flash. |
 | bonus pickups | alpha | Partial — icons yes; **[audit]** missing the **bubble container** behind every pickup, `sin⁴` pulse scale, rotation wobble, and the distinct weapon-drop `ui_wicons` variant (`bonuses.py:50-121`). Hover labels also missing (base-game consumer of "UI Info texts"). |
 | aim indicators / gauges / clock | alpha | Custom VR reticles — cursor/arrows **N/A by design** (see VR-inapplicable table). But the *data*-carrying pieces are real gaps: reload gauge absent (data in ABI, unused) and spread feedback absent (**adapt** as reticle spread ring; `spread_heat` not in ABI). |
@@ -401,9 +401,13 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    persistence** (`quest_unlock_index`) to be meaningful. Typo'Shooter stays
    hidden until its VR input design is settled (see VR-inapplicable table).
 3. ~~**Per-projectile-type render variants**~~ — **DONE 2026-07-10** (see the
-   draw-pass table; ABI v12). The Sharpshooter **laser sight** landed with it.
-   Still open from this cluster: the **sprite-effect pool** ABI stream, and
-   the shield-ring / radioactive-aura render passes (data already in ABI v11).
+   draw-pass table; ABI v12, validated in-headset 6/6). The Sharpshooter
+   **laser sight** landed with it. ~~Still open from this cluster~~: the
+   **sprite-effect pool** stream (ABI v13) and the **shield-ring /
+   radioactive-aura** passes are **DONE 2026-07-10** too — the whole
+   render-pass cluster is now ported (in-headset validation pending). Note:
+   `draw_secondary_projectile`'s `alpha` param is the global world-fade
+   (`ctx.entity_alpha`), which VR skips by design — no ABI field needed.
 4. ~~**HUD behaviors**~~ — **mostly DONE 2026-07-10** (enemy health bar, reload
    gauge, XP roll-up, ammo "+N"/30-cap, HUD fade, spread ring; ABI v11 also
    exports `shield_timer` + perk flags for Radioactive/Sharpshooter — their
