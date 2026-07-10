@@ -1274,7 +1274,10 @@ public partial class Main : Node3D
     private void UpdateHandVisual(XRController3D hand, Node3D reticle, Node3D guide, bool isMoveHand)
     {
         bool tracking = hand.GetHasTrackingData();
-        reticle.Visible = tracking;
+        // Only the MOVE hand keeps a static reticle (the ui_aim ring art): the
+        // aim point is marked by the dynamic spread ring + reload gauge, and
+        // the old ui_cursor pointer is retired outright.
+        reticle.Visible = tracking && isMoveHand;
         guide.Visible = tracking;
         if (!tracking)
         {
@@ -1282,22 +1285,21 @@ public partial class Main : Node3D
         }
 
         ComputeReticle(hand, out bool over, out Vector3 clampedWorld);
-        reticle.GlobalPosition = clampedWorld + new Vector3(0, 0.002f, 0);
+        if (isMoveHand)
+        {
+            reticle.GlobalPosition = clampedWorld + new Vector3(0, 0.002f, 0);
 
-        var mesh = (MeshInstance3D)reticle;
-        var material = (StandardMaterial3D)mesh.MaterialOverride;
-        // The AIM hand carries the dynamic spread ring + reload gauge now, which
-        // made the static ui_aim ring art redundant there — so the aim hand
-        // shows the plain cursor and the ring art marks the MOVE hand instead
-        // (roles swap with the hand-swap setting, so pick by role each frame).
-        material.AlbedoTexture = isMoveHand ? _aimTex : _cursorTex;
-        float triggerValue = hand.GetFloat("trigger");
-        Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
-        // Opaque reticle material: dim by darkening RGB (an alpha change would be
-        // invisible without alpha transparency enabled).
-        material.AlbedoColor = over
-            ? baseColor.Lerp(Colors.White, triggerValue)
-            : baseColor.Darkened(0.6f);
+            var mesh = (MeshInstance3D)reticle;
+            var material = (StandardMaterial3D)mesh.MaterialOverride;
+            material.AlbedoTexture = _aimTex;
+            float triggerValue = hand.GetFloat("trigger");
+            var baseColor = new Color(0.2f, 0.5f, 1.0f);
+            // Opaque reticle material: dim by darkening RGB (an alpha change would
+            // be invisible without alpha transparency enabled).
+            material.AlbedoColor = over
+                ? baseColor.Lerp(Colors.White, triggerValue)
+                : baseColor.Darkened(0.6f);
+        }
 
         // Vertical guide line from the controller down to the plane point.
         float planeY = _arenaRoot.GlobalPosition.Y;
