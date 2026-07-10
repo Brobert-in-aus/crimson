@@ -38,11 +38,16 @@ public sealed partial class Hud : Node3D
     private const float AmmoBaseY = 17.0f;
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
 
-    // Health bar stretched much taller than the native 9px sliver so it reads in VR.
+    // Health bar stretched much taller than the native 9px sliver so it reads in
+    // VR (doubled again after in-headset feedback; fills the 64-tall top bar).
     private const float HealthBarX = 64.0f;
-    private const float HealthBarY = 18.0f;
-    private const float HealthBarH = 28.0f;
+    private const float HealthBarY = 4.0f;
+    private const float HealthBarH = 56.0f;
     private const float HeartBase = 40.0f; // heart quad base size (native ~32)
+
+    // Bottom of the laid-out native content (XP panel 60..113): used to anchor
+    // the panel's BOTTOM edge on the arena plane.
+    private const float NativeBottomY = 113.0f;
 
     private float _u;      // metres per native HUD unit
     private float _side;
@@ -83,16 +88,15 @@ public sealed partial class Hud : Node3D
         // The HUD top bar spans ~1.15x the arena width; scale native units to fit.
         _u = arenaSideMeters * 1.15f / NativeSpan;
 
-        // Anchor the HUD's TOP edge at the VISIBLE floor square's near edge (the
-        // floor extends FloorMarginScale past the playable zone — anchoring at
-        // the playable edge left the HUD under the tabletop) and hang it DOWN /
-        // toward the seated player (tilted to face up), so it never covers the
-        // play surface. Arena is yawed so the player's side is local -z; the
-        // 180 yaw turns the art to face them. Together with depth-tested quads
-        // (below) the tabletop occludes the HUD at shallow view angles instead
-        // of the HUD drawing over the arena.
-        Position = new Vector3(0.0f, 0.0f, -(half * Diorama.FloorMarginScale));
-        RotationDegrees = new Vector3(-45.0f, 180.0f, 0.0f);
+        // The HUD stands VERTICALLY at the FAR edge of the visible floor square
+        // (in-headset decision: a scoreboard across the table beats a panel at
+        // the near edge), its BOTTOM edge aligned with the floor's far edge.
+        // Content is laid out hanging DOWN from the node origin (native y=0 at
+        // the origin), so lifting the origin by the content height puts the
+        // bottom exactly on the plane. Arena local +z = far; the 180 yaw turns
+        // the art back toward the player. Quads stay depth-tested.
+        Position = new Vector3(0.0f, NativeBottomY * _u, half * Diorama.FloorMarginScale);
+        RotationDegrees = new Vector3(0.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
         _indLife = Load("ui_indLife");

@@ -1286,9 +1286,11 @@ public partial class Main : Node3D
 
         var mesh = (MeshInstance3D)reticle;
         var material = (StandardMaterial3D)mesh.MaterialOverride;
-        // Aim hand shows the crosshair, move hand the cursor (roles swap with the
-        // hand-swap setting, so pick the texture by role each frame).
-        material.AlbedoTexture = isMoveHand ? _cursorTex : _aimTex;
+        // The AIM hand carries the dynamic spread ring + reload gauge now, which
+        // made the static ui_aim ring art redundant there — so the aim hand
+        // shows the plain cursor and the ring art marks the MOVE hand instead
+        // (roles swap with the hand-swap setting, so pick by role each frame).
+        material.AlbedoTexture = isMoveHand ? _aimTex : _cursorTex;
         float triggerValue = hand.GetFloat("trigger");
         Color baseColor = isMoveHand ? new Color(0.2f, 0.5f, 1.0f) : new Color(1.0f, 0.3f, 0.25f);
         // Opaque reticle material: dim by darkening RGB (an alpha change would be

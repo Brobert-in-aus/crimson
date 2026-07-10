@@ -182,17 +182,22 @@ def weapon_table() -> dict[str, dict]:
 
 
 def perk_names() -> dict[str, str]:
-    """perk_id -> display name (PERK_BY_ID), for the VR perk-menu card labels."""
-    from src.crimson.perks.ids import PERK_BY_ID
+    """perk_id -> display name for the VR perk-menu card labels. Resolved via
+    perk_display_name with preserve_bugs=False (the VR session default), so
+    original typos the reference fixes by default are fixed here too — e.g.
+    'Fire Caugh' -> 'Fire Cough' (an original-game typo, kept only under
+    preserve_bugs)."""
+    from src.crimson.perks.ids import PERK_BY_ID, perk_display_name
 
-    return {str(int(pid)): meta.name for pid, meta in PERK_BY_ID.items()}
+    return {str(int(pid)): perk_display_name(pid, preserve_bugs=False) for pid in PERK_BY_ID}
 
 
 def perk_descriptions() -> dict[str, str]:
-    """perk_id -> description (PERK_BY_ID), for the VR perk-menu '?' popups."""
-    from src.crimson.perks.ids import PERK_BY_ID
+    """perk_id -> description for the VR perk-menu '?' popups (same
+    preserve_bugs=False resolution as the names)."""
+    from src.crimson.perks.ids import PERK_BY_ID, perk_display_description
 
-    return {str(int(pid)): meta.description for pid, meta in PERK_BY_ID.items()}
+    return {str(int(pid)): perk_display_description(pid, preserve_bugs=False) for pid in PERK_BY_ID}
 
 
 def main() -> None:
