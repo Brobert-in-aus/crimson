@@ -12,8 +12,12 @@ if (-not (Test-Path $zig)) { $zig = 'zig' }
 
 Push-Location $zigDir
 try {
-    # Windows x64 (host)
+    # Windows x64 (host). FAIL CLOSED: a native command's non-zero exit does NOT
+    # trip $ErrorActionPreference in PS 5.1, so without this check a failed zig
+    # build silently copies the STALE zig-out artifact (shipped a v10 .so in a
+    # v11 APK once - 'ABI mismatch' only visible on-device).
     & $zig build host-lib
+    if ($LASTEXITCODE -ne 0) { throw "zig build host-lib (win) failed ($LASTEXITCODE)" }
     New-Item -ItemType Directory -Force (Join-Path $godotNative 'win-x64') | Out-Null
     Copy-Item (Join-Path $zigDir 'zig-out\bin\crimson_host.dll') (Join-Path $godotNative 'win-x64\') -Force
     Write-Output "win-x64: crimson_host.dll -> $godotNative\win-x64"
@@ -49,6 +53,7 @@ try {
         [System.IO.File]::WriteAllText($libcFile, ($libcLines -join "`n") + "`n")
 
         & $zig build host-lib -Dtarget=aarch64-linux-android "-Dandroid-libc=$libcFile"
+        if ($LASTEXITCODE -ne 0) { throw "zig build host-lib (android) failed ($LASTEXITCODE)" }
         New-Item -ItemType Directory -Force (Join-Path $godotNative 'android-arm64') | Out-Null
         Copy-Item (Join-Path $zigDir 'zig-out\lib\libcrimson_host.so') (Join-Path $godotNative 'android-arm64\') -Force
         Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64 (bionic libc via NDK $ndkRoot)"

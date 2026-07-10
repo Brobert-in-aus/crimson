@@ -52,6 +52,32 @@ foreach ($item in $preflight.GetEnumerator()) {
         throw "preflight failed: missing $($item.Key): $($item.Value)"
     }
 }
+
+# Fail-closed ABI check: the arm64 .so about to be injected must report the same
+# CRIMSON_HOST_ABI_VERSION the C# frontend expects (Sim.ExpectedAbiVersion), else
+# the app boots to 'sim unavailable' on-device. This slipped through once: a
+# silently-failed android zig build left a stale .so that a signed, payload-
+# verified APK shipped anyway. The constant is read by disassembling
+# crimson_host_abi_version (mov w0, #N) with the NDK's llvm-objdump.
+$simCs = Join-Path $proj 'src\Sim.cs'
+$abiExpected = $null
+if (Test-Path $simCs) {
+    $abiMatch = Select-String -Path $simCs -Pattern 'ExpectedAbiVersion\s*=\s*(\d+)' | Select-Object -First 1
+    if ($abiMatch) { $abiExpected = [int]$abiMatch.Matches[0].Groups[1].Value }
+}
+$objdump = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\ndk\*\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-objdump.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($abiExpected -and $objdump) {
+    $dis = & $objdump.FullName -d --disassemble-symbols=crimson_host_abi_version $preflight['arm64 native lib (build_libcrimson.ps1 -android)'] 2>$null
+    $mv = $dis | Select-String 'mov\s+w0, #(0x[0-9a-fA-F]+|\d+)' | Select-Object -First 1
+    if ($mv) {
+        $rawVer = $mv.Matches[0].Groups[1].Value
+        $libVer = if ($rawVer -like '0x*') { [Convert]::ToInt32($rawVer.Substring(2), 16) } else { [int]$rawVer }
+        if ($libVer -ne $abiExpected) {
+            throw "preflight failed: arm64 libcrimson_host.so reports ABI v$libVer but Sim.cs expects v$abiExpected - rebuild it (build_libcrimson.ps1 -android)"
+        }
+        Write-Host "    arm64 lib ABI v$libVer matches Sim.cs" -ForegroundColor DarkGray
+    }
+}
 if ($Install) {
     $adbPre = (Get-Command adb -ErrorAction SilentlyContinue).Source
     if (-not $adbPre) { $adbPre = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
