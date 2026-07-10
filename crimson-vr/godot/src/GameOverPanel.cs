@@ -69,12 +69,15 @@ public sealed partial class GameOverPanel : Node3D
 
         // Reaper banner (256x64 art). Well Done is the quest-victory variant;
         // survival death is always the Reaper.
-        AddQuad(Load("ui_textReaper"), 0.0f, s * 0.38f, s * 0.62f, s * 0.155f, new Color(1, 1, 1, 0.95f), priority: 62);
+        AddQuad(Load("ui_textReaper"), 0.0f, s * 0.40f, s * 0.62f, s * 0.155f, new Color(1, 1, 1, 0.95f), priority: 62);
 
         // Score column (left) — value + rank, like the base card's first column.
-        _score = AddLabel("Score: 0", -s * 0.36f, s * 0.22f, s / 950.0f, new Color(0.9f, 0.9f, 1.0f));
-        _rank = AddLabel("Rank: -", -s * 0.36f, s * 0.13f, s / 1200.0f, new Color(0.9f, 0.9f, 0.92f));
-        _tooLow = AddLabel($"Score too low for top{TableMax}.", 0.0f, s * 0.295f, s / 1350.0f, new Color(0.78f, 0.78f, 0.78f));
+        // Line spacing: Label3D glyphs are ~FontSize*PixelSize tall (110*s/1000
+        // = 0.11s for the score), so adjacent rows need >= that between centres
+        // — the first pass overlapped descenders (Frags g touched the Hit %).
+        _score = AddLabel("Score: 0", -s * 0.36f, s * 0.25f, s / 1000.0f, new Color(0.9f, 0.9f, 1.0f));
+        _rank = AddLabel("Rank: -", -s * 0.36f, s * 0.12f, s / 1200.0f, new Color(0.9f, 0.9f, 0.92f));
+        _tooLow = AddLabel($"Score too low for top{TableMax}.", 0.0f, -s * 0.24f, s / 1400.0f, new Color(0.78f, 0.78f, 0.78f));
 
         // Game time (right): analog gauge + mm:ss. Pointer rotates 6 deg per
         // elapsed second like the base clock (viewer-clockwise = -Z here).
@@ -85,9 +88,9 @@ public sealed partial class GameOverPanel : Node3D
 
         // Weapon row: most-used icon (2 wicons cells, 2:1) + name, frags, hit %.
         _weaponIcon = AddQuad(Load("ui_wicons"), -s * 0.36f, -s * 0.02f, s * 0.30f, s * 0.15f, new Color(1, 1, 1, 0.9f), priority: 62, out _weaponIconMat);
-        _weaponName = AddLabel("", -s * 0.36f, -s * 0.13f, s / 1350.0f, new Color(0.8f, 0.8f, 0.82f));
-        _frags = AddLabel("Frags: 0", s * 0.28f, -s * 0.02f, s / 1100.0f, new Color(0.9f, 0.9f, 0.92f));
-        _hitRatio = AddLabel("Hit %: 0%", s * 0.28f, -s * 0.11f, s / 1100.0f, new Color(0.9f, 0.9f, 0.92f));
+        _weaponName = AddLabel("", -s * 0.36f, -s * 0.15f, s / 1400.0f, new Color(0.8f, 0.8f, 0.82f));
+        _frags = AddLabel("Frags: 0", s * 0.28f, s * 0.005f, s / 1150.0f, new Color(0.9f, 0.9f, 0.92f));
+        _hitRatio = AddLabel("Hit %: 0%", s * 0.28f, -s * 0.125f, s / 1150.0f, new Color(0.9f, 0.9f, 0.92f));
 
         // Buttons: Play Again / Main Menu (High scores needs the browser screen).
         AddButton("Play Again", -s * 0.26f, -s * 0.34f, () => OnPlayAgain?.Invoke(), new Color(0.35f, 0.55f, 0.4f));
