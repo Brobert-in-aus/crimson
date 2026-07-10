@@ -16,20 +16,20 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-10 (previous round all
-    // passing except the death-screen pair); now covers the comfort/alignment
-    // round: death panel beside the keyboard, depth-tested UI text, HUD and
-    // edge-buttons aligned to the VISIBLE floor square (1.3x playable zone).
+    // validation surface changes. Cleared 2026-07-10 again (comfort round all
+    // green); now covers the tweak round: HUD scoreboard at the far edge with
+    // the doubled HP bar, lowered keyboard, new reticle roles, the corrected
+    // perk name, and this panel's own doubled buttons.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("deathside", "Death screen: beside keyboard, no look-up"),
-        ("deathoccl", "No text through keys (caret occluded)"),
-        ("deathstats", "Death stats: score/rank/time/clock"),
-        ("hudedge", "HUD top edge at floor-square edge"),
-        ("buttonedge", "Pause/LevelUp outside the floor edge"),
+        ("hudfar", "HUD at far edge, HP bar x2"),
+        ("kbheight", "Keyboard height comfortable"),
+        ("reticles2", "Move = ring, aim = dynamic only"),
+        ("firecough", "Perk name reads Fire Cough"),
+        ("checklistbtn", "These buttons: no double-hits"),
     };
 
-    private const int PerPage = 6;
+    private const int PerPage = 4;
 
     private static readonly Color[] StateColors =
     {
@@ -61,7 +61,8 @@ public sealed partial class ValidationChecklist : Node3D
         // faces the player when they look right — always visible, out of the way of
         // the play area, with room for the full list. (Tune yaw sign in-headset if
         // it ends up on the wrong side.)
-        Position = new Vector3(s * 1.25f, s * 0.55f, 0.0f);
+        // Raised to make room for the doubled rows (the stack reaches further down).
+        Position = new Vector3(s * 1.25f, s * 0.9f, 0.0f);
         RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
 
         var title = new Label3D
@@ -77,9 +78,12 @@ public sealed partial class ValidationChecklist : Node3D
         };
         AddChild(title);
 
+        // Rows doubled in height + a wider gap (in-headset: adjacent rows got
+        // poked together — the 2cm poke sphere spans a thin gap), with fewer
+        // rows per page to keep the stack above the arena plane.
         float rw = s * 0.78f;
-        float rh = s * 0.09f;
-        float gap = s * 0.015f;
+        float rh = s * 0.18f;
+        float gap = s * 0.03f;
         float top = s * 0.32f;
 
         for (int i = 0; i < PerPage; i++)
