@@ -16,18 +16,17 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Covers the light round (HUD raise, arena
-    // border, aim line-clamp), the projectile-variants slice, and the new
-    // debug weapon-tour behaviors (reload cycles weapons, Sharpshooter laser
-    // from spawn).
+    // validation surface changes. Cleared 2026-07-10 (projectile round 6/6
+    // green); now covers the ABI v13 slice: sprite-effect pool (muzzle puffs,
+    // rocket exhaust, smoke), the shield-ring pair (grab a shield bonus), the
+    // Radioactive aura (granted at spawn in debug showcase), and the louder
+    // level-up cue.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("hudup", "HUD raised one panel-height"),
-        ("arenaedge", "Playfield border strip visible"),
-        ("aimclamp", "Off-arena cursor stays on aim line"),
-        ("wpncycle", "Reload cycles weapons (debug)"),
-        ("lasersight", "Laser sight from spawn (debug)"),
-        ("projfx", "Per-weapon projectile visuals"),
+        ("spritefx", "Muzzle puffs / rocket smoke"),
+        ("shieldring", "Shield ring pair (shield bonus)"),
+        ("radaura", "Green aura from spawn (debug)"),
+        ("lvlsnd", "Level-up sound clearly audible"),
     };
 
     private const int PerPage = 4;
