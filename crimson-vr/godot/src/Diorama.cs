@@ -194,7 +194,8 @@ public sealed partial class Diorama : Node3D
     private float _worldSize;
     private float _energizerTimer; // global energizer bonus timer (snapshot header)
 
-    private Layer _players = null!;
+    private Layer _players = null!;      // torso quads (player lift)
+    private Layer _playerLegs = null!;   // leg quads, LOWER: on the creature plane
     private readonly Dictionary<int, Layer> _creatureLayers = new();
     private Layer _creatureFallback = null!;
     private Layer _bonuses = null!;
@@ -319,13 +320,21 @@ public sealed partial class Diorama : Node3D
         // sizeScale 1.0 = faithful: the reference draws a sprite at ~its `size`
         // world units (player) / 64*clamp(size/64,.25,2) (creatures), so the sprite
         // matches the sim hit radius. Bigger scales overshoot the hitbox.
-        // ABI v15: legs + torso are separate quads in one UV-indexed layer
-        // (leg frame from move_phase rotated by heading; torso = leg + 16
-        // rotated by aim with the recoil offset — trooper.py:155-196), so the
-        // cap is 2 per player.
-        _players = manifest?.player is { } pd
-            ? BuildPlayerLayer(pd)
-            : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
+        // ABI v15: legs + torso are separate UV-indexed layers (leg frame from
+        // move_phase rotated by heading; torso = leg + 16 rotated by aim with
+        // the recoil offset — trooper.py:155-196). The LEGS render on the
+        // creature plane (0.008) so they read as standing IN the crowd; the
+        // torso floats at the player lift (0.012) above the swarm.
+        if (manifest?.player is { } pd)
+        {
+            _playerLegs = BuildPlayerLayer(pd, lift: 0.008f);
+            _players = BuildPlayerLayer(pd, lift: 0.012f);
+        }
+        else
+        {
+            _playerLegs = BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 15);
+            _players = BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
+        }
 
         // One creature layer per type so each can bind its own sheet texture.
         if (manifest?.creatures is { } creatures)
@@ -398,19 +407,19 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Textured layer showing one static frame of a sheet. Falls back
     /// to a colored layer if the texture can't be loaded (assets not baked).</summary>
-    /// <summary>The player layer: UV-indexed (per-instance frame) so legs and
-    /// torso render as two quads from the same trooper sheet.</summary>
-    private Layer BuildPlayerLayer(SpriteDesc desc)
+    /// <summary>A player part layer: UV-indexed (per-instance frame) from the
+    /// trooper sheet, at the given plane lift.</summary>
+    private Layer BuildPlayerLayer(SpriteDesc desc, float lift)
     {
         string path = SpriteDir + desc.sheet;
         if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
-            return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
+            return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 15);
         }
         var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = desc.priority };
         material.SetShaderParameter("sheet", tex);
-        Layer layer = BuildLayer(PlayerCap, material, lift: 0.012f, sizeScale: 1.0f, useCustomData: true);
+        Layer layer = BuildLayer(PlayerCap, material, lift, sizeScale: 1.0f, useCustomData: true);
         layer.UvIndexed = true;
         layer.Grid = Mathf.Max(desc.grid, 1);
         layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
@@ -1361,6 +1370,7 @@ public sealed partial class Diorama : Node3D
     public void PushSnapshot(in SnapshotView view)
     {
         _players.BeginPush();
+        _playerLegs.BeginPush();
         _muzzleCount = 0;
         foreach (Sim.PlayerSnap p in view.Players)
         {
@@ -1370,7 +1380,7 @@ public sealed partial class Diorama : Node3D
             // offset (muzzle_flash_alpha * 12 units along aim + 90 deg).
             var game = new Vector2(p.X, p.Y);
             int legFrame = Mathf.Clamp((int)(p.MovePhase + 0.5f), 0, 14);
-            _players.Add(game, p.Heading, p.Size, frame: legFrame);
+            _playerLegs.Add(game, p.Heading, p.Size, frame: legFrame);
             float recoilDir = p.AimHeading + Mathf.Pi * 0.5f;
             Vector2 recoil = new Vector2(Mathf.Cos(recoilDir), Mathf.Sin(recoilDir))
                 * (p.MuzzleFlashAlpha * 12.0f);
@@ -1526,7 +1536,10 @@ public sealed partial class Diorama : Node3D
         frac = Mathf.Clamp(frac, 0.0f, 1.0f);
         _needleCount = 0;
         _shadowCount = 0;
-        InterpolateLayer(_players, frac, sprite: true, castShadow: true);
+        // Legs cast the ground shadow (they're the part standing on it); the
+        // floating torso doesn't add a second blob.
+        InterpolateLayer(_playerLegs, frac, sprite: true, castShadow: true);
+        InterpolateLayer(_players, frac, sprite: true, castShadow: false);
         foreach (Layer layer in _creatureLayers.Values)
         {
             InterpolateLayer(layer, frac, sprite: true, castShadow: true);
