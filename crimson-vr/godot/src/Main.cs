@@ -340,12 +340,14 @@ public partial class Main : Node3D
         _rightGuide.Visible = visible;
     }
 
-    /// <summary>Leave the main menu and begin play (switch to the in-game track).</summary>
+    /// <summary>Leave the main menu and begin play. The base game STOPS the menu
+    /// theme entering a run; the in-game tune starts on the first creature hit
+    /// (randomly gt1/gt2, sim trigger_game_tune), not at run start.</summary>
     private void StartGame()
     {
         _mainMenu.Close();
         SetGameplayVisible(true);
-        _audio.PlayMusic("gt1_ingame");
+        _audio.StopMusic();
     }
 
     /// <summary>Quit the current game back to the main menu: reset the sim to a
@@ -1239,6 +1241,8 @@ public partial class Main : Node3D
         _sim.Restart();
         _diorama.ResetTerrainFx();
         _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+        // Fresh run: fade the old tune out; the first hit rolls a new one.
+        _audio.StopMusic();
     }
 
     // The poke point is the grip position - i.e. the centre of the visible hand

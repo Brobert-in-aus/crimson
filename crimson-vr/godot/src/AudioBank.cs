@@ -51,7 +51,17 @@ public sealed partial class AudioBank : Node3D
     // VolumeDb; music on the music player's.
     private AudioStreamPlayer _music = null!;
     private readonly Dictionary<string, string> _musicTracks = new();
-    private string? _musicTrack;
+    private string? _musicTrack;    // track currently in the player
+    private string? _musicDesired;  // track that SHOULD be playing (survives volume 0)
+    private string? _musicPending;  // next track, starts once the fade-out lands
+    private bool _musicStopping;    // fade to silence with nothing after
+    private float _musicFade;       // 0..1 crossfade factor over the user volume
+    // Base exclusive-channel behaviour (music.py:229-256,293-344): the old
+    // track fades OUT at 0.5/s, the new one fades IN at 1.0/s only after
+    // silence; music volume 0 hard-stops playback instead of playing at -80dB.
+    private const float MusicFadeOutPerSec = 0.5f;
+    private const float MusicFadeInPerSec = 1.0f;
+    private int _musicLevel = 10;
     private float _sfxVolumeDb;
     private float _musicVolumeDb;
     private AudioStream? _levelUpStream; // one-shot UI cue on level up
@@ -185,7 +195,10 @@ public sealed partial class AudioBank : Node3D
         {
             if (hit.TriggerGameTune != 0)
             {
-                continue; // game-tune trigger plays no hit sfx (music: later slice)
+                // First creature hit of the run: start the randomly-rolled game
+                // tune (no hit sfx for this event, matching the router).
+                PlayGameTune(hit.GameTuneRoll);
+                continue;
             }
             if (hit.ShockHit != 0)
             {
@@ -227,36 +240,140 @@ public sealed partial class AudioBank : Node3D
 
     public void SetMusicVolume(int level)
     {
+        _musicLevel = level;
         _musicVolumeDb = VolumeToDb(level);
-        if (_music != null)
-        {
-            _music.VolumeDb = _musicVolumeDb;
-        }
-    }
-
-    /// <summary>Play a named music track (looping), e.g. "crimson_theme" (menu) or
-    /// "gt1_ingame" (gameplay). No-ops if the track/asset is absent. Re-selecting
-    /// the current track keeps it playing.</summary>
-    public void PlayMusic(string track)
-    {
-        if (_music == null || _musicTrack == track)
+        if (_music == null)
         {
             return;
         }
-        if (!_musicTracks.TryGetValue(track, out string? path) || ResourceLoader.Load<AudioStream>(AudioDir + path) is not AudioStream stream)
+        if (level <= 0)
+        {
+            // Base semantics: volume 0 STOPS playback (music.py:303-363).
+            _music.Stop();
+            _musicTrack = null;
+        }
+        else if (!_music.Playing && _musicDesired != null)
+        {
+            // Volume raised from 0: resume the desired track, fading in.
+            StartTrack(_musicDesired, fadeFrom: 0.0f);
+        }
+        ApplyMusicVolume();
+    }
+
+    private void ApplyMusicVolume()
+        => _music.VolumeDb = _musicVolumeDb + Mathf.LinearToDb(Mathf.Max(_musicFade, 0.0001f));
+
+    /// <summary>Play a named music track (looping), e.g. "crimson_theme" (menu) or
+    /// "gt1_ingame" (gameplay), crossfading from whatever plays now (fade out
+    /// 0.5/s, fade in 1.0/s after silence — music.py). No-ops if the track/asset
+    /// is absent. Re-selecting the current track keeps it playing.</summary>
+    public void PlayMusic(string track)
+    {
+        if (_music == null || !_musicTracks.ContainsKey(track))
+        {
+            return;
+        }
+        _musicDesired = track;
+        _musicStopping = false;
+        if (_musicLevel <= 0)
+        {
+            return; // volume 0: remember the track, play nothing
+        }
+        if (_musicTrack == track && _music.Playing)
+        {
+            _musicPending = null;
+            return;
+        }
+        if (_music.Playing)
+        {
+            _musicPending = track; // fade the current one out first
+        }
+        else
+        {
+            StartTrack(track, fadeFrom: 0.0f);
+        }
+    }
+
+    /// <summary>Fade the music out to silence (base fades at 0.5/s rather than
+    /// cutting; entering a run stops the menu theme this way).</summary>
+    public void StopMusic()
+    {
+        _musicDesired = null;
+        _musicPending = null;
+        _musicStopping = true;
+    }
+
+    /// <summary>First projectile hit on a creature: the sim raises
+    /// trigger_game_tune with a resolved roll; the base picks randomly from the
+    /// game-tune queue (music/game_tunes.txt: gt1_ingame + gt2_harppen) and
+    /// crossfades it in (audio_router.py:100-119, music.py:269-290).</summary>
+    private static readonly string[] GameTuneQueue = { "gt1_ingame", "gt2_harppen" };
+
+    private void PlayGameTune(int roll)
+    {
+        var available = new List<string>();
+        foreach (string t in GameTuneQueue)
+        {
+            if (_musicTracks.ContainsKey(t))
+            {
+                available.Add(t);
+            }
+        }
+        if (available.Count == 0)
+        {
+            return;
+        }
+        int idx = roll >= 0 ? roll % available.Count : 0;
+        PlayMusic(available[idx]);
+    }
+
+    private void StartTrack(string track, float fadeFrom)
+    {
+        if (!_musicTracks.TryGetValue(track, out string? path)
+            || ResourceLoader.Load<AudioStream>(AudioDir + path) is not AudioStream stream)
         {
             return;
         }
         _musicTrack = track;
+        _musicPending = null;
+        _musicFade = fadeFrom;
         _music.Stream = stream;
-        _music.VolumeDb = _musicVolumeDb;
+        ApplyMusicVolume();
         _music.Play();
     }
 
-    public void StopMusic()
+    /// <summary>Drive the music crossfade (out 0.5/s; in 1.0/s once silent).</summary>
+    public override void _Process(double delta)
     {
-        _musicTrack = null;
-        _music?.Stop();
+        if (_music == null || _musicLevel <= 0)
+        {
+            return;
+        }
+        bool fadingOut = _musicStopping || _musicPending != null;
+        if (fadingOut && _music.Playing)
+        {
+            _musicFade -= (float)delta * MusicFadeOutPerSec;
+            if (_musicFade <= 0.0f)
+            {
+                _musicFade = 0.0f;
+                _music.Stop();
+                _musicTrack = null;
+                if (_musicPending is { } next)
+                {
+                    StartTrack(next, fadeFrom: 0.0f);
+                }
+                else
+                {
+                    _musicStopping = false;
+                }
+            }
+            ApplyMusicVolume();
+        }
+        else if (_music.Playing && _musicFade < 1.0f)
+        {
+            _musicFade = Mathf.Min(1.0f, _musicFade + (float)delta * MusicFadeInPerSec);
+            ApplyMusicVolume();
+        }
     }
 
     /// <summary>Play the level-up UI cue (non-positional-ish, at the arena centre).</summary>

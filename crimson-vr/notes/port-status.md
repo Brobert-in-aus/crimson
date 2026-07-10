@@ -285,16 +285,13 @@ final `SfxId`s + a `trigger_game_tune` flag; screens emit their own UI SFX. VR
 consumes the sim stream (`SimSession.CaptureAudio` → `AudioBank.Route`) and
 reimplements screen audio itself. Systemic gaps:
 
-- **In-game music trigger**: base **stops** music on entering a run and starts a
-  **randomly chosen** game tune (50/50 `gt1_ingame` / `gt2_harppen`, from
-  `music/game_tunes.txt`) on the **first projectile hit on a creature**, with
-  crossfade (`audio_router.py:100-119`, `music.py:269-290`); suppressed in demo
-  and **Rush** (Rush has no in-game music, `audio_router.py:114`). VR hard-starts
-  `gt1_ingame` immediately, always. → **Correction:** `gt2_harppen` is NOT
-  "wire when mode-select lands" — it's in the already-shipped Survival pool.
-- **Music crossfade / exclusive channels**: base fades out old track (0.5/s) and
-  fades in new (1.0/s) only after silence (`music.py:229-256,293-344`); VR
-  hard-swaps the stream (`AudioBank.cs:238-252`).
+- ~~**In-game music trigger**~~ — **DONE 2026-07-10**: entering a run (and Play
+  Again) now STOPS the menu theme; the game tune starts on the sim's
+  `trigger_game_tune` (first creature hit) picking gt1/gt2 by the ABI's
+  resolved roll.
+- ~~**Music crossfade / exclusive channels**~~ — **DONE 2026-07-10**: AudioBank
+  fades out at 0.5/s and fades the next track in at 1.0/s only after silence
+  (music.py rates).
 - **Reflex-Boost pitch-down**: grim slows SFX playback toward half rate during
   reflex boost (`grim/sfx.py:63-80`); VR has no pitch path. (Desktop rewrite
   currently stubs the timer too — `audio_router.py:31-43` — but the mechanism is
@@ -306,8 +303,8 @@ reimplements screen audio itself. Systemic gaps:
   "panned" comments are unimplemented); VR positions shots at the player and the
   rest at arena centre with attenuation **disabled**. VR is *more* spatial than
   the rewrite; fine, now documented.
-- **Volume semantics**: base music volume 0 hard-stops playback, up-ramps are
-  gradual (`music.py:303-363`); VR maps 0 → -80dB and keeps streaming.
+- ~~**Volume semantics**~~ — **DONE 2026-07-10**: music volume 0 now hard-stops
+  playback (resumes the desired track, fading in, when raised).
 - **Quest victory sting**: `crimsonquest` doubles as the quest-completion music,
   ramped from 0 (`quest_mode.py:345-356`) — not just the "quest/demo theme".
 - **Verify**: possible `UI_LEVELUP` double-play in VR (both `Route`d from loose
