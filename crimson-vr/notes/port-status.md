@@ -266,8 +266,19 @@ tints only) — nothing to port there. `render/pipeline.py`/`frame.py`/`sink.py`
 are orchestration only. Base camera is a fit-to-window scale, not a follow-cam —
 no zoom/follow behavior exists to miss; only the shake (above) is real.
 
-**Ground generator (tracked gap).** The terrain floor was marked "implemented",
-but that masked a fidelity gap: the diorama only **tiles the base terrain slot**
+**Ground generator — DONE 2026-07-10.** The diorama now reproduces the native
+ground RT: a one-shot SubViewport canvas replays `grim/terrain_render.py`
+(CrtRand LCG from `terrain_seed`; base/overlay/detail scatter passes 1600/70/30
+at 1024²; 128px patches rotated about centre, RNG order rotation→Y→X; native
+tints over the 63/56/25 clear). Scatter math is golden-tested against the
+reference (TerrainGen.cs + TerrainGenTests). The RT maps 1:1 onto the playable
+zone (margin wraps) and the surrounding world floor shares it; missing sheets
+fall back to the old base-slot tiling. Decal/corpse BAKING into the RT (the
+native permanent-bake + corpse shadow darken) remains ring-buffered quads —
+still tracked in the draw-pass table. In-headset validation pending.
+Historical context of the gap:
+The terrain floor was marked "implemented",
+but that masked a fidelity gap: the diorama only **tiled the base terrain slot**
 (`ter_qN_base`, Nearest-filtered), whereas the base game builds the ground with
 grim's **seeded generator** compositing all three slots — base + overlay (`tex1`)
 + detail — into a 1024² bitmap with dirt/grass patches placed by `terrain_seed`
