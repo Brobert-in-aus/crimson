@@ -43,9 +43,24 @@ public partial class Main : Node3D
     // forced, and 1-in-10 exported creatures carry a poison/plague aura flag —
     // so the aura + glow-pool render paths can be validated on demand
     // (checklist items that otherwise need rare spawns/drops).
-    private string SurvivalConfig =>
-        "{\"seed\":1,\"game_mode\":1,\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
+    private string SessionConfig =>
+        "{\"seed\":1"
+        + $",\"game_mode\":{_gameMode}"
+        + (_gameMode == GameModeQuests ? $",\"quest_level_key\":{_questKey}" : string.Empty)
+        + ",\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
+        // The persisted quest-unlock progression also gates the survival/rush
+        // weapon-drop pool, like the base game's status blob.
+        + $",\"status_quest_unlock_index\":{_settings.QuestUnlockIndex}"
         + (_settings.Debug ? ",\"debug_fx_showcase\":true" : string.Empty) + "}";
+
+    // Sim.GameModeId values (game_ids.zig).
+    private const int GameModeSurvival = 1;
+    private const int GameModeRush = 2;
+    private const int GameModeQuests = 3;
+    private int _gameMode = GameModeSurvival;
+    private int _questKey = 101;      // quest_level_key = stage*100 + index
+    private string _questTitle = string.Empty;
+    private bool _questEndShown;      // quest end panel shown for this run
 
     private XROrigin3D _origin = null!;
     private XRCamera3D _camera = null!;
@@ -97,11 +112,15 @@ public partial class Main : Node3D
     private ValidationChecklist _checklist = null!;
     private DebugMenu _debugMenu = null!;
     private MainMenu _mainMenu = null!;
+    private PlayGameMenu _playGameMenu = null!;
+    private QuestSelectMenu _questSelect = null!;
+    private QuestResultPanel _questPanel = null!;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
     /// from it) owns the screen: the sim must not tick and gameplay input must not
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
-    private bool MenuOwnsScreen => _mainMenu.IsOpen || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
+    private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
+        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -305,14 +324,45 @@ public partial class Main : Node3D
             LoadReticleTex("ui_signCrimson.png"),
             LoadReticleTex("ui_menuItem.png"),
             LoadReticleTex("ui_itemTexts.png"));
-        _mainMenu.OnPlay += StartGame;
+        _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(); };
         _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
         _mainMenu.OnStatistics += () => GD.Print("CrimsonVR: statistics screen is a later slice");
         _mainMenu.OnQuit += () => GetTree().Quit();
 
+        // Play Game mode select (base play_game.py): Quests / Rush / Survival.
+        _playGameMenu = new PlayGameMenu();
+        _arenaRoot.AddChild(_playGameMenu);
+        _playGameMenu.Build(ArenaSideMeters);
+        _playGameMenu.OnSurvival += () => StartRun(GameModeSurvival);
+        _playGameMenu.OnRush += () => StartRun(GameModeRush);
+        _playGameMenu.OnQuests += () => { _playGameMenu.Close(); _questSelect.Open(_settings.QuestUnlockIndex); };
+        _playGameMenu.OnBack += () => { _playGameMenu.Close(); _mainMenu.Open(); };
+
+        // Quest stage/level select, gated by the persisted unlock index.
+        _questSelect = new QuestSelectMenu();
+        _arenaRoot.AddChild(_questSelect);
+        _questSelect.Build(ArenaSideMeters);
+        _questSelect.OnStart += (key, title) => { _questTitle = title; StartRun(GameModeQuests, key); };
+        _questSelect.OnBack += () => { _questSelect.Close(); _playGameMenu.Open(); };
+
+        // Quest end panel: completed (Next Quest) or failed (Retry).
+        _questPanel = new QuestResultPanel();
+        _arenaRoot.AddChild(_questPanel);
+        _questPanel.Build(ArenaSideMeters);
+        _questPanel.OnNext += StartNextQuest;
+        _questPanel.OnRetry += () => StartRun(GameModeQuests, _questKey);
+        _questPanel.OnQuestMenu += () =>
+        {
+            _questPanel.Dismiss();
+            ReturnToMenu();
+            _mainMenu.Close();
+            _questSelect.Open(_settings.QuestUnlockIndex);
+        };
+        _questPanel.OnMainMenu += () => { _questPanel.Dismiss(); ReturnToMenu(); };
+
         try
         {
-            _sim = new SimSession(SurvivalConfig);
+            _sim = new SimSession(SessionConfig);
             // Static terrain generation info (ABI v3): slots pick the ground atlas
             // sheets, seed drives the stamp layout. The terrain-base quad render is
             // a follow-up; log it so the plumbing is exercised meanwhile.
@@ -353,15 +403,59 @@ public partial class Main : Node3D
         _rightGuide.Visible = visible;
     }
 
-    /// <summary>Leave the main menu and begin play. The base game STOPS the menu
-    /// theme entering a run; the in-game tune starts on the first creature hit
-    /// (randomly gt1/gt2, sim trigger_game_tune), not at run start.</summary>
-    private void StartGame()
+    /// <summary>Leave the menus and begin a run in the given mode (Quests also
+    /// carry the level key). Recreates the sim session with the mode's config
+    /// and re-applies terrain (quests have per-level terrain slots). The base
+    /// game STOPS the menu theme entering a run; the in-game tune starts on the
+    /// first creature hit (randomly gt1/gt2, sim trigger_game_tune).</summary>
+    private void StartRun(int gameMode, int questKey = 0)
     {
+        _gameMode = gameMode;
+        if (questKey > 0)
+        {
+            _questKey = questKey;
+        }
         _mainMenu.Close();
+        _playGameMenu.Close();
+        _questSelect.Close();
+        _questPanel.Dismiss();
+        _questEndShown = false;
+        RestartSession();
         SetGameplayVisible(true);
         _audio.StopMusic();
     }
+
+    /// <summary>Recreate the sim with the CURRENT mode config and reset the
+    /// per-run frontend state (terrain look, decals, player position).</summary>
+    private void RestartSession()
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+        _sim.Restart(SessionConfig);
+        _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
+        _diorama.ResetTerrainFx();
+        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+    }
+
+    /// <summary>Quest results "Next Quest": advance to the next global index.</summary>
+    private void StartNextQuest()
+    {
+        _questPanel.Dismiss();
+        int gi = QuestGlobalIndex(_questKey) + 1;
+        if (gi > 49)
+        {
+            ReturnToMenu();
+            return;
+        }
+        int key = (gi / 10 + 1) * 100 + (gi % 10 + 1);
+        _questTitle = _questSelect.TitleFor(key);
+        StartRun(GameModeQuests, key);
+    }
+
+    /// <summary>0-based global quest index from a quest_level_key.</summary>
+    private static int QuestGlobalIndex(int key) => (key / 100 - 1) * 10 + (key % 100 - 1);
 
     /// <summary>Quit the current game back to the main menu: reset the sim to a
     /// fresh run, unpause, and show the menu (Play starts clean). The MAIN MENU's
@@ -370,11 +464,11 @@ public partial class Main : Node3D
     {
         _keyboard.Dismiss();
         _gameOverPanel.Dismiss();
+        _questPanel.Dismiss();
         _perkMenu.ForceHide(); // don't leave perk cards floating over the main menu
         _pauseMenu.ForceResume();
-        _sim?.Restart();
-        _diorama.ResetTerrainFx();
-        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+        _questEndShown = false;
+        RestartSession();
         _mainMenu.Open();
         SetGameplayVisible(false);
         _audio.PlayMusic("crimson_theme");
@@ -590,6 +684,7 @@ public partial class Main : Node3D
             || _pauseMenu.IsPaused
             || _perkMenu.Active
             || _startPrompt.Pending
+            || _questPanel.Active
             || (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active));
         if (_handMarkers[0] != null)
         {
@@ -719,7 +814,7 @@ public partial class Main : Node3D
     private void UpdateAimOverlays()
     {
         bool inPlay = !MenuOwnsScreen && _sim != null && _hasPlayerSnap
-            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active;
+            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active && !_questPanel.Active;
         XRController3D aimHand = _handSwap ? _leftHand : _rightHand;
         if (!inPlay || !aimHand.GetHasTrackingData() || _lastPlayer.Health <= 0.0f)
         {
@@ -866,10 +961,18 @@ public partial class Main : Node3D
             return;
         }
 
+        // Quest end panel up (completed or failed): hold the sim until a button
+        // routes somewhere.
+        if (_questPanel.Active)
+        {
+            return;
+        }
+
         // Death handling (base game_over.py flow): a short pacing delay over the
         // frozen world, then name entry (only when the score ranks, like the base
         // top-100 gate — ours is the local top-10), then the results panel with
-        // Play Again / Main Menu. Sim frozen throughout.
+        // Play Again / Main Menu. Sim frozen throughout. Quest mode swaps the
+        // score card for the Quest Failed panel (no highscores in quests).
         if (_sim.GameOver)
         {
             if (_keyboard.Active || _gameOverPanel.Active)
@@ -885,9 +988,15 @@ public partial class Main : Node3D
             _deathTicks++;
             if (_deathTicks >= DeathPacingTicks)
             {
+                _audio.PlayUi(AudioBank.UiPanel);
+                if (_gameMode == GameModeQuests)
+                {
+                    _questEndShown = true;
+                    _questPanel.Show(completed: false, _questTitle, _sim.LastResult.ElapsedMsSim, hasNext: false);
+                    return;
+                }
                 int score = _sim.LastResult.PlayerExperience;
                 _deathRank = HighscoreRank(score);
-                _audio.PlayUi(AudioBank.UiPanel);
                 // One composite death screen (base game_over.py two-phase panel):
                 // the results panel appears immediately; a ranking score raises it
                 // and puts the name-entry keyboard in front (phase 0), otherwise
@@ -901,6 +1010,31 @@ public partial class Main : Node3D
                 {
                     _gameOverPanel.Show(_sim.LastResult, _deathRank);
                 }
+            }
+            return;
+        }
+
+        // Quest completed (ABI v14): pace like the death flow, then show the
+        // results panel and advance the persisted unlock frontier once.
+        if (_gameMode == GameModeQuests && _sim.LastResult.QuestCompleted != 0 && !_questEndShown)
+        {
+            if (_pauseMenu.IsPaused)
+            {
+                return;
+            }
+            _deathTicks++;
+            if (_deathTicks >= DeathPacingTicks)
+            {
+                _questEndShown = true;
+                int gi = QuestGlobalIndex(_questKey);
+                if (gi == _settings.QuestUnlockIndex && gi < 49)
+                {
+                    _settings.QuestUnlockIndex = gi + 1;
+                    _settings.Save();
+                }
+                _audio.PlayUi(AudioBank.UiPanel);
+                _questPanel.Show(completed: true, _questTitle, _sim.LastResult.ElapsedMsSim,
+                    hasNext: gi + 1 <= _settings.QuestUnlockIndex && gi < 49);
             }
             return;
         }
@@ -1054,7 +1188,7 @@ public partial class Main : Node3D
 
         // Ease the whole HUD out over the perk pick and on death instead of
         // hard-toggling (survival_mode.py hud_alpha, 400 ms transition).
-        float hudTarget = (_perkMenu.Active || (_sim != null && _sim.GameOver)) ? 0.0f : 1.0f;
+        float hudTarget = (_perkMenu.Active || _questPanel.Active || (_sim != null && _sim.GameOver)) ? 0.0f : 1.0f;
         _hudFade = Mathf.MoveToward(_hudFade, hudTarget, (float)delta / 0.4f);
         _hud.SetFade(_hudFade);
 
@@ -1118,6 +1252,16 @@ public partial class Main : Node3D
             _mainMenu.PollPoke(p);
             return;
         }
+        if (_playGameMenu.IsOpen)
+        {
+            _playGameMenu.PollPoke(p);
+            return;
+        }
+        if (_questSelect.IsOpen)
+        {
+            _questSelect.PollPoke(p);
+            return;
+        }
         // Options / VR Settings opened from the main menu (sim gated by
         // MenuOwnsScreen): poke whichever is showing.
         if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen))
@@ -1136,6 +1280,12 @@ public partial class Main : Node3D
         if (_startPrompt.Pending)
         {
             _startPrompt.PollPoke(p);
+            return;
+        }
+        // Quest end panel (completed or failed): its buttons own the poke.
+        if (_questPanel.Active)
+        {
+            _questPanel.PollPoke(p);
             return;
         }
         // Death screen: keyboard (name-entry phase) and panel can be up together.
@@ -1215,12 +1365,13 @@ public partial class Main : Node3D
         }
     }
 
-    /// <summary>0-based insertion rank of a score in the local highscore table
-    /// (existing entries win ties, matching rank_index in the base game).</summary>
+    /// <summary>0-based insertion rank of a score in the current mode's local
+    /// highscore table (existing entries win ties, matching rank_index in the
+    /// base game).</summary>
     private int HighscoreRank(int score)
     {
         int rank = 0;
-        foreach (HighscoreEntry e in _settings.Highscores)
+        foreach (HighscoreEntry e in _settings.HighscoresFor(_gameMode))
         {
             if (e.Score >= score)
             {
@@ -1241,14 +1392,15 @@ public partial class Main : Node3D
         int score = _sim.LastResult.PlayerExperience;
         if (!string.IsNullOrEmpty(name))
         {
-            _settings.AddHighscore(name, score);
+            _settings.AddHighscore(name, score, _gameMode);
         }
         GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
         _keyboard.Dismiss();
         _gameOverPanel.ShowButtons();
     }
 
-    /// <summary>Results panel "Play Again": start a fresh run immediately.</summary>
+    /// <summary>Results panel "Play Again": start a fresh run immediately in
+    /// the same mode.</summary>
     private void PlayAgain()
     {
         if (_sim == null)
@@ -1256,9 +1408,8 @@ public partial class Main : Node3D
             return;
         }
         _gameOverPanel.Dismiss();
-        _sim.Restart();
-        _diorama.ResetTerrainFx();
-        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+        _questEndShown = false;
+        RestartSession();
         // Fresh run: fade the old tune out; the first hit rolls a new one.
         _audio.StopMusic();
     }

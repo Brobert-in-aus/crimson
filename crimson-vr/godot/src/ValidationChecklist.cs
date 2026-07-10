@@ -16,17 +16,17 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Covers the ABI v13 slice (sprite-effect
-    // pool, shield ring, radioactive aura — the latter two now forced on
-    // demand from the Debug FX menu on the player's left), the louder
-    // level-up cue, and the new debug menu itself.
+    // validation surface changes. Cleared 2026-07-10 (v13 FX round 5/5
+    // green); now covers the game-mode-select slice: Play Game submenu,
+    // Rush mode, quest select with unlock gating, and the quest
+    // completed/failed end panels.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("spritefx", "Muzzle puffs / rocket smoke"),
-        ("shieldring", "Shield ring (toggle or bonus)"),
-        ("radaura", "Radioactive aura (toggle)"),
-        ("lvlsnd", "Level-up sound clearly audible"),
-        ("debugmenu", "Debug FX menu toggles work"),
+        ("playmenu", "Play Game menu (3 modes + Back)"),
+        ("rushmode", "Rush starts w/ assault rifle"),
+        ("questsel", "Quest select: stages + locks"),
+        ("questwin", "Quest complete -> results + unlock"),
+        ("questfail", "Quest death -> failed + Retry"),
     };
 
     private const int PerPage = 4;

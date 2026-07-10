@@ -37,7 +37,16 @@ public sealed class UserSettings
     // level (0 = off, 2, 4). The flat-sprite scene is cheap, so default high.
     public float RenderScale = 1.4f;
     public int Msaa = 4;
+
+    // Quest unlock progression (base game_status quest_unlock_index): the
+    // 0-based global index of the FIRST still-locked quest. 0 = only 1.1
+    // playable; completing quest N (== the index) advances it to N+1.
+    public int QuestUnlockIndex;
+
+    // Per-mode local highscore tables: Survival keeps the original list (and
+    // its legacy cfg key); Rush gets its own. Quests have no score table.
     public readonly List<HighscoreEntry> Highscores = new();
+    public readonly List<HighscoreEntry> RushHighscores = new();
     // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
     public readonly Dictionary<string, int> Checklist = new();
 
@@ -59,23 +68,10 @@ public sealed class UserSettings
         RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
-        Highscores.Clear();
-        string hs = cf.GetValue("game", "highscores", string.Empty).AsString();
-        if (!string.IsNullOrEmpty(hs))
-        {
-            try
-            {
-                List<HighscoreEntry>? list = JsonSerializer.Deserialize<List<HighscoreEntry>>(hs);
-                if (list != null)
-                {
-                    Highscores.AddRange(list);
-                }
-            }
-            catch (JsonException)
-            {
-                // Corrupt highscore blob -> start fresh, keep the scalar settings.
-            }
-        }
+        QuestUnlockIndex = cf.GetValue("game", "quest_unlock_index", QuestUnlockIndex).AsInt32();
+
+        LoadHighscoreList(cf, "highscores", Highscores);
+        LoadHighscoreList(cf, "highscores_rush", RushHighscores);
 
         Checklist.Clear();
         string ck = cf.GetValue("dev", "checklist", string.Empty).AsString();
@@ -104,7 +100,9 @@ public sealed class UserSettings
         cf.SetValue("input", "hand_swap", HandSwap);
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("game", "first_run_done", FirstRunDone);
+        cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
+        cf.SetValue("game", "highscores_rush", JsonSerializer.Serialize(RushHighscores));
         cf.SetValue("game", "ui_info_texts", UiInfoTexts);
         cf.SetValue("audio", "sfx_volume", SfxVolume);
         cf.SetValue("audio", "music_volume", MusicVolume);
@@ -116,15 +114,45 @@ public sealed class UserSettings
         cf.Save(ConfigPath);
     }
 
-    /// <summary>Add a highscore, keep the list sorted high-to-low and capped.</summary>
-    public void AddHighscore(string name, int score)
+    /// <summary>The highscore table for a game mode (Sim GameModeId values:
+    /// 1 survival, 2 rush). Quests intentionally fall back to the survival
+    /// table only so callers never get null; quest flows skip highscores.</summary>
+    public List<HighscoreEntry> HighscoresFor(int gameMode)
+        => gameMode == 2 ? RushHighscores : Highscores;
+
+    /// <summary>Add a highscore to the mode's table, kept sorted high-to-low
+    /// and capped at 10.</summary>
+    public void AddHighscore(string name, int score, int gameMode = 1)
     {
-        Highscores.Add(new HighscoreEntry { Name = name, Score = score });
-        Highscores.Sort((a, b) => b.Score.CompareTo(a.Score));
-        if (Highscores.Count > 10)
+        List<HighscoreEntry> list = HighscoresFor(gameMode);
+        list.Add(new HighscoreEntry { Name = name, Score = score });
+        list.Sort((a, b) => b.Score.CompareTo(a.Score));
+        if (list.Count > 10)
         {
-            Highscores.RemoveRange(10, Highscores.Count - 10);
+            list.RemoveRange(10, list.Count - 10);
         }
         Save();
+    }
+
+    private static void LoadHighscoreList(ConfigFile cf, string key, List<HighscoreEntry> into)
+    {
+        into.Clear();
+        string blob = cf.GetValue("game", key, string.Empty).AsString();
+        if (string.IsNullOrEmpty(blob))
+        {
+            return;
+        }
+        try
+        {
+            List<HighscoreEntry>? list = JsonSerializer.Deserialize<List<HighscoreEntry>>(blob);
+            if (list != null)
+            {
+                into.AddRange(list);
+            }
+        }
+        catch (JsonException)
+        {
+            // Corrupt highscore blob -> start fresh, keep the scalar settings.
+        }
     }
 }

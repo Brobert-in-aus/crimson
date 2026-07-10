@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 13;
+pub const abi_version: u32 = 14;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -80,6 +80,11 @@ pub const CrimsonHostTickResult = extern struct {
     // weapon row. Append-only (ABI v10).
     creature_kill_count: i32,
     most_used_weapon_id: i32,
+    // Nonzero once the current quest's spawn timeline has been cleared
+    // (session.quest_completed). Always 0 outside quest mode. The frontend
+    // uses it to show quest results + advance the unlock index. Append-only
+    // (ABI v14).
+    quest_completed: u32,
 };
 
 pub const SnapshotHeader = extern struct {
@@ -647,6 +652,7 @@ pub export fn crimson_host_session_tick(
             .elapsed_ms_sim_hi = @truncate(elapsed_bits >> 32),
             .creature_kill_count = update.creature_kill_count,
             .most_used_weapon_id = update.most_used_weapon_id,
+            .quest_completed = @intFromBool(box.runner.session.quest_completed),
         };
     }
     return ok;

@@ -149,7 +149,7 @@ public readonly ref struct TerrainFxView
 /// </summary>
 public sealed class SimSession : IDisposable
 {
-    private readonly string _configJson;
+    private string _configJson;
     private readonly byte[][] _bufs = new byte[2][];
     private int _curSlot = -1;
     private byte[] _audioBuf = new byte[4096];
@@ -265,13 +265,18 @@ public sealed class SimSession : IDisposable
     }
 
     /// <summary>Tear down and recreate the session with the same config.</summary>
-    public void Restart()
+    public void Restart() => Restart(_configJson);
+
+    /// <summary>Tear down and recreate the session with a NEW config (mode
+    /// select: game_mode / quest_level_key / unlock index change per run).</summary>
+    public void Restart(string configJson)
     {
         if (Handle != 0)
         {
             Sim.SessionDestroy(Handle);
         }
-        Handle = Sim.SessionCreate(_configJson);
+        _configJson = configJson;
+        Handle = Sim.SessionCreate(configJson);
         LastResult = default;
         _curSlot = -1;
     }

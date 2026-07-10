@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 13;
+    public const uint ExpectedAbiVersion = 14;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -66,6 +66,7 @@ public static partial class Sim
         public uint ElapsedMsSimHi;
         public int CreatureKillCount;   // ABI v10+: total kills this run (frags)
         public int MostUsedWeaponId;    // ABI v10+: argmax per-weapon shots, current weapon fallback
+        public uint QuestCompleted;     // ABI v14+: quest timeline cleared (0 outside quests)
 
         public readonly long ElapsedMsSim => (long)(((ulong)ElapsedMsSimHi << 32) | ElapsedMsSimLo);
     }

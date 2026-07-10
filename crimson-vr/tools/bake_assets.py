@@ -182,6 +182,26 @@ def weapon_table() -> dict[str, dict]:
     }
 
 
+def quest_table() -> list[dict]:
+    """All 50 quests in global-index order, for the VR quest-select menu:
+    level key = major*100 + minor (the ABI's quest_level_key), stage/index for
+    the grid, and the display title. Importing src.crimson.quests populates the
+    registry (the package import registers all tier builders)."""
+    from src.crimson import quests as _quests  # noqa: F401 - registers builders
+    from src.crimson.quests.registry import all_quests
+
+    return [
+        {
+            "key": quest.level.major * 100 + quest.level.minor,
+            "stage": quest.level.major,
+            "index": quest.level.minor,
+            "title": str(quest.title),
+            "time_limit_ms": int(quest.time_limit_ms),
+        }
+        for quest in all_quests()
+    ]
+
+
 def perk_names() -> dict[str, str]:
     """perk_id -> display name for the VR perk-menu card labels. Resolved via
     perk_display_name with preserve_bugs=False (the VR session default), so
@@ -349,6 +369,8 @@ def main() -> None:
         # Weapon id -> display name + ui_wicons icon index, for the game-over
         # score card's most-used-weapon row (ABI v10 most_used_weapon_id).
         "weapons": weapon_table(),
+        # All 50 quests (key/stage/index/title) for the quest-select menu.
+        "quests": quest_table(),
     }
 
     manifest_path = out_dir / "sprite_manifest.json"

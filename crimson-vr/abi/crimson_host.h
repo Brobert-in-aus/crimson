@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 13u
+#define CRIMSON_HOST_ABI_VERSION 14u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -106,6 +106,9 @@ typedef struct crimson_host_tick_result {
      * nothing was fired), matching weapon_runtime/assign.py. */
     int32_t creature_kill_count;
     int32_t most_used_weapon_id;
+    /* ABI v14 (append-only): nonzero once the quest spawn timeline has been
+     * cleared (session.quest_completed); always 0 outside quest mode. */
+    uint32_t quest_completed;
 } crimson_host_tick_result;
 
 /* Snapshot payload layout (packed, in order):
