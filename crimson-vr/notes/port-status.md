@@ -241,7 +241,7 @@ effect-pool) → bonuses → labels → aim indicators → arrows → cursor.
 | creatures (sprites + tint) | alpha | Yes — energizer tint / lifecycle fade / death staging / hit-flash verified. Creature **shadow** sub-pass (tinted silhouette 1.07×, `creatures.py:55-68`) approximated by a generic soft blob. |
 | creature overlays (poison/plague/monster-vision auras) | alpha | Yes (ABI v7) — **[audit]** but fixed-size (90/80/60) regardless of creature `Size`; boss auras don't scale (`Diorama.cs:693-743`). |
 | freeze overlay (`draw_freeze_overlay`, per-creature `FREEZE_SHATTER`) | alpha | **Yes** (`Diorama.cs:820-860`) — **[audit]** was implemented but missing from this table. |
-| **projectiles / secondaries — per-type draw variants** **[audit]** | additive **+ one subtractive** | **Color-only parity — the biggest open render gap (ground-gen trap, again).** Base dispatches per-type routines (`primary_dispatch.py`, `secondary_dispatch.py`): textured **bullet trails** w/ per-type head color + head sprite (`primary_bullet.py`); **plasma** tail-segment trains + aura, per-weapon configs (`primary_plasma.py`, `projectile_render_registry.py:33-83`); **beam** stepped body + head, **Ion chain arcs** to nearby creatures, Fire-Bullets glow overlay (`primary_beam.py:59-306`); **pulse** distance-scaled expansion; **splitter/blade** sprites w/ blade spin; **Plague Spreader** 5 orbiting "hole" quads in a **custom SRC=ZERO darken blend** (`primary_special.py:16-243`); per-rocket glow style table (`secondary_rocket.py:23-149`); two-quad detonation core+halo (`secondary_detonation.py:12-67`). VR renders every projectile as one tinted additive soft-circle streak; detonations are a single generic orange burst. ABI already ships `type_id`/`angle`/`life_timer`/`vx,vy`. |
+| **projectiles / secondaries — per-type draw variants** **[audit]** | additive **+ one subtractive** | **DONE 2026-07-10 (ABI v12, DioramaProjectiles.cs)** — full port of the dispatch: bullet trails (gradient quad + per-type head colour + bullet16 head sprite), plasma tail trains + head + aura per weapon config, ion/fire beam stepped bodies + heads + **ion chain arcs** to collidable creatures (Ion Gun Master reach ×1.2 via perk flag), Fire-Bullets glow overlay, pulse expansion, splitter/blade sprites (blade spin from the stable pool index), **Plague Spreader darken pass** (SRC=ZERO/INV_SRC_ALPHA reproduced EXACTLY with blend_mul + pow-2.2, which commutes through the linear pipeline), per-rocket glow styles, two-quad detonations (replacing the synthetic EmitFx blobs — also resolves the flagged double-draw), Sharpshooter laser sight, and the fade-stage visuals for life<0.4 (the old blanket cull is gone). ABI v12 added origin/speed_scale/travel_budget/pool_index. In-headset validation pending (batched). |
 | `draw_effect_pool` alpha pass (flags & 0x40): smoke, casings, blood | alpha | Yes |
 | `draw_effect_pool` additive pass: ring, flash, shockwave burst | additive | Yes (b5cea3c0) — restored explosion ring/flash/shockwave, enemy hit-sparks, projectile muzzle/impact flashes. |
 | `draw_particle_pool` (`state.particles`): additive glows/sparks | additive | Yes (ABI v7) — `RenderGlowPool` big/normal/bubblegun sub-passes; formulae verified. |
@@ -400,12 +400,10 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    highscore tables, quest results/failed screens, and **unlock-progression
    persistence** (`quest_unlock_index`) to be meaningful. Typo'Shooter stays
    hidden until its VR input design is settled (see VR-inapplicable table).
-3. **Per-projectile-type render variants** (bullet trails, plasma trains, beam
-   bodies + ion chains, plague darken pass, per-rocket glow, two-quad
-   detonations) — the largest remaining in-combat fidelity delta; ABI already
-   carries the needed fields. Add the **sprite-effect pool** stream to the ABI
-   while touching it, plus shield ring / radioactive aura / laser sight (need
-   small ABI additions: shield timer, perk flags).
+3. ~~**Per-projectile-type render variants**~~ — **DONE 2026-07-10** (see the
+   draw-pass table; ABI v12). The Sharpshooter **laser sight** landed with it.
+   Still open from this cluster: the **sprite-effect pool** ABI stream, and
+   the shield-ring / radioactive-aura render passes (data already in ABI v11).
 4. ~~**HUD behaviors**~~ — **mostly DONE 2026-07-10** (enemy health bar, reload
    gauge, XP roll-up, ammo "+N"/30-cap, HUD fade, spread ring; ABI v11 also
    exports `shield_timer` + perk flags for Radioactive/Sharpshooter — their

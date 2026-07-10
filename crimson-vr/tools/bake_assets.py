@@ -118,6 +118,7 @@ BONUS_PRIORITY = 25  # matches the old colored-quad bonus layer (over the world)
 GAME = "crimson/game"
 TER = "crimson/ter"
 UI = "crimson/ui"
+LOAD = "crimson/load"  # boot-time singles (bullet head sprite, trail gradient)
 
 # Terrain slot index -> ground sheet (src/crimson/terrain_slots.py
 # _TEXTURE_ID_BY_TERRAIN_SLOT). Even slots are the quadrant BASE texture, odd are
@@ -219,8 +220,21 @@ def main() -> None:
         with Image.open(src) as im:
             staged[name] = list(im.size)
 
-    # Terrain ground sheets live under crimson/ter/ (not crimson/game/).
+    # Projectile-draw singles live under crimson/load/: the bullet head sprite
+    # (bullet16) and the additive trail gradient (bulletTrail) used by the
+    # per-type projectile renderers (projectile_draw/).
     from PIL import Image
+
+    for name in ("bullet16.png", "bulletTrail.png"):
+        src = assets_dir / LOAD / name
+        if not src.exists():
+            print(f"WARN missing load sheet: {src}")
+            continue
+        shutil.copy2(src, out_dir / name)
+        with Image.open(src) as im:
+            staged[name] = list(im.size)
+
+    # Terrain ground sheets live under crimson/ter/ (not crimson/game/).
 
     for name in sorted(set(TERRAIN_SLOT_FILES.values())):
         src = assets_dir / TER / name

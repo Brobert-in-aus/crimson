@@ -55,8 +55,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v11" {
-    try std.testing.expectEqual(@as(u32, 11), exports.crimson_host_abi_version());
+test "abi version reports v12" {
+    try std.testing.expectEqual(@as(u32, 12), exports.crimson_host_abi_version());
 }
 
 test "abi verify passthrough matches native verifier byte for byte" {

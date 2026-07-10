@@ -153,8 +153,11 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Apply the Options graphics-detail level (1-5): shadows at >=3,
     /// particles at >=2. A coarse but faithful "less eye-candy at low detail".</summary>
+    private int _graphicsDetail = 5; // current level (projectile glow gating)
+
     public void SetGraphicsDetail(int level)
     {
+        _graphicsDetail = level;
         if (_shadowNode != null)
         {
             _shadowNode.Visible = level >= 3;
@@ -194,8 +197,6 @@ public sealed partial class Diorama : Node3D
     private Layer _players = null!;
     private readonly Dictionary<int, Layer> _creatureLayers = new();
     private Layer _creatureFallback = null!;
-    private Layer _projectiles = null!;
-    private Layer _secondaries = null!;
     private Layer _bonuses = null!;
     private MultiMesh? _needles;
     private int _needleCount;
@@ -203,15 +204,12 @@ public sealed partial class Diorama : Node3D
     private int _shadowCount;
 
     // Effects (slice 6a): additive glow bursts for muzzle flashes (player
-    // MuzzleFlashAlpha) and explosions (secondary detonation). Captured at tick
-    // time in PushSnapshot, drawn each frame in Interpolate. True sim particle
-    // pools (blood/gibs) need an ABI stream — slice 6b.
+    // MuzzleFlashAlpha). Captured at tick time in PushSnapshot, drawn each frame
+    // in Interpolate. (The synthetic explosion blobs were retired when the
+    // faithful two-quad detonations landed in DioramaProjectiles.cs.)
     private struct Muzzle { public Vector2 Game; public float Heading; public float Alpha; public float SizeGame; }
-    private struct Explosion { public Vector2 Game; public float Scale; public float T; }
     private readonly Muzzle[] _muzzles = new Muzzle[PlayerCap];
     private int _muzzleCount;
-    private readonly Explosion[] _explosionsCap = new Explosion[512];
-    private int _explosionCapCount;
     private MultiMesh _fx = null!;
     private int _fxCount;
     private const int FxCap = 2048;
@@ -297,23 +295,8 @@ public sealed partial class Diorama : Node3D
     private readonly Dictionary<int, int> _bonusIcons = new();
     private int _bonusGrid = 4;
 
-    // Per-type projectile glow tint (known_proj_rgb, projectile_render_registry.py).
-    // Colors only (not asset-derived); default is the tan bullet glow.
-    private static readonly Color ProjTintDefault = new(240f / 255f, 220f / 255f, 160f / 255f);
-    private static readonly Dictionary<int, Color> ProjTints = new()
-    {
-        // ProjectileTemplateId -> rgb (KNOWN_PROJ_RGB_BY_TYPE_ID).
-        { 21, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_RIFLE (blue)
-        { 22, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_MINIGUN
-        { 23, new Color(120f / 255f, 200f / 255f, 1.0f) },   // ION_CANNON
-        { 45, new Color(1.0f, 170f / 255f, 90f / 255f) },    // FIRE_BULLETS (orange)
-        { 24, new Color(160f / 255f, 1.0f, 170f / 255f) },   // SHRINKIFIER (green)
-        { 25, new Color(240f / 255f, 120f / 255f, 1.0f) },   // BLADE_GUN (magenta)
-    };
-
-    private static Color ProjTint(int typeId)
-        => ProjTints.TryGetValue(typeId, out Color c) ? c : ProjTintDefault;
-
+    // (Per-type projectile tints/frames now live in DioramaProjectiles.cs with
+    // the faithful per-type renderers.)
     private static readonly Basis FlatBasis = Basis.FromEuler(new Vector3(-Mathf.Pi / 2.0f, 0.0f, 0.0f));
 
     // Fixed back-tilt applied to sprite bases (about arena X so the lean is the
@@ -358,13 +341,9 @@ public sealed partial class Diorama : Node3D
         _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
         _creatureFallback.ClampRefSize = true;
 
-        // Native pass order (top of the stack): player < projectiles/effects < bonuses/UI.
-        // Projectiles/secondaries: additive per-type-tinted glow streaks. Lifted to
-        // the PLAYER's plane (0.012, above the creature plane at 0.008) so bullets
-        // emerge from the shooter, not from the lower creature plane (in-headset
-        // finding: the player reads on a higher plane, which is wanted).
-        _projectiles = BuildStreakLayer(ProjectileCap, lift: 0.012f, sizeScale: 5.0f, renderPriority: 20);
-        _secondaries = BuildStreakLayer(SecondaryCap, lift: 0.012f, sizeScale: 7.0f, renderPriority: 20);
+        // Native pass order (top of the stack): player < projectiles/effects <
+        // bonuses/UI. Projectiles/secondaries now use the faithful per-type
+        // renderers (DioramaProjectiles.cs) on the player's plane (0.012).
         _bonuses = BuildBonusLayer(manifest);
 
         BuildFloor(manifest);
@@ -373,6 +352,7 @@ public sealed partial class Diorama : Node3D
         BuildParticles(manifest);
         BuildDecals(manifest);
         BuildCorpses(manifest);
+        BuildProjectileRenderers(); // after BuildParticles (needs _effectUv)
 
         // Facing needle: always built (hidden) so the debug toggle can enable it
         // at runtime; emission is gated on _debug (SetDebug).
@@ -1330,17 +1310,6 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Copy one sim snapshot into the layers' current buffers, rolling
     /// the previous current into prev. Call once per sim tick.</summary>
-    // Gauss/ion beam ProjectileTypeIds (game_ids.zig): these linger deliberately as
-    // a persisting beam after a hit, so they're exempt from the stopped-bullet cull.
-    private static bool IsLingerBeam(int typeId) => typeId switch
-    {
-        0x06 => true, // gauss_gun
-        0x15 => true, // ion_rifle
-        0x16 => true, // ion_minigun
-        0x17 => true, // ion_cannon
-        _ => false,
-    };
-
     public void PushSnapshot(in SnapshotView view)
     {
         _players.BeginPush();
@@ -1376,37 +1345,13 @@ public sealed partial class Diorama : Node3D
                 baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer);
         }
 
-        _projectiles.BeginPush();
-        foreach (Sim.ProjectileSnap pr in view.Projectiles)
-        {
-            // Cull projectiles the instant they stop moving: life_timer < 0.4 is the
-            // sim's own "hit and lingering" gate (projectiles.zig), where the bullet
-            // no longer advances. This removes the bullets that used to float on
-            // corpses / hang in the air (ABI v9). Exempt the gauss/ion beams, whose
-            // linger IS a deliberate persisting-beam visual, not a stuck bullet.
-            if (pr.LifeTimer < 0.4f && !IsLingerBeam(pr.TypeId))
-            {
-                continue;
-            }
-            _projectiles.Add(new Vector2(pr.X, pr.Y), pr.Angle, 1.0f, animPhase: 0.0f, typeId: pr.TypeId);
-        }
-
-        _secondaries.BeginPush();
-        _explosionCapCount = 0;
-        foreach (Sim.SecondarySnap s in view.Secondaries)
-        {
-            _secondaries.Add(new Vector2(s.X, s.Y), s.Angle, 1.0f, typeId: s.TypeId);
-            // Detonating secondaries (rockets/grenades) burst into an explosion.
-            if (s.DetonationT > 0.0f && _explosionCapCount < _explosionsCap.Length)
-            {
-                _explosionsCap[_explosionCapCount++] = new Explosion
-                {
-                    Game = new Vector2(s.X, s.Y),
-                    Scale = s.DetonationScale,
-                    T = s.DetonationT,
-                };
-            }
-        }
+        // Projectiles + secondaries: faithful per-type renderers (tick-rate; the
+        // handlers draw their own fade stages for life_timer < 0.4, so the old
+        // blanket stopped-projectile cull is gone — the fade visuals it dropped
+        // are back). Detonations render their two-quad core+halo here too,
+        // replacing the synthetic EmitFx explosion blobs (and the possible
+        // double-draw the audit flagged).
+        RenderProjectiles(view);
 
         _bonuses.BeginPush();
         foreach (Sim.BonusSnap b in view.Bonuses)
@@ -1530,8 +1475,6 @@ public sealed partial class Diorama : Node3D
             InterpolateLayer(layer, frac, sprite: true, castShadow: true);
         }
         InterpolateLayer(_creatureFallback, frac, sprite: false, castShadow: true);
-        InterpolateLayer(_projectiles, frac, sprite: false);
-        InterpolateLayer(_secondaries, frac, sprite: false);
         InterpolateLayer(_bonuses, frac, sprite: false);
         _shadows.VisibleInstanceCount = _shadowCount;
         EmitFx();
@@ -1541,9 +1484,8 @@ public sealed partial class Diorama : Node3D
         }
     }
 
-    /// <summary>Draw the captured muzzle-flash and explosion bursts into the
-    /// shared additive fx mesh (positions are tick-captured; these are transient
-    /// so they aren't interpolated).</summary>
+    /// <summary>Draw the captured muzzle-flash bursts into the shared additive
+    /// fx mesh (positions are tick-captured; transient, not interpolated).</summary>
     private void EmitFx()
     {
         float k = _arenaSideMeters / _worldSize;
@@ -1559,17 +1501,6 @@ public sealed partial class Diorama : Node3D
                 + dir * (m.SizeGame * k * 0.2f) + new Vector3(0.0f, 0.012f, 0.0f);
             float s = Mathf.Max(m.SizeGame * k * 2.2f * m.Alpha, 0.002f);
             var color = new Color(1.0f, 0.85f, 0.5f, m.Alpha);
-            AddFx(arena, s, color);
-        }
-        for (int i = 0; i < _explosionCapCount; i++)
-        {
-            Explosion e = _explosionsCap[i];
-            Vector3 arena = Mapper.GameToArenaLocal(e.Game, _arenaSideMeters, _worldSize)
-                + new Vector3(0.0f, 0.012f, 0.0f);
-            float s = Mathf.Max(e.Scale * k * 2.0f, 0.004f);
-            // Fade out over the detonation's life (T rising 0->1).
-            float a = Mathf.Clamp(1.0f - e.T, 0.0f, 1.0f);
-            var color = new Color(1.0f, 0.6f, 0.25f, a);
             AddFx(arena, s, color);
         }
         _fx.VisibleInstanceCount = _fxCount;
@@ -1632,14 +1563,6 @@ public sealed partial class Diorama : Node3D
                 // (2.5D). Raise the centre so the tilted base stays near the plane.
                 basis = SpriteTilt * FlatFacingBasis(ForwardFromHeading(angle + layer.HeadingOffset), meters);
                 pos.Y += meters * 0.5f * SpriteTiltSin;
-            }
-            else if (layer.Streak)
-            {
-                // Additive glow elongated along travel (flat on the plane), tinted
-                // per projectile type. Orientation via the creature heading
-                // convention (validate in-headset; flip if streaks read sideways).
-                basis = StreakBasis(ForwardFromHeading(angle), length: meters * 2.6f, width: meters);
-                layer.Mesh.SetInstanceColor(i, ProjTint(cur.TypeId));
             }
             else if (layer.UvIndexed)
             {

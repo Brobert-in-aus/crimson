@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 11;
+pub const abi_version: u32 = 12;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -155,6 +155,8 @@ pub const PlayerSnap = extern struct {
 pub const player_perk_flag_doctor: u32 = 1 << 0;
 pub const player_perk_flag_radioactive: u32 = 1 << 1;
 pub const player_perk_flag_sharpshooter: u32 = 1 << 2;
+// ABI v12: Ion Gun Master scales the ion chain-arc reach in the renderer.
+pub const player_perk_flag_ion_gun_master: u32 = 1 << 3;
 
 pub const CreatureSnap = extern struct {
     x: f32,
@@ -191,6 +193,16 @@ pub const ProjectileSnap = extern struct {
     // and entered "linger" mode: it no longer moves (projectiles.zig update). The
     // host uses this to cull bullets the instant they stop.
     life_timer: f32,
+    // ABI v12 (append-only), for the per-type draw variants (projectile_draw/):
+    // spawn origin (bullet trails, beam bodies, pulse/splitter size), the plasma
+    // tail step scale + travel budget (tail segment count), and the POOL slot
+    // index (stable per projectile: blade spin / plague orbit phase — the dense
+    // snapshot index shifts when others despawn).
+    origin_x: f32,
+    origin_y: f32,
+    speed_scale: f32,
+    travel_budget: f32,
+    pool_index: i32,
 };
 
 pub const SecondarySnap = extern struct {
@@ -768,7 +780,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .shield_timer = player.shield_timer,
             .perk_flags = (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.doctor)) player_perk_flag_doctor else 0) |
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.radioactive)) player_perk_flag_radioactive else 0) |
-                (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.sharpshooter)) player_perk_flag_sharpshooter else 0),
+                (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.sharpshooter)) player_perk_flag_sharpshooter else 0) |
+                (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.ion_gun_master)) player_perk_flag_ion_gun_master else 0),
         });
     }
     // Debug fx showcase: paint 1-in-10 creatures with an aura on the WIRE only
@@ -807,7 +820,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .hit_flash_timer = entry.hit_flash_timer,
         });
     }
-    for (box.runner.session.projectiles.entries) |entry| {
+    for (box.runner.session.projectiles.entries, 0..) |entry, proj_slot| {
         if (!entry.active) continue;
         writeStruct(out, &offset, ProjectileSnap{
             .x = entry.pos.x,
@@ -817,6 +830,11 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .vx = entry.vel.x,
             .vy = entry.vel.y,
             .life_timer = entry.life_timer,
+            .origin_x = entry.origin.x,
+            .origin_y = entry.origin.y,
+            .speed_scale = entry.speed_scale,
+            .travel_budget = entry.travel_budget,
+            .pool_index = @intCast(proj_slot),
         });
     }
     for (box.runner.session.secondary_projectiles.entries) |entry| {

@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 11u
+#define CRIMSON_HOST_ABI_VERSION 12u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -204,6 +204,15 @@ typedef struct crimson_host_projectile_snap {
     float vx; /* ABI v6+; fixed-magnitude direction (cos,sin)*1.5, NOT speed */
     float vy;
     float life_timer; /* ABI v9+; < 0.4 => hit & lingering (stopped moving) */
+    /* ABI v12+ (append-only), for the per-type projectile draw variants:
+     * spawn origin (trails/beam bodies/pulse sizing), plasma tail step scale +
+     * travel budget (segment count), and the stable pool slot index (blade
+     * spin / plague orbit phase). */
+    float origin_x;
+    float origin_y;
+    float speed_scale;
+    float travel_budget;
+    int32_t pool_index;
 } crimson_host_projectile_snap;
 
 typedef struct crimson_host_secondary_snap {

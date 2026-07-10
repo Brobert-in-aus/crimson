@@ -1,0 +1,770 @@
+using System.Collections.Generic;
+using Godot;
+
+namespace CrimsonVR;
+
+/// <summary>
+/// Faithful per-projectile-type renderers (port of render/projectile_draw/):
+/// bullet trails + head sprites, plasma tail trains + head + aura, ion/fire
+/// beam bodies + heads + chain arcs, pulse expansion, splitter/blade sprites,
+/// the Plague Spreader darken pass, per-rocket glow styles, two-quad
+/// detonations, and the Sharpshooter laser sight — replacing the old single
+/// tinted streak per projectile. Data comes from ABI v12 (origin, speed_scale,
+/// travel_budget, pool_index) + the creature/player snaps already in view.
+///
+/// Everything is written tick-rate into capped MultiMeshes (like the effect
+/// pools); sizes are game units * k (meters per unit), flat on the plane at
+/// the projectile lift. The reference draws in these blend modes: additive for
+/// trails/plasma/beams/pulse/rocket-glow/detonations/laser, plain alpha for
+/// splitter/blade/rocket bodies/known-frame fallback, and a SRC=ZERO /
+/// INV_SRC_ALPHA darken for the Plague Spreader (reproduced exactly with
+/// blend_mul + a pow-2.2 factor, which commutes through the linear pipeline).
+/// </summary>
+public sealed partial class Diorama
+{
+    // ---- projectile type ids (projectiles/types.py ProjectileTemplateId) ----
+    private const int ProjPistol = 0x01;
+    private const int ProjAssaultRifle = 0x02;
+    private const int ProjSubmachineGun = 0x05;
+    private const int ProjGaussGun = 0x06;
+    private const int ProjPlasmaRifle = 0x09;
+    private const int ProjPlasmaMinigun = 0x0B;
+    private const int ProjPulseGun = 0x13;
+    private const int ProjIonRifle = 0x15;
+    private const int ProjIonMinigun = 0x16;
+    private const int ProjIonCannon = 0x17;
+    private const int ProjShrinkifier = 0x18;
+    private const int ProjBladeGun = 0x19;
+    private const int ProjSpiderPlasma = 0x1A;
+    private const int ProjPlasmaCannon = 0x1C;
+    private const int ProjSplitterGun = 0x1D;
+    private const int ProjPlagueSpreader = 0x29;
+    private const int ProjFireBullets = 0x2D;
+
+    private const int SecRocket = 1;
+    private const int SecHomingRocket = 2;
+    private const int SecDetonation = 3;
+    private const int SecRocketMinigun = 4;
+
+    private const float ProjPlaneLift = 0.012f;
+
+    // KNOWN_PROJ_FRAMES (world_defs.py): type_id -> (grid, frame) in projs.png.
+    private static readonly Dictionary<int, (int Grid, int Frame)> KnownProjFrames = new()
+    {
+        [ProjPulseGun] = (2, 0),
+        [ProjSplitterGun] = (4, 3),
+        [ProjBladeGun] = (4, 6),
+        [ProjIonMinigun] = (4, 2),
+        [ProjIonCannon] = (4, 2),
+        [ProjShrinkifier] = (4, 2),
+        [ProjFireBullets] = (4, 2),
+        [ProjIonRifle] = (4, 2),
+    };
+
+    // known_proj_rgb (projectile_render_registry.py) for the frame fallback.
+    private static readonly Dictionary<int, Color> KnownProjRgb = new()
+    {
+        [ProjIonRifle] = new Color(120 / 255f, 200 / 255f, 1.0f),
+        [ProjIonMinigun] = new Color(120 / 255f, 200 / 255f, 1.0f),
+        [ProjIonCannon] = new Color(120 / 255f, 200 / 255f, 1.0f),
+        [ProjFireBullets] = new Color(1.0f, 170 / 255f, 90 / 255f),
+        [ProjShrinkifier] = new Color(160 / 255f, 1.0f, 170 / 255f),
+        [ProjBladeGun] = new Color(240 / 255f, 120 / 255f, 1.0f),
+    };
+    private static readonly Color KnownProjRgbDefault = new(240 / 255f, 220 / 255f, 160 / 255f);
+
+    // PlasmaProjectileRenderConfig (projectile_render_registry.py).
+    private readonly struct PlasmaCfg
+    {
+        public readonly Color Rgb;
+        public readonly float Spacing;
+        public readonly int SegLimit;
+        public readonly float TailSize;
+        public readonly float HeadSize;
+        public readonly float HeadAlphaMul;
+        public readonly Color AuraRgb;
+        public readonly float AuraSize;
+        public readonly float AuraAlphaMul;
+
+        public PlasmaCfg(Color rgb, float spacing, int segLimit, float tailSize, float headSize,
+            float headAlphaMul, Color auraRgb, float auraSize, float auraAlphaMul)
+        {
+            Rgb = rgb;
+            Spacing = spacing;
+            SegLimit = segLimit;
+            TailSize = tailSize;
+            HeadSize = headSize;
+            HeadAlphaMul = headAlphaMul;
+            AuraRgb = auraRgb;
+            AuraSize = auraSize;
+            AuraAlphaMul = auraAlphaMul;
+        }
+    }
+
+    private static readonly PlasmaCfg PlasmaDefault = new(
+        Colors.White, 2.1f, 3, 12.0f, 16.0f, 0.45f, Colors.White, 120.0f, 0.15f);
+
+    private static readonly Dictionary<int, PlasmaCfg> PlasmaCfgByType = new()
+    {
+        [ProjPlasmaRifle] = new PlasmaCfg(Colors.White, 2.5f, 8, 22.0f, 56.0f, 0.45f, Colors.White, 256.0f, 0.3f),
+        [ProjPlasmaMinigun] = PlasmaDefault,
+        [ProjPlasmaCannon] = new PlasmaCfg(Colors.White, 2.6f, 18, 44.0f, 84.0f, 0.45f, Colors.White, 256.0f, 0.4f),
+        [ProjSpiderPlasma] = new PlasmaCfg(new Color(0.3f, 1.0f, 0.3f), 2.1f, 3, 12.0f, 16.0f, 0.45f, new Color(0.3f, 1.0f, 0.3f), 120.0f, 0.15f),
+        [ProjShrinkifier] = new PlasmaCfg(new Color(0.3f, 0.3f, 1.0f), 2.1f, 3, 12.0f, 16.0f, 0.45f, new Color(0.3f, 0.3f, 1.0f), 120.0f, 0.15f),
+    };
+
+    private static float BeamEffectScale(int typeId) => typeId switch
+    {
+        ProjIonMinigun => 1.05f,
+        ProjIonRifle => 2.2f,
+        ProjIonCannon => 3.5f,
+        _ => 0.8f,
+    };
+
+    private static bool IsPlasmaType(int t)
+        => t is ProjPlasmaRifle or ProjPlasmaMinigun or ProjPlasmaCannon or ProjSpiderPlasma or ProjShrinkifier;
+
+    private static bool IsIonType(int t) => t is ProjIonRifle or ProjIonMinigun or ProjIonCannon;
+
+    private static bool IsBeamType(int t) => IsIonType(t) || t == ProjFireBullets;
+
+    private static bool IsBulletTrailType(int t) => (t >= 0 && t < 8) || t == ProjSplitterGun;
+
+    // SecondaryRocketStyle (secondary_rocket.py): base size, glow size/rgb/alpha.
+    private static (float BaseSize, float GlowSize, Color GlowRgb, float GlowAlphaMul)? RocketStyle(int t) => t switch
+    {
+        SecRocket => (14.0f, 60.0f, Colors.White, 0.68f),
+        SecHomingRocket => (10.0f, 40.0f, Colors.White, 0.58f),
+        SecRocketMinigun => (8.0f, 30.0f, new Color(0.7f, 0.7f, 1.0f), 0.158f),
+        _ => null,
+    };
+
+    // ---- meshes ----
+    private const int TrailCap = 320;
+    private const int BulletHeadCap = 320;
+    private const int ProjGlowCap = 768;
+    private const int ProjsAtlasAddCap = 1024;
+    private const int ProjsAtlasAlphaCap = 320;
+    private const int IonStripCap = 256;
+    private const int PlagueCap = 320;
+
+    private MultiMesh? _trailMesh;
+    private MultiMesh? _bulletHeadMesh;
+    private MultiMesh? _projGlowMesh;      // particles.png GLOW cell, additive
+    private MultiMesh? _projsAtlasAddMesh; // projs.png per-instance cell, additive
+    private MultiMesh? _projsAtlasAlphaMesh; // projs.png per-instance cell, alpha
+    private MultiMesh? _ionStripMesh;
+    private MultiMesh? _plagueMesh;
+    private Vector3 _glowUv; // particles.png GLOW cell (effect id 12) from the manifest
+
+    private int _trailN;
+    private int _bulletHeadN;
+    private int _projGlowN;
+    private int _projsAddN;
+    private int _projsAlphaN;
+    private int _ionStripN;
+    private int _plagueN;
+
+    // Trail shader: quad stretched tail->head (local +Y = head end). Instance
+    // COLOR = head rgba; CUSTOM.x = tail alpha. Alpha ramps tail->head over the
+    // quad and samples the bulletTrail gradient (native maps head at v=0.5,
+    // tail at v=0). Additive premultiplied like the other effect shaders, with
+    // the fitted pow-1.1 sRGB-space correction; fog_disabled is load-bearing.
+    private Shader? _trailShader;
+    private Shader TrailShader => _trailShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, blend_add, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 col;
+            varying float tail_a;
+            void vertex() { col = COLOR; tail_a = INSTANCE_CUSTOM.x; }
+            void fragment() {
+                float g = 1.0 - UV.y; // 1 at the head end (+Y), 0 at the tail
+                vec4 c = texture(sheet, vec2(UV.x, (1.0 - UV.y) * 0.5));
+                float a = mix(tail_a, col.a, g);
+                vec3 s = c.rgb * col.rgb * (c.a * a);
+                ALBEDO = pow(s, vec3(1.1));
+                ALPHA = 1.0;
+            }
+            """,
+    };
+
+    // Ion chain strip: native samples a constant u=0.625 line of projs.png with
+    // v spanning 0..0.25 ACROSS the strip; constant per-instance color.
+    private Shader? _ionStripShader;
+    private Shader IonStripShader => _ionStripShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, blend_add, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 col;
+            void vertex() { col = COLOR; }
+            void fragment() {
+                vec4 c = texture(sheet, vec2(0.625, UV.x * 0.25));
+                vec3 s = c.rgb * col.rgb * (c.a * col.a);
+                ALBEDO = pow(s, vec3(1.1));
+                ALPHA = 1.0;
+            }
+            """,
+    };
+
+    // Plague Spreader darken: native blend is SRC=ZERO / DST=INV_SRC_ALPHA, i.e.
+    // dst *= (1 - src_alpha). Godot blend_mul multiplies dst by ALBEDO in LINEAR
+    // space; a constant factor commutes exactly through the sRGB transfer as
+    // factor^2.2, so ALBEDO = pow(1 - a, 2.2) reproduces the native display
+    // math EXACTLY (no dst-blind approximation needed for pure multiplies).
+    private Shader? _plagueShader;
+    private Shader PlagueShader => _plagueShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, blend_mul, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                float a = clamp(c.a * col.a, 0.0, 1.0);
+                ALBEDO = vec3(pow(1.0 - a, 2.2));
+                ALPHA = 1.0;
+            }
+            """,
+    };
+
+    private static Texture2D? LoadSprite(string name)
+    {
+        string path = $"res://assets/sprites/{name}.png";
+        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+    }
+
+    private MultiMesh BuildProjMesh(Material material, int cap, bool customData = true)
+    {
+        var mesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseCustomData = customData,
+            UseColors = true,
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            InstanceCount = cap,
+            VisibleInstanceCount = 0,
+        };
+        AddChild(new MultiMeshInstance3D { Multimesh = mesh, MaterialOverride = material });
+        return mesh;
+    }
+
+    private ShaderMaterial ProjShaderMat(Shader shader, Texture2D sheet, int priority)
+    {
+        var mat = new ShaderMaterial { Shader = shader, RenderPriority = priority };
+        mat.SetShaderParameter("sheet", sheet);
+        return mat;
+    }
+
+    /// <summary>Build the per-type projectile meshes. Missing art degrades that
+    /// pass to nothing (the sim stays authoritative either way).</summary>
+    private void BuildProjectileRenderers()
+    {
+        Texture2D? projs = LoadSprite("projs");
+        Texture2D? trail = LoadSprite("bulletTrail");
+        Texture2D? bullet = LoadSprite("bullet16");
+        Texture2D? particles = LoadSprite("particles");
+
+        if (_effectUv.TryGetValue(GlowNormalEffectId, out Vector3 g))
+        {
+            _glowUv = g;
+        }
+
+        if (trail != null)
+        {
+            _trailMesh = BuildProjMesh(ProjShaderMat(TrailShader, trail, priority: 18), TrailCap);
+        }
+        if (bullet != null)
+        {
+            var mat = new StandardMaterial3D
+            {
+                AlbedoTexture = bullet,
+                VertexColorUseAsAlbedo = true,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+                RenderPriority = 19,
+                DisableFog = true,
+            };
+            _bulletHeadMesh = BuildProjMesh(mat, BulletHeadCap, customData: false);
+        }
+        if (particles != null && _glowUv != Vector3.Zero)
+        {
+            _projGlowMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, particles, priority: 20), ProjGlowCap);
+        }
+        if (projs != null)
+        {
+            _projsAtlasAddMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, projs, priority: 20), ProjsAtlasAddCap);
+            _projsAtlasAlphaMesh = BuildProjMesh(ProjShaderMat(ParticleShader, projs, priority: 19), ProjsAtlasAlphaCap);
+            _ionStripMesh = BuildProjMesh(ProjShaderMat(IonStripShader, projs, priority: 20), IonStripCap, customData: false);
+            _plagueMesh = BuildProjMesh(ProjShaderMat(PlagueShader, projs, priority: 21), PlagueCap);
+        }
+    }
+
+    // ---- emit helpers (game units -> arena meters, flat at the proj lift) ----
+
+    private static Vector3 CellUv(int grid, int frame)
+    {
+        float inv = 1.0f / grid;
+        return new Vector3(frame % grid * inv, frame / grid * inv, inv);
+    }
+
+    private void EmitAtlasSprite(MultiMesh? mesh, ref int n, int cap, Vector2 game, float sizeUnits,
+        float rotation, Color color, Vector3 uv)
+    {
+        if (mesh == null || n >= cap || sizeUnits <= 1e-3f)
+        {
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+            + new Vector3(0.0f, ProjPlaneLift, 0.0f);
+        Basis basis = FlatFacingBasis(ForwardFromHeading(rotation), sizeUnits * k);
+        mesh.SetInstanceTransform(n, new Transform3D(basis, pos));
+        mesh.SetInstanceColor(n, color);
+        mesh.SetInstanceCustomData(n, new Color(uv.X, uv.Y, uv.Z, 0.0f));
+        n++;
+    }
+
+    private void EmitStretch(MultiMesh? mesh, ref int n, int cap, Vector2 startGame, Vector2 endGame,
+        float halfWidthUnits, Color color, float customX = 0.0f, bool custom = true)
+    {
+        if (mesh == null || n >= cap)
+        {
+            return;
+        }
+        Vector2 seg = endGame - startGame;
+        float len = seg.Length();
+        if (len <= 1e-4f)
+        {
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        Vector2 mid = (startGame + endGame) * 0.5f;
+        var forward = new Vector3(seg.X / len, 0.0f, seg.Y / len); // game xy -> arena xz
+        Vector3 pos = Mapper.GameToArenaLocal(mid, _arenaSideMeters, _worldSize)
+            + new Vector3(0.0f, ProjPlaneLift, 0.0f);
+        Basis basis = StreakBasis(forward, length: len * k, width: halfWidthUnits * 2.0f * k);
+        mesh.SetInstanceTransform(n, new Transform3D(basis, pos));
+        mesh.SetInstanceColor(n, color);
+        if (custom)
+        {
+            mesh.SetInstanceCustomData(n, new Color(customX, 0.0f, 0.0f, 0.0f));
+        }
+        n++;
+    }
+
+    // ---- the per-tick render ----
+
+    /// <summary>Render all primaries/secondaries with their faithful per-type
+    /// draw routines. Call once per pushed snapshot.</summary>
+    private void RenderProjectiles(in SnapshotView view)
+    {
+        _trailN = 0;
+        _bulletHeadN = 0;
+        _projGlowN = 0;
+        _projsAddN = 0;
+        _projsAlphaN = 0;
+        _ionStripN = 0;
+        _plagueN = 0;
+
+        float elapsedMs = view.Header.ElapsedMsSim;
+        bool ionMaster = false;
+        if (view.Header.PlayerCount > 0)
+        {
+            Sim.PlayerSnap p0 = view.Players[0];
+            ionMaster = (p0.PerkFlags & Sim.PlayerSnap.PerkFlagIonGunMaster) != 0;
+            // Sharpshooter laser sight draws first in the projectile pass.
+            if ((p0.PerkFlags & Sim.PlayerSnap.PerkFlagSharpshooter) != 0 && p0.Health > 0.0f)
+            {
+                var pp = new Vector2(p0.X, p0.Y);
+                var dir = new Vector2(Mathf.Sin(p0.AimHeading), -Mathf.Cos(p0.AimHeading));
+                // Head alpha 0.2 at the far end, tail alpha 0.5 at the start.
+                EmitStretch(_trailMesh, ref _trailN, TrailCap, pp + dir * 15.0f, pp + dir * 512.0f,
+                    halfWidthUnits: 1.0f, new Color(1.0f, 0.0f, 0.0f, 0.2f), customX: 0.5f);
+            }
+        }
+
+        foreach (Sim.ProjectileSnap pr in view.Projectiles)
+        {
+            DrawPrimary(pr, elapsedMs, ionMaster, view);
+        }
+        foreach (Sim.SecondarySnap s in view.Secondaries)
+        {
+            DrawSecondary(s);
+        }
+
+        Flush(_trailMesh, _trailN);
+        Flush(_bulletHeadMesh, _bulletHeadN);
+        Flush(_projGlowMesh, _projGlowN);
+        Flush(_projsAtlasAddMesh, _projsAddN);
+        Flush(_projsAtlasAlphaMesh, _projsAlphaN);
+        Flush(_ionStripMesh, _ionStripN);
+        Flush(_plagueMesh, _plagueN);
+    }
+
+    private static void Flush(MultiMesh? mesh, int n)
+    {
+        if (mesh != null)
+        {
+            mesh.VisibleInstanceCount = n;
+        }
+    }
+
+    private void DrawPrimary(in Sim.ProjectileSnap pr, float elapsedMs, bool ionMaster, in SnapshotView view)
+    {
+        int t = pr.TypeId;
+        var pos = new Vector2(pr.X, pr.Y);
+        var origin = new Vector2(pr.OriginX, pr.OriginY);
+        float life = pr.LifeTimer;
+
+        if (IsBulletTrailType(t))
+        {
+            DrawBulletTrail(pr, pos, origin, life);
+            if (t == ProjSplitterGun)
+            {
+                // Splitter also draws its atlas sprite (falls through in the
+                // native handler chain after the trail).
+                DrawSplitterOrBlade(pr, pos, origin, life, elapsedMs);
+            }
+            return;
+        }
+        if (IsPlasmaType(t))
+        {
+            DrawPlasma(pr, pos, life);
+            return;
+        }
+        if (IsBeamType(t))
+        {
+            DrawBeam(pr, pos, origin, life, ionMaster, view);
+            return;
+        }
+        if (t == ProjPulseGun)
+        {
+            DrawPulse(pr, pos, origin, life);
+            return;
+        }
+        if (t == ProjBladeGun)
+        {
+            DrawSplitterOrBlade(pr, pos, origin, life, elapsedMs);
+            return;
+        }
+        if (t == ProjPlagueSpreader)
+        {
+            DrawPlagueSpreader(pr, pos, life, elapsedMs);
+            return;
+        }
+        // Fallback: known frame, tinted, life-faded (draw_projectile tail).
+        if (KnownProjFrames.TryGetValue(t, out (int Grid, int Frame) map))
+        {
+            float a = Mathf.Clamp(life / 0.4f, 0.0f, 1.0f);
+            Color rgb = KnownProjRgb.TryGetValue(t, out Color c) ? c : KnownProjRgbDefault;
+            // Native scale 0.6 of the cell: cell = 256/grid world units.
+            float size = 256.0f / map.Grid * 0.6f;
+            EmitAtlasSprite(_projsAtlasAlphaMesh, ref _projsAlphaN, ProjsAtlasAlphaCap, pos, size,
+                pr.Angle, new Color(rgb.R, rgb.G, rgb.B, a), CellUv(map.Grid, map.Frame));
+        }
+    }
+
+    private void DrawBulletTrail(in Sim.ProjectileSnap pr, Vector2 pos, Vector2 origin, float life)
+    {
+        int t = pr.TypeId;
+        float alpha = Mathf.Clamp(life, 0.0f, 1.0f);
+        if (alpha <= 1e-3f)
+        {
+            return;
+        }
+        float sideMul = t is ProjPistol or ProjAssaultRifle ? 1.2f : t == ProjGaussGun ? 1.1f : 0.7f;
+        Color head = t == ProjGaussGun
+            ? new Color(0.2f, 0.5f, 1.0f, alpha)
+            : new Color(0.5f, 0.5f, 0.5f, alpha);
+        EmitStretch(_trailMesh, ref _trailN, TrailCap, origin, pos, halfWidthUnits: 1.5f * sideMul, head, customX: 0.0f);
+
+        if (life >= 0.39f)
+        {
+            float size = t == ProjAssaultRifle ? 6.0f : t == ProjSubmachineGun ? 8.0f : 4.0f;
+            EmitBulletHead(pos, Mathf.Max(size, 2.0f), pr.Angle, new Color(220 / 255f, 220 / 255f, 220 / 255f, alpha));
+        }
+    }
+
+    private void EmitBulletHead(Vector2 game, float sizeUnits, float rotation, Color color)
+    {
+        if (_bulletHeadMesh == null || _bulletHeadN >= BulletHeadCap)
+        {
+            return;
+        }
+        float k = _arenaSideMeters / _worldSize;
+        Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+            + new Vector3(0.0f, ProjPlaneLift, 0.0f);
+        Basis basis = FlatFacingBasis(ForwardFromHeading(rotation), sizeUnits * k);
+        _bulletHeadMesh.SetInstanceTransform(_bulletHeadN, new Transform3D(basis, pos));
+        _bulletHeadMesh.SetInstanceColor(_bulletHeadN, color);
+        _bulletHeadN++;
+    }
+
+    private void DrawPlasma(in Sim.ProjectileSnap pr, Vector2 pos, float life)
+    {
+        PlasmaCfg cfg = PlasmaCfgByType.TryGetValue(pr.TypeId, out PlasmaCfg c) ? c : PlasmaDefault;
+        if (life >= 0.4f)
+        {
+            int segCount = (int)pr.TravelBudget;
+            if (segCount < 0)
+            {
+                segCount = 0;
+            }
+            segCount /= 5;
+            if (segCount > cfg.SegLimit)
+            {
+                segCount = cfg.SegLimit;
+            }
+            // Stored angle is rotated +pi/2 vs travel; +pi walks BACK along it.
+            float back = pr.Angle + Mathf.Pi;
+            var step = new Vector2(Mathf.Sin(back), -Mathf.Cos(back)) * pr.SpeedScale * cfg.Spacing;
+
+            var tail = new Color(cfg.Rgb.R, cfg.Rgb.G, cfg.Rgb.B, 0.4f);
+            for (int i = 0; i < segCount; i++)
+            {
+                EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos + step * i, cfg.TailSize, 0.0f, tail, _glowUv);
+            }
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, cfg.HeadSize, 0.0f,
+                new Color(cfg.Rgb.R, cfg.Rgb.G, cfg.Rgb.B, cfg.HeadAlphaMul), _glowUv);
+            if (_graphicsDetail >= 2)
+            {
+                EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, cfg.AuraSize, 0.0f,
+                    new Color(cfg.AuraRgb.R, cfg.AuraRgb.G, cfg.AuraRgb.B, cfg.AuraAlphaMul), _glowUv);
+            }
+            return;
+        }
+        // Fade stage: a white pop shrinking with life (restores the visuals the
+        // old blanket life<0.4 cull dropped).
+        float fade = Mathf.Clamp(life * 2.5f, 0.0f, 1.0f);
+        if (fade > 1e-3f)
+        {
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, 56.0f, 0.0f,
+                new Color(1.0f, 1.0f, 1.0f, fade), _glowUv);
+        }
+    }
+
+    private void DrawBeam(in Sim.ProjectileSnap pr, Vector2 pos, Vector2 origin, float life,
+        bool ionMaster, in SnapshotView view)
+    {
+        int t = pr.TypeId;
+        bool isFire = t == ProjFireBullets;
+        Vector2 beam = pos - origin;
+        float dist = beam.Length();
+        if (dist <= 1e-6f)
+        {
+            return;
+        }
+        Vector2 dir = beam / dist;
+        float effectScale = BeamEffectScale(t);
+        float baseAlpha = life >= 0.4f ? 1.0f : Mathf.Clamp(life * 2.5f, 0.0f, 1.0f);
+        if (baseAlpha <= 1e-3f)
+        {
+            return;
+        }
+
+        Color streak = isFire ? new Color(1.0f, 0.6f, 0.1f) : new Color(0.5f, 0.6f, 1.0f);
+        Vector3 beamUv = CellUv(4, 2);
+        float spriteSize = 64.0f * effectScale; // grid-4 cell = 64 units * effect scale
+
+        // Body: stamped sprites over the last 256 units, alpha ramping 0 -> base.
+        float start = dist > 256.0f ? dist - 256.0f : 0.0f;
+        float span = dist - start;
+        float step = Mathf.Min(effectScale * 3.1f, 9.0f);
+        for (float s = start; s < dist; s += step)
+        {
+            float ta = span > 1e-6f ? (s - start) / span : 1.0f;
+            float segAlpha = ta * baseAlpha;
+            if (segAlpha > 1e-3f)
+            {
+                EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, origin + dir * s,
+                    spriteSize, 0.0f, new Color(streak.R, streak.G, streak.B, segAlpha), beamUv);
+            }
+        }
+
+        if (life >= 0.4f)
+        {
+            EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, pos, spriteSize,
+                pr.Angle, new Color(1.0f, 1.0f, 0.7f, baseAlpha), beamUv);
+            if (isFire)
+            {
+                // Fire Bullets extra particles.png glow overlay at the head.
+                EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, 64.0f, pr.Angle,
+                    new Color(1.0f, 1.0f, 1.0f, 1.0f), _glowUv);
+            }
+            return;
+        }
+
+        // Fade stage: small blue core at the head.
+        EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, pos, 64.0f,
+            pr.Angle, new Color(0.5f, 0.6f, 1.0f, baseAlpha), beamUv);
+
+        if (IsIonType(t))
+        {
+            DrawIonChains(pos, effectScale, ionMaster ? 1.2f : 1.0f, baseAlpha, spriteSize, beamUv, view);
+        }
+    }
+
+    private void DrawIonChains(Vector2 pos, float effectScale, float perkScale, float baseAlpha,
+        float spriteSize, Vector3 beamUv, in SnapshotView view)
+    {
+        float radius = effectScale * perkScale * 40.0f;
+        var tint = new Color(0.5f, 0.6f, 1.0f, baseAlpha);
+        float innerHalf = 10.0f * effectScale;
+        float outerHalf = 14.0f * effectScale;
+
+        // Native scans the pool from index 1 (quirk); dense snapshot order is
+        // pool order, so skip our first creature to match.
+        bool first = true;
+        foreach (Sim.CreatureSnap cSnap in view.Creatures)
+        {
+            if (first)
+            {
+                first = false;
+                continue;
+            }
+            // Collidable lifecycle only (creature_lifecycle_is_collidable > 5).
+            if (cSnap.LifecycleStage <= 5.0f)
+            {
+                continue;
+            }
+            var cp = new Vector2(cSnap.X, cSnap.Y);
+            float d = pos.DistanceTo(cp);
+            float threshold = cSnap.Size * 0.14285715f + 3.0f;
+            if (d - radius >= threshold)
+            {
+                continue;
+            }
+            // Outer (softer) + inner strips, then an end glow on the target.
+            EmitStretch(_ionStripMesh, ref _ionStripN, IonStripCap, pos, cp, outerHalf, tint, custom: false);
+            EmitStretch(_ionStripMesh, ref _ionStripN, IonStripCap, pos, cp, innerHalf, tint, custom: false);
+            EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, cp, spriteSize, 0.0f, tint, beamUv);
+        }
+    }
+
+    private void DrawPulse(in Sim.ProjectileSnap pr, Vector2 pos, Vector2 origin, float life)
+    {
+        Vector3 uv = CellUv(2, 0);
+        if (life >= 0.4f)
+        {
+            float size = origin.DistanceTo(pos) * 0.16f;
+            if (size > 1e-3f)
+            {
+                EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, pos, size, pr.Angle,
+                    new Color(0.1f, 0.6f, 0.2f, 0.7f), uv);
+            }
+            return;
+        }
+        float fade = Mathf.Clamp(life * 2.5f, 0.0f, 1.0f);
+        if (fade > 1e-3f)
+        {
+            EmitAtlasSprite(_projsAtlasAddMesh, ref _projsAddN, ProjsAtlasAddCap, pos, 56.0f, pr.Angle,
+                new Color(1.0f, 1.0f, 1.0f, fade), uv);
+        }
+    }
+
+    private void DrawSplitterOrBlade(in Sim.ProjectileSnap pr, Vector2 pos, Vector2 origin, float life, float elapsedMs)
+    {
+        if (life < 0.4f || !KnownProjFrames.TryGetValue(pr.TypeId, out (int Grid, int Frame) map))
+        {
+            return;
+        }
+        float size = Mathf.Min(origin.DistanceTo(pos), 20.0f);
+        if (size <= 1e-3f)
+        {
+            return;
+        }
+        float rotation = pr.Angle;
+        var rgb = new Color(1.0f, 1.0f, 1.0f, 1.0f);
+        if (pr.TypeId == ProjBladeGun)
+        {
+            rotation = pr.PoolIndex * 0.1f - elapsedMs * 0.1f;
+            rgb = new Color(0.8f, 0.8f, 0.8f, 1.0f);
+        }
+        EmitAtlasSprite(_projsAtlasAlphaMesh, ref _projsAlphaN, ProjsAtlasAlphaCap, pos, size, rotation,
+            rgb, CellUv(map.Grid, map.Frame));
+    }
+
+    private void DrawPlagueSpreader(in Sim.ProjectileSnap pr, Vector2 pos, float life, float elapsedMs)
+    {
+        Vector3 uv = CellUv(4, 2);
+        var tint = new Color(1.0f, 1.0f, 1.0f, 1.0f);
+        if (life >= 0.4f)
+        {
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap, pos, 60.0f, 0.0f, tint, uv);
+
+            float back = pr.Angle + Mathf.Pi;
+            var offset = new Vector2(Mathf.Sin(back), -Mathf.Cos(back)) * 15.0f;
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap, pos + offset, 60.0f, 0.0f, tint, uv);
+
+            float phase = pr.PoolIndex + elapsedMs * 0.01f;
+            float cosP = Mathf.Cos(phase);
+            float sinP = Mathf.Sin(phase);
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap,
+                pos + new Vector2(cosP * cosP - 5.0f, sinP * 11.0f - 5.0f), 52.0f, 0.0f, tint, uv);
+
+            float p120 = phase + 2.0943952f;
+            float sin120 = Mathf.Sin(p120);
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap,
+                pos + new Vector2(Mathf.Cos(p120) * 10.0f, Mathf.Sin(p120) * 10.0f), 62.0f, 0.0f, tint, uv);
+
+            float p240 = phase + 4.1887903f;
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap,
+                pos + new Vector2(Mathf.Cos(p240) * 10.0f, Mathf.Sin(p240) * sin120), 62.0f, 0.0f, tint, uv);
+            return;
+        }
+        float fade = Mathf.Clamp(life * 2.5f, 0.0f, 1.0f);
+        if (fade > 1e-3f)
+        {
+            EmitAtlasSprite(_plagueMesh, ref _plagueN, PlagueCap, pos, fade * 40.0f + 32.0f, 0.0f,
+                new Color(1.0f, 1.0f, 1.0f, fade), uv);
+        }
+    }
+
+    private void DrawSecondary(in Sim.SecondarySnap s)
+    {
+        var pos = new Vector2(s.X, s.Y);
+        if (s.TypeId == SecDetonation)
+        {
+            float t = Mathf.Clamp(s.DetonationT, 0.0f, 1.0f);
+            float fade = 1.0f - t;
+            if (fade <= 1e-3f || s.DetonationScale <= 1e-6f)
+            {
+                return;
+            }
+            var tint = new Color(1.0f, 0.6f, 0.1f, fade);
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, s.DetonationScale * t * 64.0f, 0.0f, tint, _glowUv);
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos, s.DetonationScale * t * 200.0f, 0.0f,
+                new Color(1.0f, 0.6f, 0.1f, fade * 0.3f), _glowUv);
+            return;
+        }
+
+        (float BaseSize, float GlowSize, Color GlowRgb, float GlowAlphaMul)? style = RocketStyle(s.TypeId);
+        if (style is not { } st)
+        {
+            return;
+        }
+        // Glow pair trails a touch behind the rocket along its heading.
+        var dir = new Vector2(Mathf.Sin(s.Angle), -Mathf.Cos(s.Angle));
+        if (_graphicsDetail >= 2)
+        {
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos - dir * 5.0f, 140.0f, 0.0f,
+                new Color(1.0f, 1.0f, 1.0f, 0.48f), _glowUv);
+            EmitAtlasSprite(_projGlowMesh, ref _projGlowN, ProjGlowCap, pos - dir * 9.0f, st.GlowSize, 0.0f,
+                new Color(st.GlowRgb.R, st.GlowRgb.G, st.GlowRgb.B, st.GlowAlphaMul), _glowUv);
+        }
+        // Rocket body sprite (projs 4x4 frame 3), alpha pass.
+        EmitAtlasSprite(_projsAtlasAlphaMesh, ref _projsAlphaN, ProjsAtlasAlphaCap, pos, st.BaseSize, s.Angle,
+            new Color(0.8f, 0.8f, 0.8f, 0.9f), CellUv(4, 3));
+    }
+}

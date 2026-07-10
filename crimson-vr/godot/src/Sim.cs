@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 11;
+    public const uint ExpectedAbiVersion = 12;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -130,6 +130,7 @@ public static partial class Sim
         public const uint PerkFlagDoctor = 1u << 0;
         public const uint PerkFlagRadioactive = 1u << 1;
         public const uint PerkFlagSharpshooter = 1u << 2;
+        public const uint PerkFlagIonGunMaster = 1u << 3; // ABI v12: ion chain reach x1.2
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -162,6 +163,11 @@ public static partial class Sim
         public float Vx; // ABI v6: fixed-magnitude direction (cos,sin)*1.5, NOT speed
         public float Vy;
         public float LifeTimer; // ABI v9: < 0.4 => hit & lingering (stopped moving)
+        public float OriginX;      // ABI v12: spawn origin (trails/beams/pulse sizing)
+        public float OriginY;
+        public float SpeedScale;   // ABI v12: plasma tail step scale
+        public float TravelBudget; // ABI v12: plasma tail segment budget
+        public int PoolIndex;      // ABI v12: stable pool slot (spin/orbit phases)
     }
 
     [StructLayout(LayoutKind.Sequential)]
