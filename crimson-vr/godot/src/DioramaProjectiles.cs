@@ -483,7 +483,8 @@ public sealed partial class Diorama
             Sim.PlayerSnap p0 = view.Players[0];
             ionMaster = (p0.PerkFlags & Sim.PlayerSnap.PerkFlagIonGunMaster) != 0;
             // Sharpshooter laser sight draws first in the projectile pass.
-            if ((p0.PerkFlags & Sim.PlayerSnap.PerkFlagSharpshooter) != 0 && p0.Health > 0.0f)
+            bool laser = (p0.PerkFlags & Sim.PlayerSnap.PerkFlagSharpshooter) != 0 || DebugFx.LaserSight;
+            if (laser && p0.Health > 0.0f)
             {
                 var pp = new Vector2(p0.X, p0.Y);
                 var dir = new Vector2(Mathf.Sin(p0.AimHeading), -Mathf.Cos(p0.AimHeading));
@@ -533,7 +534,7 @@ public sealed partial class Diorama
 
         // trooper.py:107-132 — AURA cell, additive, 100u, pulsing alpha. Drawn
         // regardless of health (the native pass sits before the alive check).
-        if ((p.PerkFlags & Sim.PlayerSnap.PerkFlagRadioactive) != 0
+        if (((p.PerkFlags & Sim.PlayerSnap.PerkFlagRadioactive) != 0 || DebugFx.RadioactiveAura)
             && _effectUv.TryGetValue(PlayerAuraEffectId, out Vector3 auraUv))
         {
             float auraAlpha = (Mathf.Sin(t) + 1.0f) * 0.1875f + 0.25f;
@@ -542,14 +543,20 @@ public sealed partial class Diorama
         }
 
         // trooper.py:198-243 — SHIELD_RING pair, additive, centred 3u along the
-        // aim heading; strength pulses and ramps out with the last second.
-        if (p.ShieldTimer > 1e-3f && p.Health > 0.0f
+        // aim heading; strength pulses and ramps out with the last second. The
+        // debug toggle renders as if a fresh shield were up (no ramp).
+        float shieldTimer = p.ShieldTimer;
+        if (shieldTimer <= 1e-3f && DebugFx.ShieldRing)
+        {
+            shieldTimer = 5.0f;
+        }
+        if (shieldTimer > 1e-3f && p.Health > 0.0f
             && _effectUv.TryGetValue(ShieldRingEffectId, out Vector3 ringUv))
         {
-            float strength = (Mathf.Sin(t) + 1.0f) * 0.25f + p.ShieldTimer;
-            if (p.ShieldTimer < 1.0f)
+            float strength = (Mathf.Sin(t) + 1.0f) * 0.25f + shieldTimer;
+            if (shieldTimer < 1.0f)
             {
-                strength *= p.ShieldTimer;
+                strength *= shieldTimer;
             }
             strength = Mathf.Min(1.0f, strength);
             float offDir = p.AimHeading - Mathf.Pi * 0.5f;

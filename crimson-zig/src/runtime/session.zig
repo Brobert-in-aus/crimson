@@ -40,8 +40,8 @@ pub const SessionConfig = struct {
     quest_stage_major: i32 = 0,
     quest_stage_minor: i32 = 0,
     demo_mode_active: bool = false,
-    // Debug-only fx showcase (VR checklist): weapon drops become flamethrower/
-    // bubblegun so the glow pool is exercised. Never set for replays/verify.
+    // Debug-only fx showcase (VR debug menu): reload cycles the player to the
+    // next real weapon for a one-run arsenal tour. Never set for replays/verify.
     debug_fx_showcase: bool = false,
     initial_creature_pool: []const replay_codec.ReplayCreatureSlotResidue = &.{},
 
@@ -235,15 +235,6 @@ pub const DeterministicSession = struct {
 
         creatures_mod.applyPoolResidue(&session.creatures, config.initial_creature_pool);
         player_runtime.resetPlayers(session.players(), config.world_size, null);
-        // Debug fx showcase: spawn with Sharpshooter (laser sight) and
-        // Radioactive (green aura) so both player render passes are visible
-        // from the first frame without perk-roll luck.
-        if (config.debug_fx_showcase) {
-            for (session.players()) |*player| {
-                player.perk_counts.set(game_ids.PerkId.sharpshooter, 1);
-                player.perk_counts.set(game_ids.PerkId.radioactive, 1);
-            }
-        }
         session.creatures.capture_spawn_events_authoritative = options.capture_spawn_events_authoritative;
         session.creatures.effects = &session.effects;
 

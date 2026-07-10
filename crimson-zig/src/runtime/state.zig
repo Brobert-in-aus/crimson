@@ -267,9 +267,8 @@ pub const GameplayState = struct {
     time_scale_active: bool = false,
     perk_selection: PerkSelectionState = .{},
     demo_mode_active: bool = false,
-    // Debug fx showcase (VR checklist): overrides weapon drops to
-    // flamethrower/bubblegun. Presentation aura injection happens in the
-    // host-ABI export, not here. Default false; never set for replays.
+    // Debug fx showcase (VR debug menu): a reload press cycles the player to
+    // the next real weapon (weapons.zig). Default false; never set for replays.
     debug_fx_showcase: bool = false,
     game_tune_started: bool = false,
     hardcore: bool = false,

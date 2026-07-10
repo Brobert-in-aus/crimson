@@ -380,10 +380,10 @@ int32_t crimson_host_last_error(uint8_t *buf, uint32_t len);
  *     "gore_disabled": 0, "hardcore": false, "preserve_bugs": false,
  *     "demo_mode_active": false, "status_quest_unlock_index": 0,
  *     "debug_fx_showcase": false }
- * Unknown fields are ignored. debug_fx_showcase is a DEBUG aid (weapon drops
- * become flamethrower/bubblegun; the exported snapshot forces monster_vision
- * and paints 1-in-10 creatures with poison/plague aura flags) - never set it
- * for replay-verified sessions. */
+ * Unknown fields are ignored. debug_fx_showcase is a DEBUG aid: each reload
+ * press cycles the player to the next real weapon (arsenal tour). Visual
+ * debug forcing (auras, shield ring, laser sight, monster vision) lives in
+ * the frontend now - never set this for replay-verified sessions. */
 int32_t crimson_host_session_create(const uint8_t *config_json,
                                     uint32_t config_len,
                                     uint64_t *out_handle);

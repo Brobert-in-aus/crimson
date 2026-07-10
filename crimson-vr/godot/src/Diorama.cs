@@ -713,6 +713,8 @@ public sealed partial class Diorama : Node3D
             n++;
         }
 
+        bool monsterVision = _monsterVision || DebugFx.MonsterVision;
+        int creatureIdx = 0;
         foreach (Sim.CreatureSnap c in view.Creatures)
         {
             // monster_vision_fade_alpha(lifecycle_stage): 1 while alive, ramps to 0
@@ -720,20 +722,25 @@ public sealed partial class Diorama : Node3D
             float fade = c.LifecycleStage >= 0.0f
                 ? 1.0f
                 : Mathf.Clamp((c.LifecycleStage + 10.0f) * 0.1f, 0.0f, 1.0f);
+            int idx = creatureIdx++;
             if (fade <= 1e-3f)
             {
                 continue;
             }
             var game = new Vector2(c.X, c.Y);
-            if (_monsterVision)
+            if (monsterVision)
             {
                 Emit(game, 90.0f, new Color(1.0f, 1.0f, 0.0f, fade));
             }
-            if ((c.Flags & CreatureWireFlagPlague) != 0)
+            // Debug toggle: paint 1-in-10 creatures with an aura (alternating
+            // poison/plague) so the overlay pass is inspectable on demand.
+            bool debugPoison = DebugFx.CreatureAuras && idx % 10 == 0;
+            bool debugPlague = DebugFx.CreatureAuras && idx % 10 == 5;
+            if ((c.Flags & CreatureWireFlagPlague) != 0 || debugPlague)
             {
                 Emit(game, 80.0f, new Color(0.0f, 0.0f, 0.0f, fade));
             }
-            if ((c.Flags & CreatureFlagPoison) != 0)
+            if ((c.Flags & CreatureFlagPoison) != 0 || debugPoison)
             {
                 Emit(game, 60.0f, new Color(1.0f, 0.0f, 0.0f, fade));
             }

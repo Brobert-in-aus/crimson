@@ -929,15 +929,6 @@ pub fn questUnlockWeaponForIndex(global_index: i32) ?game_ids.WeaponId {
 }
 
 pub fn weaponPickRandomAvailable(state: *state_mod.GameplayState) game_ids.WeaponId {
-    // Debug fx showcase: every drop is a glow-pool weapon (flamethrower or
-    // bubblegun, 50/50) so the VR particle-glow render path can be exercised
-    // on demand. Gated off in normal play and never set for replays.
-    if (state.debug_fx_showcase) {
-        return if ((state.rng.randTagged(rng_callers.weapon_pick_random_available_pick) & 1) == 0)
-            game_ids.WeaponId.flamethrower
-        else
-            game_ids.WeaponId.bubblegun;
-    }
     weaponRefreshAvailable(state);
 
     for (0..1000) |_| {

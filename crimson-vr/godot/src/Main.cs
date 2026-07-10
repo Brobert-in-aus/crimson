@@ -95,6 +95,7 @@ public partial class Main : Node3D
     private const int HighscoreTableMax = 10; // UserSettings.AddHighscore cap
     private readonly UserSettings _settings = new();
     private ValidationChecklist _checklist = null!;
+    private DebugMenu _debugMenu = null!;
     private MainMenu _mainMenu = null!;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
@@ -247,6 +248,13 @@ public partial class Main : Node3D
         _checklist.Build(ArenaSideMeters, _settings.Checklist);
         _checklist.OnItemChanged += (id, state) => { _settings.Checklist[id] = state; _settings.Save(); };
         _checklist.SetShown(true);
+
+        // Debug FX menu: runtime force-toggles for the effect render passes,
+        // mirrored on the player's left. Visible only while debug is on.
+        _debugMenu = new DebugMenu();
+        _arenaRoot.AddChild(_debugMenu);
+        _debugMenu.Build(ArenaSideMeters);
+        _debugMenu.SetShown(_settings.Debug);
 
         // Debug poke-tip markers (world-space); shown only in debug mode.
         for (int i = 0; i < _pokeMarkers.Length; i++)
@@ -1101,6 +1109,7 @@ public partial class Main : Node3D
         // The validation checklist stands off to the right of the arena and is always
         // pokeable, in any game state (menu, gameplay, paused) — poll it first.
         _checklist.PollPoke(p);
+        _debugMenu.PollPoke(p);
 
         // Main menu owns the screen while open: poke its items. Gameplay menus stay
         // dormant.
@@ -1192,6 +1201,7 @@ public partial class Main : Node3D
         _debug = on;
         _settings.Debug = on;
         _settings.Save();
+        _debugMenu.SetShown(on);
         // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
         // per-creature facing needle, a one-off sprite-calibration tool. The
         // settings debug flag means "fx showcase" now; flip the needle on in

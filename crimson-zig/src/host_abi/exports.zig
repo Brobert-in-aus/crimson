@@ -369,9 +369,11 @@ const HostSessionConfig = struct {
     preserve_bugs: bool = false,
     demo_mode_active: bool = false,
     status_quest_unlock_index: i32 = 0,
-    // Debug fx showcase (VR checklist): flamer/bubblegun-only drops, forced
-    // monster-vision wire flag, and synthetic 1-in-10 aura flags on exported
-    // creatures. Presentation/debug only — never set for replays or verify.
+    // Debug fx showcase (VR debug menu): each reload press cycles the player
+    // to the next real weapon so the whole arsenal can be toured in one run.
+    // The visual force-toggles (auras, shield ring, laser, monster vision)
+    // live entirely frontend-side now. Debug only — never set for replays or
+    // verify.
     debug_fx_showcase: bool = false,
 };
 
@@ -718,12 +720,6 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         {
             header.monster_vision = 1;
         }
-        // Debug fx showcase: force the flag so the yellow-aura render path can
-        // be validated without grinding for the perk. Presentation-only (the
-        // wire flag is what the frontend reads); the sim is untouched.
-        if (box.runner.session.state.debug_fx_showcase) {
-            header.monster_vision = 1;
-        }
     }
 
     if (header.perk_pending_count > 0) {
@@ -814,24 +810,9 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.ion_gun_master)) player_perk_flag_ion_gun_master else 0),
         });
     }
-    // Debug fx showcase: paint 1-in-10 creatures with an aura on the WIRE only
-    // (alternating red poison = SELF_DAMAGE_TICK 0x01 / black plague = the
-    // synthetic wire bit) so the overlay render path can be validated. The
-    // flags are injected into the exported snapshot, never into the sim, so
-    // gameplay (incl. the real self-damage tick) is untouched.
-    const fx_showcase = box.runner.session.state.debug_fx_showcase;
-    var showcase_idx: u32 = 0;
     for (box.runner.session.creatures.entries) |entry| {
         if (!entry.active) continue;
-        var wire_flags: u32 = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0);
-        if (fx_showcase) {
-            if (showcase_idx % 10 == 0) {
-                wire_flags |= 0x01; // poison aura (SELF_DAMAGE_TICK render bit)
-            } else if (showcase_idx % 10 == 5) {
-                wire_flags |= creature_wire_flag_plague;
-            }
-            showcase_idx += 1;
-        }
+        const wire_flags: u32 = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0);
         writeStruct(out, &offset, CreatureSnap{
             .x = entry.pos.x,
             .y = entry.pos.y,
