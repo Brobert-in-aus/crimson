@@ -406,7 +406,10 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    validation pending. Remaining from this item: quest TIME-LIMIT HUD
    (timer not drawn; sim enforces), quest end-note screens (5.10 finale),
    hardcore toggle (unlock>=40), Typo'Shooter (still blocked on VR input
-   design — see VR-inapplicable table).
+   design — see VR-inapplicable table). **Validated 2026-07-10: all five
+   checklist items functionally PASS; `playmenu` marked FAIL on THEMING
+   only** (the new panels are plain VrButton stacks, not base-game art) —
+   see the menu-theming pass, item 10.
 3. ~~**Per-projectile-type render variants**~~ — **DONE 2026-07-10** (see the
    draw-pass table; ABI v12, validated in-headset 6/6). The Sharpshooter
    **laser sight** landed with it. ~~Still open from this cluster~~: the
@@ -432,6 +435,44 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    optional cosmetic polish: panel-slide timelines + brief world-fade
    transitions.
 9. Credits (+ AlienZooKeeper secret, if we're feeling faithful).
+10. **Base-game menu THEMING pass** (user-flagged 2026-07-10: `playmenu`
+    checklist FAIL was theming-only). The new panels (PlayGameMenu,
+    QuestSelectMenu, QuestResultPanel) are plain colored VrButton stacks;
+    they should read like the original screens. The native building blocks
+    to port (all verified in the reference):
+    - **Buttons**: `ui_buttonSm`/`ui_buttonMd` plate art, 32px tall, width
+      82 (short labels) / 145 (`button_width`, perk_menu.py:276-282); label
+      in the game's SMALL FONT centered at y+10, alpha 0.7 idle → 1.0
+      hovered; a hover HIGHLIGHT FILL rect at (x+12, y+5, w−24, 22) tinted
+      (0.5,0.5,0.7) with alpha = hover ramp (6/ms up, 4/ms down, 0..1000)
+      and a click bias toward blue-white (+0.0005/+0.0007 per press-ms) —
+      `button_draw`/`button_update` (perk_menu.py:258-365). VR adaptation:
+      teach VrButton an optional themed skin (plate texture + hover quad +
+      font) while keeping the poke mechanics/depths identical; hover ramp
+      maps to poke-proximity or gaze-less dwell.
+    - **Panel backdrop**: `ui_menuPanel` with the native 3-slice + 1px
+      border inset (`draw_classic_menu_panel`, ui/menu_panel.py:23) behind
+      every panel; panel titles from the `ui_itemTexts` rows where one
+      exists (Play Game = row 1 title art, menu.py MENU_LABEL_ROW_*).
+    - **Small font**: grim's small font sheet — bake the atlas + advance
+      metrics and render text as quads (Label3D system font is the single
+      biggest "not Crimsonland" tell). Reusable for HUD popups later.
+    - **Quest select**: native stage ICONS (QUEST_STAGE_ICON_* layout,
+      selected icon full-scale, others 0.8) instead of numbered tabs; quest
+      rows in small font with the row hover pad; hardcore checkbox art at
+      unlock>=40 (quest_views/shared.py offsets).
+    - **Quest results/failed**: match quest_views/quest_results.py +
+      quest_failed.py layouts (banner text, stats block) once themed.
+    - **Motion/sfx**: panel slide-in timelines (PANEL_TIMELINE_START/END,
+      `_ui_element_anim` slide-from-side) + ui_panelClick on open (cue
+      already in AudioBank); mode-button tooltips (hover-fade alpha ramp
+      0.0009/ms) under the list like `_draw_tooltips`.
+    - **Bake needs**: stage `ui_buttonSm`, `ui_buttonMd`, `ui_menuPanel`,
+      the small-font sheet, quest stage icons.
+    - **In scope**: the three new panels + retro-fit PauseMenu/Options/
+      VR-Settings buttons. **Exempt**: dev tooling (checklist, Debug FX
+      menu) and the GameOverPanel (already uses the real reaper/clock/
+      wicons art; only its buttons pick up the themed skin).
 
 **Lesson (updated):** a feature/asset parity check misses render-pipeline and
 *behavioral* correctness. Any base-game `begin_blend_mode` / draw pass / animated
