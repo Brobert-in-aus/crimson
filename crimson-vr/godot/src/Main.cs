@@ -162,10 +162,14 @@ public partial class Main : Node3D
         BuildStatusLabel();
         StartSession();
 
+        // Surface the REAL failure in-headset: the old fixed "native lib
+        // missing" line hid version-guard and config errors behind one message.
         _status.Text = _sim != null
             ? $"CrimsonVR | sim abi v{TryQueryAbiVersion()}"
-            : "sim unavailable (native lib missing)";
+            : $"sim unavailable: {_simError ?? "native lib missing"}";
     }
+
+    private string? _simError; // SimSession ctor failure message (for the status line)
 
     private void StartSession()
     {
@@ -313,6 +317,7 @@ public partial class Main : Node3D
         {
             GD.PushError($"CrimsonVR: sim session create failed: {e.Message}");
             _sim = null;
+            _simError = e.Message;
         }
 
         // Apply the persisted Options settings now the sim/diorama/audio exist.
