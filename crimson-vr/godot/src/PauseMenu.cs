@@ -36,19 +36,19 @@ public sealed partial class PauseMenu : Node3D
         float s = arenaSideMeters;
 
         // Pause + Level Up live on the LEFT VERTICAL FACE of an imaginary cube
-        // whose bottom face is the arena (player's left = arena-local +x, the
-        // checklist side), mounted on the OUTSIDE so nothing projects over the
-        // play surface (they used to lie flat over the table — in-headset fail).
-        // Yaw -90 (like the checklist) points the fronts inward (-x) so they're
-        // readable from the seat; the node sits one proud-depth outside the
-        // x=half plane so the face — even fully depressed — never crosses over
-        // the arena. Stacked vertically near the player's end of the edge.
-        float half = s * 0.5f;
+        // whose bottom face is the VISIBLE floor square (the floor extends
+        // FloorMarginScale past the playable zone — using the playable edge put
+        // the buttons INSIDE the table, in-headset fail). Mounted on the
+        // OUTSIDE: yaw -90 (like the checklist) points the fronts inward (-x)
+        // so they're readable from the seat; the node sits one proud-depth
+        // outside the edge plane so the face — even fully depressed — never
+        // crosses into the cube. Stacked vertically near the player's end.
+        float edge = s * 0.5f * Diorama.FloorMarginScale;
         float proud = s * 0.03f;
         _toggle = new VrButton();
         AddChild(_toggle);
         _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: proud, plate: true);
-        _toggle.Position = new Vector3(half + proud, s * 0.16f, -s * 0.32f);
+        _toggle.Position = new Vector3(edge + proud, s * 0.16f, -s * 0.32f);
         _toggle.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
         _toggle.OnPress += TogglePause;
 
@@ -58,7 +58,7 @@ public sealed partial class PauseMenu : Node3D
         _levelUp = new VrButton();
         AddChild(_levelUp);
         _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: proud, plate: true);
-        _levelUp.Position = new Vector3(half + proud, s * 0.34f, -s * 0.32f);
+        _levelUp.Position = new Vector3(edge + proud, s * 0.34f, -s * 0.32f);
         _levelUp.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
         _levelUp.OnPress += () => OnLevelUp?.Invoke();
         _levelUp.Visible = false;
@@ -75,7 +75,7 @@ public sealed partial class PauseMenu : Node3D
             Modulate = new Color(1.0f, 0.9f, 0.3f),
             OutlineSize = 28,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(half + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.16f),
+            Position = new Vector3(edge + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.16f),
             RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f),
             NoDepthTest = true,
             Visible = false,

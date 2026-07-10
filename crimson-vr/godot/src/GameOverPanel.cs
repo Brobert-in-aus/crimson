@@ -96,13 +96,13 @@ public sealed partial class GameOverPanel : Node3D
         Visible = false;
     }
 
-    /// <summary>Show the panel stacked ABOVE the keyboard with buttons hidden
-    /// (base phase 0). The panel labels are no-depth-test, so mere z-separation
-    /// isn't enough — a first pass pushed the panel back behind the keyboard
-    /// and the score card drew interleaved over the keys (in-headset FAIL).
-    /// Vertical separation instead: the keyboard's top is ~1.6·side (prompt at
-    /// its +0.72 offset), so a 0.8-scaled panel centred at 2.05·side clears it
-    /// entirely; a steeper tilt keeps it readable from the seated viewpoint.</summary>
+    /// <summary>Show the panel BESIDE the keyboard with buttons hidden (base
+    /// phase 0). Stacking above forced the player to crane up (in-headset
+    /// FAIL), and pushing it behind interleaved with the keys while the panel
+    /// text was no-depth-test. Now: same comfortable height as the keyboard,
+    /// off to the player's right (arena -x, mirroring the checklist on the
+    /// left), angled toward the seat — and all panel elements depth-test, so
+    /// any overlap resolves like real geometry.</summary>
     public void ShowForNameEntry(in Sim.TickResult result, int rank)
     {
         Show(result, rank);
@@ -111,9 +111,9 @@ public sealed partial class GameOverPanel : Node3D
         {
             b.Visible = false;
         }
-        Scale = Vector3.One * 0.8f;
-        Position = new Vector3(0.0f, _side * 2.05f, 0.0f);
-        RotationDegrees = new Vector3(-24.0f, 180.0f, 0.0f);
+        Scale = Vector3.One * 0.85f;
+        Position = new Vector3(-_side * 1.05f, _side * 0.85f, 0.0f);
+        RotationDegrees = new Vector3(-12.0f, 135.0f, 0.0f);
     }
 
     /// <summary>Name entry done: drop to the standard spot and reveal the
@@ -238,10 +238,12 @@ public sealed partial class GameOverPanel : Node3D
         return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
     }
 
-    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, float z = 0.0f, bool noDepthTest = true)
+    // Depth-tested by default: overlap with the keyboard/world must resolve
+    // like real geometry (a no-depth-test score card drew through the keys).
+    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, float z = 0.0f, bool noDepthTest = false)
         => AddQuad(tex, x, y, w, h, tint, priority, out _, z, noDepthTest);
 
-    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat, float z = 0.0f, bool noDepthTest = true)
+    private MeshInstance3D AddQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat, float z = 0.0f, bool noDepthTest = false)
     {
         mat = new StandardMaterial3D
         {
@@ -273,9 +275,11 @@ public sealed partial class GameOverPanel : Node3D
             FontSize = 110,
             PixelSize = pixelSize,
             Modulate = color,
-            Position = new Vector3(x, y, 0.001f),
+            // 4mm in front of the backing so depth testing (no NoDepthTest —
+            // overlap with the keyboard must occlude correctly) keeps the text
+            // cleanly above its own panel.
+            Position = new Vector3(x, y, 0.004f),
             HorizontalAlignment = HorizontalAlignment.Center,
-            NoDepthTest = true,
             RenderPriority = 64,
         };
         AddChild(l);

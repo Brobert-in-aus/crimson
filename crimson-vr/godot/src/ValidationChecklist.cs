@@ -16,24 +16,17 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Trimmed 2026-07-09: items validated in past
-    // sessions (creature tint/anim, HUD, menus, haptics, persistence...) and
-    // dead entries (grab-drag slider, unreachable passthrough) removed; now
-    // covers this round's effect/fog/death-screen fixes + still-open audits.
+    // validation surface changes. Cleared 2026-07-10 (previous round all
+    // passing except the death-screen pair); now covers the comfort/alignment
+    // round: death panel beside the keyboard, depth-tested UI text, HUD and
+    // edge-buttons aligned to the VISIBLE floor square (1.3x playable zone).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("fogsquare", "No square around big effects"),
-        ("pickupfx", "Pickup sparks: clean edges"),
-        ("freezering", "Freeze/pickup ring look"),
-        ("fxdensity", "Effect opacity (shards/smoke)"),
-        ("fognear", "Fog: none within 3m, grey far"),
-        ("deathpanel", "Death screen: panel + keyboard"),
+        ("deathside", "Death screen: beside keyboard, no look-up"),
+        ("deathoccl", "No text through keys (caret occluded)"),
         ("deathstats", "Death stats: score/rank/time/clock"),
-        ("deathroutes", "Play Again / Main Menu buttons"),
-        ("auras", "Creature auras (poison/plague/vision)"),
-        ("glowpool", "Flamer/bubblegun glow pool"),
-        ("corpseorient", "Corpse stamp orientation"),
-        ("uisfx", "UI click SFX + perk fade"),
+        ("hudedge", "HUD top edge at floor-square edge"),
+        ("buttonedge", "Pause/LevelUp outside the floor edge"),
     };
 
     private const int PerPage = 6;

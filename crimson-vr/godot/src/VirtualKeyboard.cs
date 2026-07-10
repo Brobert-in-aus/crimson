@@ -123,7 +123,8 @@ public sealed partial class VirtualKeyboard : Node3D
             PixelSize = pixelSize,
             Modulate = color,
             Position = pos,
-            NoDepthTest = true,
+            // Depth-tested: with NoDepthTest the yellow name-entry caret drew
+            // through the key faces from a low view angle (in-headset fail).
         };
         AddChild(l);
         return l;

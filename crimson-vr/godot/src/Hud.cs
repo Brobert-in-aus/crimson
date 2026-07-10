@@ -83,13 +83,15 @@ public sealed partial class Hud : Node3D
         // The HUD top bar spans ~1.15x the arena width; scale native units to fit.
         _u = arenaSideMeters * 1.15f / NativeSpan;
 
-        // Anchor the HUD's TOP edge at the arena's near edge and hang it DOWN /
-        // toward the seated player (tilted to face up), so it never covers the play
-        // surface. Arena is yawed so the player's side is local -z; the 180 yaw
-        // turns the art to face them. Together with depth-tested quads (below)
-        // the tabletop occludes the HUD at shallow view angles instead of the
-        // HUD drawing over the arena.
-        Position = new Vector3(0.0f, 0.0f, -half);
+        // Anchor the HUD's TOP edge at the VISIBLE floor square's near edge (the
+        // floor extends FloorMarginScale past the playable zone — anchoring at
+        // the playable edge left the HUD under the tabletop) and hang it DOWN /
+        // toward the seated player (tilted to face up), so it never covers the
+        // play surface. Arena is yawed so the player's side is local -z; the
+        // 180 yaw turns the art to face them. Together with depth-tested quads
+        // (below) the tabletop occludes the HUD at shallow view angles instead
+        // of the HUD drawing over the arena.
+        Position = new Vector3(0.0f, 0.0f, -(half * Diorama.FloorMarginScale));
         RotationDegrees = new Vector3(-45.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");

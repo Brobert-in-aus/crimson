@@ -164,8 +164,10 @@ public sealed partial class VrButton : Node3D
             // Child of _face, so a small +Z lift keeps it just in front of the face
             // surface (was _proud+0.004 which double-counted the face's own proud
             // offset, floating the text forward and shifting it under parallax).
+            // Depth-tested (no NoDepthTest): button text must be occludable by
+            // geometry in front of it, like any other surface — labels used to
+            // bleed through overlapping panels/keys.
             Position = new Vector3(0.0f, 0.0f, 0.004f),
-            NoDepthTest = true,
             Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
         };
         _face.AddChild(_label);

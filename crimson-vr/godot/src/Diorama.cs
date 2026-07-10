@@ -285,7 +285,9 @@ public sealed partial class Diorama : Node3D
     private MeshInstance3D? _floor;
     private StandardMaterial3D? _floorMaterial;
     private readonly Dictionary<int, string> _terrainSlots = new(); // slot -> sheet
-    private const float FloorMarginScale = 1.3f; // floor size vs playfield side
+    // Floor size vs playfield side. PUBLIC: the visible "total square" the HUD
+    // and the edge-mounted buttons must align to (the playable zone is smaller).
+    public const float FloorMarginScale = 1.3f;
     private const float FloorY = -0.001f;        // just below the decal plane
     private const float FloorTile = 6.0f;        // ground texture repeats across the floor
 
