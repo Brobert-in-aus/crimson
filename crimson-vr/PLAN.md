@@ -360,6 +360,10 @@ Notes:
 > past the playfield so the margin reads as "off-table" rather than floating).
 > Presentation-only (no sim change — spawn positions must stay exact for parity).
 > Defer to a later M3 polish pass or M4.
+> **2026-07-10 interim:** a QUICK-FIX playfield border shipped — four thin
+> dim-crimson strips on the playable-zone perimeter (`BuildPlayfieldBorder`)
+> so the edge is visible at all. The elegant fade-band / rim-mask treatment
+> (which should also swallow this spawn-margin pop-in) is still owed.
 
 - **Terrain**: flat quad with the generated terrain texture; decals (blood,
   scorch) painted into a `SubViewport` decal layer composited over it —

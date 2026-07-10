@@ -1002,6 +1002,44 @@ public sealed partial class Diorama : Node3D
             Position = new Vector3(0.0f, FloorY, 0.0f),
         };
         AddChild(_floor);
+        BuildPlayfieldBorder();
+    }
+
+    /// <summary>QUICK-FIX playfield boundary: four thin dim-crimson strips
+    /// marking the playable zone's perimeter (the visible floor extends 1.3x
+    /// past it, so the edge was invisible). An ELEGANT treatment — fade band /
+    /// rim mask tied into the off-arena spawn-margin fix (port-status) — is
+    /// documented as future work; this is deliberately minimal.</summary>
+    private void BuildPlayfieldBorder()
+    {
+        float half = _arenaSideMeters * 0.5f;
+        float w = _arenaSideMeters * 0.008f;
+        var mat = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.75f, 0.22f, 0.16f, 0.55f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority = 2, // over decals/corpses/shadows, under reticles + creatures
+        };
+        // (centerX, centerZ, sizeX, sizeZ) per strip; corners covered by overlap.
+        (float cx, float cz, float sx, float sz)[] strips =
+        {
+            (0.0f, -half, _arenaSideMeters + w, w), // near edge
+            (0.0f, half, _arenaSideMeters + w, w),  // far edge
+            (-half, 0.0f, w, _arenaSideMeters + w), // left
+            (half, 0.0f, w, _arenaSideMeters + w),  // right
+        };
+        foreach ((float cx, float cz, float sx, float sz) in strips)
+        {
+            AddChild(new MeshInstance3D
+            {
+                Mesh = new PlaneMesh { Size = new Vector2(sx, sz) },
+                MaterialOverride = mat,
+                Position = new Vector3(cx, 0.002f, cz),
+            });
+        }
     }
 
     /// <summary>The base terrain-slot texture applied to the arena floor (null

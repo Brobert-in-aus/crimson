@@ -22,11 +22,9 @@ public sealed partial class ValidationChecklist : Node3D
     // perk name, and this panel's own doubled buttons.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("hudfar", "HUD at far edge, HP bar x2"),
-        ("kbheight", "Keyboard height comfortable"),
-        ("reticles2", "Move = ring, aim = dynamic only"),
-        ("firecough", "Perk name reads Fire Cough"),
-        ("checklistbtn", "These buttons: no double-hits"),
+        ("hudup", "HUD raised one panel-height"),
+        ("arenaedge", "Playfield border strip visible"),
+        ("aimclamp", "Off-arena cursor stays on aim line"),
     };
 
     private const int PerPage = 4;

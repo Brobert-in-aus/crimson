@@ -80,4 +80,43 @@ public class MapperTests
         Assert.False(Mapper.IsOverArena(new Vector3(0.6f, 0, 0.0f), Side));
         Assert.False(Mapper.IsOverArena(new Vector3(0.0f, 0, 0.51f), Side));
     }
+
+    [Fact]
+    public void ClampGameTowards_InsidePointUnchanged()
+    {
+        var anchor = new Vector2(512.0f, 512.0f);
+        var point = new Vector2(700.0f, 300.0f);
+        Vector2 clamped = Mapper.ClampGameTowards(anchor, point, World);
+        Assert.Equal(point.X, clamped.X, 3);
+        Assert.Equal(point.Y, clamped.Y, 3);
+    }
+
+    [Fact]
+    public void ClampGameTowards_OutsidePointStaysOnAnchorLine()
+    {
+        // Hand far past the right edge and slightly up: the cursor must sit ON
+        // the boundary AND on the anchor->point line (direction preserved),
+        // not per-axis-clamped into the corner region.
+        var anchor = new Vector2(512.0f, 512.0f);
+        var point = new Vector2(2048.0f, 256.0f);
+        Vector2 clamped = Mapper.ClampGameTowards(anchor, point, World);
+        Assert.Equal(World, clamped.X, 3); // exits through the +x edge
+        // Collinear: (clamped - anchor) parallel to (point - anchor).
+        Vector2 d = point - anchor;
+        Vector2 c = clamped - anchor;
+        Assert.Equal(0.0f, d.X * c.Y - d.Y * c.X, 1);
+        // And the y is the interpolated line value, not the raw point's y.
+        float t = (World - anchor.X) / d.X;
+        Assert.Equal(anchor.Y + d.Y * t, clamped.Y, 3);
+    }
+
+    [Fact]
+    public void ClampGameTowards_CornerwardExitClampsAtNearestEdge()
+    {
+        var anchor = new Vector2(100.0f, 100.0f);
+        var point = new Vector2(-300.0f, -100.0f); // exits -x edge first
+        Vector2 clamped = Mapper.ClampGameTowards(anchor, point, World);
+        Assert.Equal(0.0f, clamped.X, 3);
+        Assert.Equal(50.0f, clamped.Y, 3); // 100 + (-200)*(100/400)
+    }
 }

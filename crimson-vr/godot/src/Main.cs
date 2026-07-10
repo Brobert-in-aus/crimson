@@ -1265,7 +1265,11 @@ public partial class Main : Node3D
         Vector3 hit = Mapper.ProjectVertically(handPos, planeY);
         Vector3 arenaLocal = _arenaRoot.ToLocal(hit);
         over = Mapper.IsOverArena(arenaLocal, ArenaSideMeters);
-        Vector2 game = Mapper.ArenaLocalToGame(arenaLocal, ArenaSideMeters, GameWorldSize);
+        // Off-arena hands clamp along the PLAYER-to-hand line (not per-axis):
+        // the cursor stays on the aiming line at the boundary instead of being
+        // dragged sideways toward the nearest corner.
+        Vector2 raw = Mapper.ArenaLocalToGameUnclamped(arenaLocal, ArenaSideMeters, GameWorldSize);
+        Vector2 game = Mapper.ClampGameTowards(_playerGame, raw, GameWorldSize);
         Vector3 clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
         clampedWorld = _arenaRoot.ToGlobal(clampedLocal);
         return game;

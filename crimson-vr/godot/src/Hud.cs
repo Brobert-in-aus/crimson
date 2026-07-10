@@ -90,12 +90,13 @@ public sealed partial class Hud : Node3D
 
         // The HUD stands VERTICALLY at the FAR edge of the visible floor square
         // (in-headset decision: a scoreboard across the table beats a panel at
-        // the near edge), its BOTTOM edge aligned with the floor's far edge.
+        // the near edge), floating ONE panel-height above the plane (bottom
+        // edge where the top used to be — sitting on the floor read too low).
         // Content is laid out hanging DOWN from the node origin (native y=0 at
-        // the origin), so lifting the origin by the content height puts the
-        // bottom exactly on the plane. Arena local +z = far; the 180 yaw turns
-        // the art back toward the player. Quads stay depth-tested.
-        Position = new Vector3(0.0f, NativeBottomY * _u, half * Diorama.FloorMarginScale);
+        // the origin), so the origin sits at twice the content height. Arena
+        // local +z = far; the 180 yaw turns the art back toward the player.
+        // Quads stay depth-tested.
+        Position = new Vector3(0.0f, 2.0f * NativeBottomY * _u, half * Diorama.FloorMarginScale);
         RotationDegrees = new Vector3(0.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
