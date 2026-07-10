@@ -26,5 +26,6 @@
     <Compile Include="..\..\godot\src\Sim.cs" />
     <Compile Include="..\..\godot\src\SimSession.cs" />
     <Compile Include="..\..\godot\src\CreatureAnim.cs" />
+    <Compile Include="..\..\godot\src\TerrainGen.cs" />
   </ItemGroup>
 </Project>

@@ -16,17 +16,14 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-10 (v13 FX round 5/5
-    // green); now covers the game-mode-select slice: Play Game submenu,
-    // Rush mode, quest select with unlock gating, and the quest
-    // completed/failed end panels.
+    // validation surface changes. Mode-select round: 4/5 PASS; playmenu FAIL
+    // is theming-only and stays listed until the menu theming pass (port-
+    // status item 10) closes it. New: the generated ground (scatter-stamped
+    // dirt/grass from terrain_seed, replacing the tiled base slot).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("playmenu", "Play Game menu (3 modes + Back)"),
-        ("rushmode", "Rush starts w/ assault rifle"),
-        ("questsel", "Quest select: stages + locks"),
-        ("questwin", "Quest complete -> results + unlock"),
-        ("questfail", "Quest death -> failed + Retry"),
+        ("playmenu", "Menus themed like base game"),
+        ("terraingen", "Ground: scattered patches, not tiles"),
     };
 
     private const int PerPage = 4;

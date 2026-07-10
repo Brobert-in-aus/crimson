@@ -1034,26 +1034,44 @@ public sealed partial class Diorama : Node3D
     /// floor can share the same ground.</summary>
     public Texture2D? FloorTexture => _floorMaterial?.AlbedoTexture as Texture2D;
 
-    /// <summary>Texture the floor from the session's base terrain slot (ABI
-    /// terrain-info). Called once the session exists; leaves the grey fallback if
-    /// the terrain sheet isn't baked.</summary>
+    /// <summary>Texture the floor from the session's terrain info (ABI v3):
+    /// generate the faithful ground render target from the three slots + seed
+    /// (DioramaTerrain.cs). Falls back to tiling the base slot if any sheet is
+    /// missing, and to the grey floor if even that fails. Called per run —
+    /// quests carry per-level slots.</summary>
     public void ApplyTerrainInfo(Sim.TerrainInfo info)
     {
-        if (_floorMaterial == null || !_terrainSlots.TryGetValue(info.Slot0, out string? file))
+        if (_floorMaterial == null)
         {
             return;
         }
-        string path = SpriteDir + file;
-        if (ResourceLoader.Exists(path) && ResourceLoader.Load<Texture2D>(path) is Texture2D tex)
+        if (GenerateGround(info) is Texture2D ground)
         {
-            _floorMaterial.AlbedoTexture = tex;
-            // Drop the dark neutral-grey fallback tint so the grass/dirt shows at
-            // full colour (AlbedoColor multiplies the texture).
+            _floorMaterial.AlbedoTexture = ground;
             _floorMaterial.AlbedoColor = Colors.White;
+            // The RT is the full world square: map it 1:1 onto the PLAYABLE zone
+            // (the floor mesh extends FloorMarginScale past it; repeat wraps the
+            // margin, which the border strip + fog keep unobtrusive). The RT is
+            // already composed art — sample it smooth, not Nearest.
+            _floorMaterial.Uv1Scale = new Vector3(FloorMarginScale, FloorMarginScale, 1.0f);
+            _floorMaterial.Uv1Offset = new Vector3(-(FloorMarginScale - 1.0f) * 0.5f, -(FloorMarginScale - 1.0f) * 0.5f, 0.0f);
+            _floorMaterial.TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear;
+            return;
+        }
+        if (_terrainSlots.TryGetValue(info.Slot0, out string? file)
+            && ResourceLoader.Exists(SpriteDir + file)
+            && ResourceLoader.Load<Texture2D>(SpriteDir + file) is Texture2D tex)
+        {
+            // Fallback: tile the base slot (pre-generator behavior).
+            _floorMaterial.AlbedoTexture = tex;
+            _floorMaterial.AlbedoColor = Colors.White;
+            _floorMaterial.Uv1Scale = new Vector3(FloorTile, FloorTile, 1.0f);
+            _floorMaterial.Uv1Offset = Vector3.Zero;
+            _floorMaterial.TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest;
         }
         else
         {
-            GD.PushWarning($"CrimsonVR: terrain sheet missing ({path}); grey floor");
+            GD.PushWarning("CrimsonVR: terrain sheets missing; grey floor");
         }
     }
 
