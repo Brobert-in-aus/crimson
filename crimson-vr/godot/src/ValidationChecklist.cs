@@ -16,14 +16,19 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Mode-select round: 4/5 PASS; playmenu FAIL
-    // is theming-only and stays listed until the menu theming pass (port-
-    // status item 10) closes it. New: the generated ground (scatter-stamped
-    // dirt/grass from terrain_seed, replacing the tiled base slot).
+    // validation surface changes. Cleared 2026-07-10 (terraingen PASS); now
+    // covers the mega-batch: the base-game menu theming pass (button plates +
+    // small font + panel backdrops + stage icons + banner arts), the quest
+    // HUD timer, the animated player legs + torso recoil (ABI v15), and the
+    // Statistics screen with the per-mode high-score tables.
     private static readonly (string Id, string Label)[] Items =
     {
         ("playmenu", "Menus themed like base game"),
-        ("terraingen", "Ground: scattered patches, not tiles"),
+        ("smallfont", "Classic font on menu text"),
+        ("questtimer", "Quest timer on HUD (mm:ss/limit)"),
+        ("legs", "Player legs animate, torso recoils"),
+        ("statsmenu", "Statistics screen from main menu"),
+        ("hiscores", "High-score tables (both modes)"),
     };
 
     private const int PerPage = 4;

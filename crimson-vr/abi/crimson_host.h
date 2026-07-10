@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 14u
+#define CRIMSON_HOST_ABI_VERSION 15u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -179,6 +179,9 @@ typedef struct crimson_host_player_snap {
     float spread_heat;
     float shield_timer;
     uint32_t perk_flags;
+    /* ABI v15 (append-only): walk-cycle phase for the trooper leg frame
+     * (leg = clamp(int(move_phase+0.5), 0, 14), torso = leg + 16). */
+    float move_phase;
 } crimson_host_player_snap;
 
 typedef struct crimson_host_creature_snap {

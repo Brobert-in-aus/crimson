@@ -33,37 +33,28 @@ public sealed partial class PlayGameMenu : Node3D
         Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
-        var title = new Label3D
-        {
-            Text = "Play Game",
-            FontSize = 140,
-            PixelSize = s / 1100.0f,
-            Modulate = new Color(0.92f, 0.9f, 0.95f),
-            OutlineSize = 26,
-            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, s * 0.42f, 0.0f),
-        };
-        AddChild(title);
+        // Classic panel backdrop + the PLAY GAME itemTexts title art.
+        ClassicPanel.Build(this, s * 1.0f, s * 1.05f, z: -0.012f);
+        ClassicTitle.BuildRow(this, s * 0.5f, ClassicTitle.RowPlayGame, y: s * 0.42f);
 
         // Native _mode_entries order: Quests, Rush, Survival.
         float w = s * 0.55f;
-        float h = s * 0.14f;
+        float h = s * 0.13f;
         float pitch = h + s * 0.04f;
         float y = s * 0.24f;
         _quests = MakeButton("Quests", w, h, y, () => OnQuests?.Invoke()); y -= pitch;
         _rush = MakeButton("Rush", w, h, y, () => OnRush?.Invoke()); y -= pitch;
         _survival = MakeButton("Survival", w, h, y, () => OnSurvival?.Invoke()); y -= pitch;
-        _back = MakeButton("Back", w * 0.6f, h, y - s * 0.03f, () => OnBack?.Invoke(),
-            new Color(0.5f, 0.55f, 0.66f));
+        _back = MakeButton("Back", w * 0.55f, h, y - s * 0.03f, () => OnBack?.Invoke());
 
         Visible = false;
     }
 
-    private VrButton MakeButton(string text, float w, float h, float y, Action onPress, Color? color = null)
+    private VrButton MakeButton(string text, float w, float h, float y, Action onPress)
     {
         var b = new VrButton();
         AddChild(b);
-        b.Build(w, h, text, color ?? new Color(0.55f, 0.3f, 0.28f));
+        b.BuildClassic(w, h, text);
         b.Position = new Vector3(0.0f, y, 0.0f);
         b.OnPress += onPress;
         return b;

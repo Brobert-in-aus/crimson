@@ -319,8 +319,12 @@ public sealed partial class Diorama : Node3D
         // sizeScale 1.0 = faithful: the reference draws a sprite at ~its `size`
         // world units (player) / 64*clamp(size/64,.25,2) (creatures), so the sprite
         // matches the sim hit radius. Bigger scales overshoot the hitbox.
+        // ABI v15: legs + torso are separate quads in one UV-indexed layer
+        // (leg frame from move_phase rotated by heading; torso = leg + 16
+        // rotated by aim with the recoil offset — trooper.py:155-196), so the
+        // cap is 2 per player.
         _players = manifest?.player is { } pd
-            ? BuildSpriteLayer(PlayerCap, pd, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f)
+            ? BuildPlayerLayer(pd)
             : BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
 
         // One creature layer per type so each can bind its own sheet texture.
@@ -394,6 +398,25 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Textured layer showing one static frame of a sheet. Falls back
     /// to a colored layer if the texture can't be loaded (assets not baked).</summary>
+    /// <summary>The player layer: UV-indexed (per-instance frame) so legs and
+    /// torso render as two quads from the same trooper sheet.</summary>
+    private Layer BuildPlayerLayer(SpriteDesc desc)
+    {
+        string path = SpriteDir + desc.sheet;
+        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        {
+            GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
+            return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
+        }
+        var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = desc.priority };
+        material.SetShaderParameter("sheet", tex);
+        Layer layer = BuildLayer(PlayerCap, material, lift: 0.012f, sizeScale: 1.0f, useCustomData: true);
+        layer.UvIndexed = true;
+        layer.Grid = Mathf.Max(desc.grid, 1);
+        layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
+        return layer;
+    }
+
     private Layer BuildSpriteLayer(int capacity, SpriteDesc desc, Color fallback, float lift, float sizeScale)
     {
         string path = SpriteDir + desc.sheet;
@@ -1341,8 +1364,17 @@ public sealed partial class Diorama : Node3D
         _muzzleCount = 0;
         foreach (Sim.PlayerSnap p in view.Players)
         {
-            // Player torso (trooper.png frame 16) is aimed, so rotate by aim.
-            _players.Add(new Vector2(p.X, p.Y), p.AimHeading, p.Size);
+            // trooper.py:155-196 — LEGS from the walk phase (frame = clamp(
+            // int(move_phase+0.5), 0, 14)) rotated by the MOVE heading; TORSO
+            // = leg frame + 16 rotated by the AIM heading with the recoil
+            // offset (muzzle_flash_alpha * 12 units along aim + 90 deg).
+            var game = new Vector2(p.X, p.Y);
+            int legFrame = Mathf.Clamp((int)(p.MovePhase + 0.5f), 0, 14);
+            _players.Add(game, p.Heading, p.Size, frame: legFrame);
+            float recoilDir = p.AimHeading + Mathf.Pi * 0.5f;
+            Vector2 recoil = new Vector2(Mathf.Cos(recoilDir), Mathf.Sin(recoilDir))
+                * (p.MuzzleFlashAlpha * 12.0f);
+            _players.Add(game + recoil, p.AimHeading, p.Size, frame: legFrame + 16);
             // Muzzle flash at the gun, along aim, while it's firing.
             if (p.MuzzleFlashAlpha > 0.01f && _muzzleCount < _muzzles.Length)
             {

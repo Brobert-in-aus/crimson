@@ -14,7 +14,7 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class QuestSelectMenu : Node3D
 {
-    public readonly record struct QuestInfo(int Key, int Stage, int Index, string Title);
+    public readonly record struct QuestInfo(int Key, int Stage, int Index, string Title, long TimeLimitMs);
 
     private readonly List<QuestInfo> _quests = new();
     private readonly VrButton[] _stageButtons = new VrButton[5];
@@ -41,30 +41,31 @@ public sealed partial class QuestSelectMenu : Node3D
         Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
-        var title = new Label3D
-        {
-            Text = "Quests",
-            FontSize = 140,
-            PixelSize = s / 1100.0f,
-            Modulate = new Color(0.92f, 0.9f, 0.95f),
-            OutlineSize = 26,
-            OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(0.0f, s * 0.46f, 0.0f),
-        };
-        AddChild(title);
+        // Classic backdrop + the ui_textQuest title banner.
+        ClassicPanel.Build(this, s * 1.5f, s * 1.15f, z: -0.012f);
+        ClassicTitle.BuildBanner(this, "ui_textQuest.png", s * 0.55f, y: s * 0.47f);
 
-        // Stage tabs 1..5 (native: five stage icons; ours are numbered tabs).
-        float tabW = s * 0.14f;
-        float tabH = s * 0.11f;
-        float tabPitch = tabW + s * 0.035f;
+        // Stage tabs: the native ui_num1..5 stage-icon numerals (selected icon
+        // full-scale/bright, others dimmed at 0.8 — quests_menu.py).
+        float tabW = s * 0.13f;
+        float tabPitch = tabW + s * 0.045f;
         float tabX = -tabPitch * 2.0f;
         for (int i = 0; i < 5; i++)
         {
             int stage = i + 1;
             var b = new VrButton();
             AddChild(b);
-            b.Build(tabW, tabH, stage.ToString(), new Color(0.4f, 0.42f, 0.5f));
-            b.Position = new Vector3(tabX + i * tabPitch, s * 0.3f, 0.0f);
+            string iconPath = $"res://assets/sprites/ui_num{stage}.png";
+            if (ResourceLoader.Exists(iconPath)
+                && ResourceLoader.Load<Texture2D>(iconPath) is Texture2D icon)
+            {
+                b.BuildIcon(tabW, icon);
+            }
+            else
+            {
+                b.Build(tabW, tabW, stage.ToString(), new Color(0.4f, 0.42f, 0.5f));
+            }
+            b.Position = new Vector3(tabX + i * tabPitch, s * 0.32f, 0.0f);
             b.OnPress += () => SelectStage(stage);
             _stageButtons[i] = b;
         }
@@ -79,7 +80,7 @@ public sealed partial class QuestSelectMenu : Node3D
         {
             var b = new VrButton();
             AddChild(b);
-            b.Build(rowW, rowH, string.Empty, new Color(0.45f, 0.45f, 0.5f));
+            b.BuildClassic(rowW, rowH, string.Empty);
             int col = i / 5;
             int row = i % 5;
             b.Position = new Vector3(col == 0 ? -colX : colX, topY - row * rowPitch, 0.0f);
@@ -90,7 +91,7 @@ public sealed partial class QuestSelectMenu : Node3D
 
         _back = new VrButton();
         AddChild(_back);
-        _back.Build(s * 0.3f, s * 0.11f, "Back", new Color(0.5f, 0.55f, 0.66f));
+        _back.BuildClassic(s * 0.3f, s * 0.11f, "Back");
         _back.Position = new Vector3(0.0f, topY - 5.0f * rowPitch - s * 0.02f, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
@@ -160,6 +161,20 @@ public sealed partial class QuestSelectMenu : Node3D
         }
     }
 
+    /// <summary>Quest time limit in ms for a quest_level_key (0 if unknown),
+    /// for the HUD timer.</summary>
+    public long TimeLimitFor(int key)
+    {
+        foreach (QuestInfo q in _quests)
+        {
+            if (q.Key == key)
+            {
+                return q.TimeLimitMs;
+            }
+        }
+        return 0;
+    }
+
     /// <summary>Display title ("2.3 Quest Name") for a quest_level_key, for
     /// panels that need it outside the menu (e.g. Next Quest chaining).</summary>
     public string TitleFor(int key)
@@ -190,10 +205,11 @@ public sealed partial class QuestSelectMenu : Node3D
     {
         for (int i = 0; i < 5; i++)
         {
+            // Native: the selected stage icon draws full-scale and bright; the
+            // rest at 0.8 scale, dimmed (quests_menu.py stage icon pass).
             bool selected = i + 1 == _stage;
-            _stageButtons[i].SetColor(selected
-                ? new Color(0.65f, 0.35f, 0.3f)
-                : new Color(0.4f, 0.42f, 0.5f));
+            _stageButtons[i].SetColor(selected ? Colors.White : new Color(0.55f, 0.55f, 0.6f));
+            _stageButtons[i].Scale = Vector3.One * (selected ? 1.0f : 0.8f);
         }
         for (int i = 0; i < 10; i++)
         {
@@ -213,9 +229,8 @@ public sealed partial class QuestSelectMenu : Node3D
             _rows[i].SetText(locked
                 ? $"{quest.Stage}.{quest.Index}  - locked -"
                 : $"{quest.Stage}.{quest.Index}  {quest.Title}");
-            _rows[i].SetColor(locked
-                ? new Color(0.3f, 0.3f, 0.34f)
-                : new Color(0.55f, 0.3f, 0.28f));
+            // Classic skin: the colour tints the plate art.
+            _rows[i].SetColor(locked ? new Color(0.45f, 0.45f, 0.5f) : Colors.White);
         }
     }
 
@@ -239,7 +254,8 @@ public sealed partial class QuestSelectMenu : Node3D
                         q.GetProperty("key").GetInt32(),
                         q.GetProperty("stage").GetInt32(),
                         q.GetProperty("index").GetInt32(),
-                        q.GetProperty("title").GetString() ?? string.Empty));
+                        q.GetProperty("title").GetString() ?? string.Empty,
+                        q.TryGetProperty("time_limit_ms", out JsonElement tl) ? tl.GetInt64() : 0));
                 }
             }
         }

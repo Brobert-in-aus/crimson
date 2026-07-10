@@ -115,12 +115,13 @@ public partial class Main : Node3D
     private PlayGameMenu _playGameMenu = null!;
     private QuestSelectMenu _questSelect = null!;
     private QuestResultPanel _questPanel = null!;
+    private StatsMenu _statsMenu = null!;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
     /// from it) owns the screen: the sim must not tick and gameplay input must not
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
-        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
+        || _statsMenu.IsOpen || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -326,8 +327,14 @@ public partial class Main : Node3D
             LoadReticleTex("ui_itemTexts.png"));
         _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(); };
         _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
-        _mainMenu.OnStatistics += () => GD.Print("CrimsonVR: statistics screen is a later slice");
+        _mainMenu.OnStatistics += () => { _mainMenu.Close(); _statsMenu.Open(); };
         _mainMenu.OnQuit += () => GetTree().Quit();
+
+        // Statistics + high-scores browser (lifetime per-mode aggregates).
+        _statsMenu = new StatsMenu();
+        _arenaRoot.AddChild(_statsMenu);
+        _statsMenu.Build(ArenaSideMeters, _settings);
+        _statsMenu.OnBack += () => { _statsMenu.Close(); _mainMenu.Open(); };
 
         // Play Game mode select (base play_game.py): Quests / Rush / Survival.
         _playGameMenu = new PlayGameMenu();
@@ -421,6 +428,7 @@ public partial class Main : Node3D
         _questPanel.Dismiss();
         _questEndShown = false;
         RestartSession();
+        _hud.SetQuestTimeLimit(gameMode == GameModeQuests ? _questSelect.TimeLimitFor(_questKey) : 0);
         SetGameplayVisible(true);
         _audio.StopMusic();
     }
@@ -456,6 +464,18 @@ public partial class Main : Node3D
 
     /// <summary>0-based global quest index from a quest_level_key.</summary>
     private static int QuestGlobalIndex(int key) => (key / 100 - 1) * 10 + (key % 100 - 1);
+
+    /// <summary>Fold the finished run into the mode's lifetime stats (called
+    /// once per run, when the end panel first shows).</summary>
+    private void RecordRunStats()
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+        Sim.TickResult r = _sim.LastResult;
+        _settings.RecordRun(_gameMode, r.ElapsedMsSim, r.CreatureKillCount, r.ShotsFired, r.ShotsHit, r.PlayerExperience);
+    }
 
     /// <summary>Quit the current game back to the main menu: reset the sim to a
     /// fresh run, unpause, and show the menu (Play starts clean). The MAIN MENU's
@@ -989,6 +1009,7 @@ public partial class Main : Node3D
             if (_deathTicks >= DeathPacingTicks)
             {
                 _audio.PlayUi(AudioBank.UiPanel);
+                RecordRunStats();
                 if (_gameMode == GameModeQuests)
                 {
                     _questEndShown = true;
@@ -1026,6 +1047,7 @@ public partial class Main : Node3D
             if (_deathTicks >= DeathPacingTicks)
             {
                 _questEndShown = true;
+                RecordRunStats();
                 int gi = QuestGlobalIndex(_questKey);
                 if (gi == _settings.QuestUnlockIndex && gi < 49)
                 {
@@ -1260,6 +1282,11 @@ public partial class Main : Node3D
         if (_questSelect.IsOpen)
         {
             _questSelect.PollPoke(p);
+            return;
+        }
+        if (_statsMenu.IsOpen)
+        {
+            _statsMenu.PollPoke(p);
             return;
         }
         // Options / VR Settings opened from the main menu (sim gated by

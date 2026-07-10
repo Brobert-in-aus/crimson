@@ -15,6 +15,11 @@ public sealed partial class QuestResultPanel : Node3D
     private Label3D _banner = null!;
     private Label3D _questTitle = null!;
     private Label3D _timeLabel = null!;
+    // Native banner art: ui_textWellDone on completion (quest_results.py:650),
+    // ui_textReaper on failure (quest_failed.py:203). The Label3D banner stays
+    // as a fallback when the art isn't baked.
+    private MeshInstance3D? _wellDoneArt;
+    private MeshInstance3D? _reaperArt;
     private VrButton _primary = null!; // Next Quest (completed) / Retry (failed)
     private VrButton _questMenu = null!;
     private VrButton _mainMenu = null!;
@@ -35,7 +40,12 @@ public sealed partial class QuestResultPanel : Node3D
         Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
+        ClassicPanel.Build(this, s * 1.1f, s * 1.15f, z: -0.012f);
+        _wellDoneArt = ClassicTitle.BuildBanner(this, "ui_textWellDone.png", s * 0.8f, y: s * 0.40f);
+        _reaperArt = ClassicTitle.BuildBanner(this, "ui_textReaper.png", s * 0.8f, y: s * 0.40f);
+
         _banner = MakeLabel(s, y: s * 0.40f, fontSize: 170, new Color(0.95f, 0.85f, 0.6f));
+        _banner.Visible = _wellDoneArt == null; // art replaces the text banner
         _questTitle = MakeLabel(s, y: s * 0.26f, fontSize: 120, new Color(0.9f, 0.9f, 0.95f));
         _timeLabel = MakeLabel(s, y: s * 0.15f, fontSize: 100, new Color(0.8f, 0.8f, 0.88f));
 
@@ -70,9 +80,10 @@ public sealed partial class QuestResultPanel : Node3D
 
     private VrButton MakeButton(float w, float h, float y, Action onPress, Color? color = null)
     {
+        _ = color;
         var b = new VrButton();
         AddChild(b);
-        b.Build(w, h, string.Empty, color ?? new Color(0.55f, 0.3f, 0.28f));
+        b.BuildClassic(w, h, string.Empty);
         b.Position = new Vector3(0.0f, y, 0.0f);
         b.OnPress += onPress;
         return b;
@@ -87,6 +98,11 @@ public sealed partial class QuestResultPanel : Node3D
         Visible = true;
         _banner.Text = completed ? "Quest Completed!" : "Quest Failed";
         _banner.Modulate = completed ? new Color(0.7f, 0.95f, 0.6f) : new Color(0.95f, 0.5f, 0.4f);
+        if (_wellDoneArt != null && _reaperArt != null)
+        {
+            _wellDoneArt.Visible = completed;
+            _reaperArt.Visible = !completed;
+        }
         _questTitle.Text = questTitle;
         long totalSeconds = elapsedMs / 1000;
         _timeLabel.Text = $"Time  {totalSeconds / 60:D2}:{totalSeconds % 60:D2}";

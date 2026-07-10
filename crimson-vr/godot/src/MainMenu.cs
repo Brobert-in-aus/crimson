@@ -91,8 +91,7 @@ public sealed partial class MainMenu : Node3D
         _statistics.OnPress += () => OnStatistics?.Invoke();
         _quit.OnPress += () => OnQuit?.Invoke();
 
-        // No stats screen yet — keep the item for a faithful layout but inert.
-        _statistics.SetEnabled(false);
+        // Statistics opens the stats + high-scores screen (wired in Main).
 
         Visible = false;
     }

@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 14;
+    public const uint ExpectedAbiVersion = 15;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -128,6 +128,7 @@ public static partial class Sim
         public float SpreadHeat;    // ABI v11+: aim-spread heat (reticle spread ring)
         public float ShieldTimer;   // ABI v11+: shield bonus timer (> 0 = ring pair)
         public uint PerkFlags;      // ABI v11+: bit0 Doctor / bit1 Radioactive / bit2 Sharpshooter
+        public float MovePhase;     // ABI v15+: walk cycle (leg frame = clamp(int(+0.5),0,14))
 
         public const uint PerkFlagDoctor = 1u << 0;
         public const uint PerkFlagRadioactive = 1u << 1;

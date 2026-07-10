@@ -10,6 +10,18 @@ public sealed class HighscoreEntry
     public int Score { get; set; }
 }
 
+/// <summary>Lifetime per-mode aggregates for the Statistics screen, updated at
+/// each run's end (the base game keeps these in the status blob).</summary>
+public sealed class ModeStats
+{
+    public int Runs { get; set; }
+    public long PlayMs { get; set; }
+    public int Kills { get; set; }
+    public int Shots { get; set; }
+    public int Hits { get; set; }
+    public int BestScore { get; set; }
+}
+
 /// <summary>
 /// M4 slice 9: persisted user settings + highscores, stored in a Godot ConfigFile
 /// under user:// (writable on desktop and Quest). Covers the MVP settings
@@ -47,6 +59,9 @@ public sealed class UserSettings
     // its legacy cfg key); Rush gets its own. Quests have no score table.
     public readonly List<HighscoreEntry> Highscores = new();
     public readonly List<HighscoreEntry> RushHighscores = new();
+
+    // Lifetime stats per game mode (keys: mode id as string).
+    public readonly Dictionary<string, ModeStats> Stats = new();
     // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
     public readonly Dictionary<string, int> Checklist = new();
 
@@ -72,6 +87,26 @@ public sealed class UserSettings
 
         LoadHighscoreList(cf, "highscores", Highscores);
         LoadHighscoreList(cf, "highscores_rush", RushHighscores);
+
+        Stats.Clear();
+        string st = cf.GetValue("game", "stats", string.Empty).AsString();
+        if (!string.IsNullOrEmpty(st))
+        {
+            try
+            {
+                Dictionary<string, ModeStats>? map = JsonSerializer.Deserialize<Dictionary<string, ModeStats>>(st);
+                if (map != null)
+                {
+                    foreach (KeyValuePair<string, ModeStats> kv in map)
+                    {
+                        Stats[kv.Key] = kv.Value;
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
 
         Checklist.Clear();
         string ck = cf.GetValue("dev", "checklist", string.Empty).AsString();
@@ -103,6 +138,7 @@ public sealed class UserSettings
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
         cf.SetValue("game", "highscores_rush", JsonSerializer.Serialize(RushHighscores));
+        cf.SetValue("game", "stats", JsonSerializer.Serialize(Stats));
         cf.SetValue("game", "ui_info_texts", UiInfoTexts);
         cf.SetValue("audio", "sfx_volume", SfxVolume);
         cf.SetValue("audio", "music_volume", MusicVolume);
@@ -130,6 +166,34 @@ public sealed class UserSettings
         if (list.Count > 10)
         {
             list.RemoveRange(10, list.Count - 10);
+        }
+        Save();
+    }
+
+    /// <summary>The lifetime stats bucket for a game mode (created on demand).</summary>
+    public ModeStats StatsFor(int gameMode)
+    {
+        string key = gameMode.ToString();
+        if (!Stats.TryGetValue(key, out ModeStats? s))
+        {
+            s = new ModeStats();
+            Stats[key] = s;
+        }
+        return s;
+    }
+
+    /// <summary>Fold one finished run into the mode's lifetime stats.</summary>
+    public void RecordRun(int gameMode, long playMs, int kills, int shots, int hits, int score)
+    {
+        ModeStats s = StatsFor(gameMode);
+        s.Runs++;
+        s.PlayMs += playMs;
+        s.Kills += kills;
+        s.Shots += shots;
+        s.Hits += hits;
+        if (score > s.BestScore)
+        {
+            s.BestScore = score;
         }
         Save();
     }

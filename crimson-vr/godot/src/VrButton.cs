@@ -93,6 +93,130 @@ public sealed partial class VrButton : Node3D
 
     private bool _plate;
 
+    // Classic base-game button skin (ui/perk_menu.py button_draw): the
+    // ui_button plate art, a small-font label, and the native hover highlight
+    // fill with its click flash. Poke mechanics are unchanged; the native
+    // mouse-hover ramp maps to fingertip-over-footprint.
+    private bool _classic;
+    private SmallFontLabel? _smallLabel;
+    private MeshInstance3D? _hoverFill;
+    private StandardMaterial3D? _hoverMat;
+    private float _hoverT;
+    private float _pressT;
+    private ulong _lastPollMs;
+    private string _labelText = string.Empty;
+
+    private static Texture2D? _plateSm;
+    private static Texture2D? _plateMd;
+    private static bool _classicChecked;
+
+    private static void EnsureClassicPlates()
+    {
+        if (_classicChecked)
+        {
+            return;
+        }
+        _classicChecked = true;
+        const string sm = "res://assets/sprites/ui_button_64x32.png";
+        const string md = "res://assets/sprites/ui_button_128x32.png";
+        _plateSm = ResourceLoader.Exists(sm) ? ResourceLoader.Load<Texture2D>(sm) : null;
+        _plateMd = ResourceLoader.Exists(md) ? ResourceLoader.Load<Texture2D>(md) : null;
+    }
+
+    /// <summary>Build as a bare textured icon (e.g. the quest stage numerals):
+    /// the icon IS the button face, no label, no socket. Tint via SetColor.</summary>
+    public void BuildIcon(float size, Texture2D icon, float proud = 0.02f)
+    {
+        _halfW = size * 0.5f;
+        _halfH = size * 0.5f;
+        _proud = proud;
+        _pressDepth = proud * 0.1f;
+        _baseColor = Colors.White;
+        _pressedColor = new Color(1.2f, 1.2f, 1.2f);
+        _mat = new StandardMaterial3D
+        {
+            AlbedoTexture = icon,
+            AlbedoColor = _baseColor,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+        };
+        _face = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(size, size) },
+            Position = new Vector3(0.0f, 0.0f, _proud),
+            MaterialOverride = _mat,
+        };
+        AddChild(_face);
+    }
+
+    /// <summary>Build with the classic base-game button look: plate art
+    /// (ui_button 64/128 like the exe's narrow/wide buttons), small-font
+    /// label, hover fill. Falls back to the flat style when the themed assets
+    /// aren't baked.</summary>
+    public void BuildClassic(float width, float height, string? text, float proud = 0.02f)
+    {
+        EnsureClassicPlates();
+        SmallFont? font = SmallFont.Shared();
+        Texture2D? plateTex = width / height > 3.5f ? _plateMd ?? _plateSm : _plateSm ?? _plateMd;
+        if (plateTex == null || font == null)
+        {
+            Build(width, height, text, new Color(0.55f, 0.3f, 0.28f), proud);
+            return;
+        }
+
+        _classic = true;
+        _halfW = width * 0.5f;
+        _halfH = height * 0.5f;
+        _proud = proud;
+        _pressDepth = proud * 0.1f;
+        _baseColor = Colors.White;
+        _pressedColor = new Color(1.15f, 1.15f, 1.2f);
+
+        _mat = new StandardMaterial3D
+        {
+            AlbedoTexture = plateTex,
+            AlbedoColor = _baseColor,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+        };
+        _face = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(width, height) },
+            Position = new Vector3(0.0f, 0.0f, _proud),
+            MaterialOverride = _mat,
+        };
+        AddChild(_face);
+
+        // Native hover fill: inset 12px/145 horizontally, 22px/32 tall, tinted
+        // (0.5,0.5,0.7) with the hover-ramp alpha and click-flash blue bias.
+        _hoverMat = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.5f, 0.5f, 0.7f, 0.0f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        };
+        _hoverFill = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(width * (1.0f - 24.0f / 145.0f), height * (22.0f / 32.0f)) },
+            Position = new Vector3(0.0f, 0.0f, 0.002f),
+            MaterialOverride = _hoverMat,
+        };
+        _face.AddChild(_hoverFill);
+
+        // Small-font label: native buttons are 32px tall with 16px glyphs.
+        _smallLabel = new SmallFontLabel();
+        _smallLabel.Build(font, height / 32.0f, new Color(1.0f, 1.0f, 1.0f, 0.7f));
+        _smallLabel.Position = new Vector3(0.0f, 0.0f, 0.004f);
+        _smallLabel.SetText(text ?? string.Empty);
+        _labelText = text ?? string.Empty;
+        _face.AddChild(_smallLabel);
+    }
+
     /// <param name="plate">Use the original ui_menuItem neon-bar plate as the button
     /// face (dark textured bar + centred label, matching the main menu), instead of
     /// the flat colour box. <paramref name="color"/> becomes a subtle accent tint.</param>
@@ -175,6 +299,12 @@ public sealed partial class VrButton : Node3D
 
     public void SetText(string text)
     {
+        if (_smallLabel != null)
+        {
+            _labelText = text;
+            _smallLabel.SetText(text);
+            return;
+        }
         if (_label != null)
         {
             _label.Text = text;
@@ -215,6 +345,7 @@ public sealed partial class VrButton : Node3D
     public void SetFade(float alpha)
     {
         alpha = Mathf.Clamp(alpha, 0.0f, 1.0f);
+        _fadeAlpha = alpha;
         if (_mat != null)
         {
             if (alpha < 1.0f && _mat.Transparency == BaseMaterial3D.TransparencyEnum.Disabled)
@@ -231,13 +362,17 @@ public sealed partial class VrButton : Node3D
             Color o = _label.OutlineModulate;
             _label.OutlineModulate = new Color(o.R, o.G, o.B, alpha);
         }
+        _smallLabel?.SetColor(new Color(1.0f, 1.0f, 1.0f, 0.7f * alpha));
     }
 
-    /// <summary>Recolor the button (e.g. a checklist item changing pass/fail).</summary>
+    /// <summary>Recolor the button (e.g. a checklist item changing pass/fail).
+    /// In the classic skin the colour tints the plate art (White = normal).</summary>
     public void SetColor(Color color)
     {
         _baseColor = color;
-        _pressedColor = color.Lerp(Colors.White, 0.55f);
+        _pressedColor = _classic
+            ? new Color(color.R * 1.15f, color.G * 1.15f, color.B * 1.2f, color.A)
+            : color.Lerp(Colors.White, 0.55f);
         if (_mat != null && !_pressed)
         {
             _mat.AlbedoColor = _baseColor;
@@ -282,6 +417,10 @@ public sealed partial class VrButton : Node3D
 
         bool nowPressed = inside && z <= _pressDepth;
         _mat.AlbedoColor = nowPressed ? _pressedColor : _baseColor;
+        if (_classic)
+        {
+            UpdateClassicHover(overFootprint);
+        }
         // Re-arm only once the fingertip has fully LEFT the button's dead-zone
         // volume: laterally out of the footprint, OR pulled back past a clearance
         // of 2x the button depth in front of the rest face. So a hand resting/
@@ -294,11 +433,41 @@ public sealed partial class VrButton : Node3D
         }
         else if (nowPressed && !_pressed && _armed && Time.GetTicksMsec() >= _readyAtMs)
         {
+            _pressT = 1.0f; // classic click flash
             OnAnyPress?.Invoke(ClickSound);
             OnPress?.Invoke();
         }
         _pressed = nowPressed;
     }
+
+    /// <summary>Native ui_button hover/click feedback (perk_menu.py:304-346):
+    /// the fill alpha ramps 6/s up while a fingertip is over the button and
+    /// 4/s down otherwise; a press flashes the tint toward blue-white and
+    /// decays 6/s. Label text brightens from 0.7 to full while hovered.</summary>
+    private void UpdateClassicHover(bool hovered)
+    {
+        ulong now = Time.GetTicksMsec();
+        float dt = _lastPollMs == 0 ? 0.0f : Mathf.Min((now - _lastPollMs) * 0.001f, 0.1f);
+        _lastPollMs = now;
+
+        _hoverT = Mathf.Clamp(_hoverT + (hovered ? 6.0f : -4.0f) * dt, 0.0f, 1.0f);
+        _pressT = Mathf.Max(0.0f, _pressT - 6.0f * dt);
+
+        if (_hoverMat != null)
+        {
+            float g = 0.5f;
+            float b = 0.7f;
+            if (_pressT > 0.0f)
+            {
+                g = Mathf.Min(1.0f, 0.5f + _pressT * 0.5f);
+                b = Mathf.Min(1.0f, 0.7f + _pressT * 0.7f);
+            }
+            _hoverMat.AlbedoColor = new Color(g, g, b, _hoverT * _fadeAlpha);
+        }
+        _smallLabel?.SetColor(new Color(1.0f, 1.0f, 1.0f, (hovered ? 1.0f : 0.7f) * _fadeAlpha));
+    }
+
+    private float _fadeAlpha = 1.0f;
 
     private float DeadZoneClearance => _proud * 2.0f; // 2x button depth of clearance in front
 

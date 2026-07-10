@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 14;
+pub const abi_version: u32 = 15;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -161,6 +161,10 @@ pub const PlayerSnap = extern struct {
     spread_heat: f32,
     shield_timer: f32,
     perk_flags: u32,
+    // ABI v15 (append-only): the walk-cycle phase driving the trooper LEG
+    // frame (trooper.py:156 — leg = clamp(int(move_phase+0.5), 0, 14), torso =
+    // leg + 16). Presentation-only.
+    move_phase: f32,
 };
 
 pub const player_perk_flag_doctor: u32 = 1 << 0;
@@ -814,6 +818,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.radioactive)) player_perk_flag_radioactive else 0) |
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.sharpshooter)) player_perk_flag_sharpshooter else 0) |
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.ion_gun_master)) player_perk_flag_ion_gun_master else 0),
+            .move_phase = player.move_phase,
         });
     }
     for (box.runner.session.creatures.entries) |entry| {

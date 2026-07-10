@@ -136,10 +136,38 @@ public sealed partial class Hud : Node3D
         _xpValue = MakeLabel(26.0f, 74.0f, HorizontalAlignment.Left);
         _lvlValue = MakeLabel(85.0f, 79.0f, HorizontalAlignment.Left);
         MakeStaticLabel(4.0f, 78.0f, "Xp");
+
+        // Quest timer (quest mode only): elapsed / time limit, centred under
+        // the top bar. The sim enforces the timeline; this is the readout.
+        _questTimer = MakeLabel(256.0f, 74.0f, HorizontalAlignment.Center);
+        _questTimer.Visible = false;
+    }
+
+    private Label3D _questTimer = null!;
+    private long _questLimitMs;
+
+    /// <summary>Enable the quest timer with the level's time limit (0 = hide;
+    /// call per run start).</summary>
+    public void SetQuestTimeLimit(long limitMs)
+    {
+        _questLimitMs = limitMs;
+        _questTimer.Visible = limitMs > 0;
     }
 
     public void Update(in Sim.TickResult result, in Sim.PlayerSnap player)
     {
+        if (_questLimitMs > 0 && _questTimer.Visible)
+        {
+            long elapsed = result.ElapsedMsSim;
+            long secs = elapsed / 1000;
+            long limitSecs = _questLimitMs / 1000;
+            _questTimer.Text = $"{secs / 60:D2}:{secs % 60:D2} / {limitSecs / 60:D2}:{limitSecs % 60:D2}";
+            // Running out: tint toward red over the last 30s.
+            float leftMs = Mathf.Max(0.0f, _questLimitMs - elapsed);
+            float warn = 1.0f - Mathf.Clamp(leftMs / 30000.0f, 0.0f, 1.0f);
+            _questTimer.Modulate = new Color(1.0f, 1.0f - warn * 0.6f, 1.0f - warn * 0.6f);
+        }
+
         // Pulsing heart: ((sin(t*speed)^4)*4 + 14) radius, faster when hurt.
         float t = result.ElapsedMsSim / 1000.0f;
         float speed = player.Health < 30.0f ? 5.0f : 2.0f;

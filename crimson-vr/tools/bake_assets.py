@@ -182,6 +182,17 @@ def weapon_table() -> dict[str, dict]:
     }
 
 
+def small_font_widths(assets_dir: Path) -> list[int]:
+    """Per-byte advance widths for the classic small font (load/smallFnt.dat,
+    256 bytes, indexed by latin-1 byte; glyphs live in smallWhite.png as a
+    16x16 grid of 16px cells) — grim/fonts/small.py."""
+    dat = assets_dir / LOAD / "smallFnt.dat"
+    if not dat.exists():
+        print(f"WARN missing font widths: {dat}")
+        return []
+    return list(dat.read_bytes())
+
+
 def quest_table() -> list[dict]:
     """All 50 quests in global-index order, for the VR quest-select menu:
     level key = major*100 + minor (the ABI's quest_level_key), stage/index for
@@ -245,7 +256,7 @@ def main() -> None:
     # per-type projectile renderers (projectile_draw/).
     from PIL import Image
 
-    for name in ("bullet16.png", "bulletTrail.png"):
+    for name in ("bullet16.png", "bulletTrail.png", "smallWhite.png"):
         src = assets_dir / LOAD / name
         if not src.exists():
             print(f"WARN missing load sheet: {src}")
@@ -282,6 +293,11 @@ def main() -> None:
         # Game-over / results screen art (screens/results/game_over.py): the
         # Reaper / Well Done banners and the analog game-time gauge.
         "ui_textReaper.png", "ui_textWellDone.png", "ui_clockTable.png", "ui_clockPointer.png",
+        # Menu theming pass (roadmap item 10): the classic button plates
+        # (drawn at 82/145px widths from the 64/128 textures like the exe),
+        # the quest-select title art, and the 5 stage-icon numerals.
+        "ui_button_64x32.png", "ui_button_128x32.png", "ui_textQuest.png",
+        "ui_num1.png", "ui_num2.png", "ui_num3.png", "ui_num4.png", "ui_num5.png",
     ):
         src = assets_dir / UI / name
         if not src.exists():
@@ -371,6 +387,10 @@ def main() -> None:
         "weapons": weapon_table(),
         # All 50 quests (key/stage/index/title) for the quest-select menu.
         "quests": quest_table(),
+        # Classic small font: per-byte advances (smallWhite.png, 16x16 grid of
+        # 16px cells). The themed menus render text with this instead of the
+        # system font.
+        "small_font_widths": small_font_widths(assets_dir),
     }
 
     manifest_path = out_dir / "sprite_manifest.json"

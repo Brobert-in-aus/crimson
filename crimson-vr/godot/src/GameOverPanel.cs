@@ -291,9 +291,10 @@ public sealed partial class GameOverPanel : Node3D
 
     private void AddButton(string text, float x, float y, Action onPress, Color color)
     {
+        _ = color; // classic plate skin: colour no longer differentiates buttons
         var b = new VrButton();
         AddChild(b);
-        b.Build(_side * 0.44f, _side * 0.13f, text, color);
+        b.BuildClassic(_side * 0.44f, _side * 0.13f, text);
         b.Position = new Vector3(x, y, 0.004f);
         b.OnPress += onPress;
         _buttons.Add(b);
