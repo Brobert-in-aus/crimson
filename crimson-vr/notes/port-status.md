@@ -446,11 +446,19 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    optional cosmetic polish: panel-slide timelines + brief world-fade
    transitions.
 9. Credits (+ AlienZooKeeper secret, if we're feeling faithful).
-10. **Base-game menu THEMING pass** (user-flagged 2026-07-10: `playmenu`
-    checklist FAIL was theming-only). The new panels (PlayGameMenu,
-    QuestSelectMenu, QuestResultPanel) are plain colored VrButton stacks;
-    they should read like the original screens. The native building blocks
-    to port (all verified in the reference):
+10. **Base-game menu THEMING pass — DONE 2026-07-10** (in-headset validation
+    pending): baked small font rendered as glyph-quad meshes
+    (SmallFontLabel), VrButton classic skin (ui_button plates + native hover
+    fill/click flash) + icon mode, ui_menuPanel 3-slice backdrops,
+    itemTexts title rows + banner arts, quest stage icons; applied to
+    PlayGameMenu / QuestSelectMenu / QuestResultPanel / GameOverPanel
+    buttons / the new StatsMenu. Remaining polish: Options/VR-Settings
+    button retrofit, slide-in timelines, hover tooltips, hardcore checkbox.
+    Also landed in the same batch: **quest time-limit HUD timer**,
+    **player leg animation + torso recoil (ABI v15 move_phase)**, and the
+    **Statistics screen + high-scores browser** (lifetime per-mode stats
+    persisted at run end). The original scoping notes (kept for the
+    remaining polish):
     - **Buttons**: `ui_buttonSm`/`ui_buttonMd` plate art, 32px tall, width
       82 (short labels) / 145 (`button_width`, perk_menu.py:276-282); label
       in the game's SMALL FONT centered at y+10, alpha 0.7 idle → 1.0
