@@ -395,11 +395,18 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    Implemented). Follow-ups fold into other items: High-scores button → the
    high-scores browser (item 6), world-fade + slide-in → cosmetic polish
    (item 8).
-2. **Game-mode select** (two-level: modes + quest stage/level select) — the sim
-   supports all modes; needs `game_mode`/`quest_level_key` wiring, per-mode
-   highscore tables, quest results/failed screens, and **unlock-progression
-   persistence** (`quest_unlock_index`) to be meaningful. Typo'Shooter stays
-   hidden until its VR input design is settled (see VR-inapplicable table).
+2. ~~**Game-mode select**~~ — **DONE 2026-07-10 (ABI v14)**: Play Game panel
+   (Quests/Rush/Survival, native order), quest stage/level select gated by
+   persisted `quest_unlock_index` (frontier-stage default, locked rows
+   dimmed), quest completed/failed end panels (Next Quest advances the
+   frontier; Retry on death; no highscores in quests), per-mode highscore
+   tables (Rush has its own), `game_mode`/`quest_level_key`/`status_quest_
+   unlock_index` wired into session create, per-run terrain re-apply (quest
+   terrain slots). ABI v14 appends tick-result `quest_completed`. In-headset
+   validation pending. Remaining from this item: quest TIME-LIMIT HUD
+   (timer not drawn; sim enforces), quest end-note screens (5.10 finale),
+   hardcore toggle (unlock>=40), Typo'Shooter (still blocked on VR input
+   design — see VR-inapplicable table).
 3. ~~**Per-projectile-type render variants**~~ — **DONE 2026-07-10** (see the
    draw-pass table; ABI v12, validated in-headset 6/6). The Sharpshooter
    **laser sight** landed with it. ~~Still open from this cluster~~: the
