@@ -1388,6 +1388,93 @@ public sealed partial class Diorama : Node3D
         RenderGlowPool(view);
         RenderFreezeOverlay(view);
         RenderCreatureOverlays(view);
+        UpdateTargetHealthBar(view);
+    }
+
+    // ---- Target (enemy) health bar — Doctor perk (base_gameplay_mode.py
+    // _draw_target_health_bar). While the player has Doctor, the first creature
+    // within 12 game units of the aim point gets a floating bar 32 units below
+    // it (game +y): 64 units wide, colour lerping red -> green with HP ratio,
+    // deliberately subtle alphas (fg 0.2 / bg 0.08) like the original.
+    private MeshInstance3D? _targetBarBg;
+    private MeshInstance3D? _targetBarFg;
+    private StandardMaterial3D? _targetBarBgMat;
+    private StandardMaterial3D? _targetBarFgMat;
+    private const float TargetBarLift = 0.013f;
+
+    private MeshInstance3D BuildTargetBarQuad(int priority, out StandardMaterial3D mat)
+    {
+        mat = new StandardMaterial3D
+        {
+            AlbedoColor = Colors.White,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority = priority,
+        };
+        var node = new MeshInstance3D
+        {
+            Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
+            MaterialOverride = mat,
+            Visible = false,
+        };
+        AddChild(node);
+        return node;
+    }
+
+    private void UpdateTargetHealthBar(in SnapshotView view)
+    {
+        _targetBarBg ??= BuildTargetBarQuad(30, out _targetBarBgMat);
+        _targetBarFg ??= BuildTargetBarQuad(31, out _targetBarFgMat);
+
+        bool found = false;
+        if (view.Header.PlayerCount > 0)
+        {
+            Sim.PlayerSnap p = view.Players[0];
+            if ((p.PerkFlags & Sim.PlayerSnap.PerkFlagDoctor) != 0 && p.Health > 0.0f)
+            {
+                var aim = new Vector2(p.AimX, p.AimY);
+                foreach (Sim.CreatureSnap c in view.Creatures)
+                {
+                    // creature_find_in_radius: first pool-order creature within
+                    // 12 units of the aim point.
+                    if (c.MaxHp <= 0.0f || (new Vector2(c.X, c.Y) - aim).LengthSquared() > 12.0f * 12.0f)
+                    {
+                        continue;
+                    }
+                    float ratio = Mathf.Clamp(c.Hp / c.MaxHp, 0.0f, 1.0f);
+                    PlaceTargetBar(new Vector2(c.X, c.Y), ratio);
+                    found = true;
+                    break;
+                }
+            }
+        }
+        _targetBarBg.Visible = found;
+        _targetBarFg.Visible = found;
+    }
+
+    private void PlaceTargetBar(Vector2 creatureGame, float ratio)
+    {
+        float k = _arenaSideMeters / _worldSize;
+        // Bar rect in game units: 64 wide x 4 tall at (creature + (0, +32)),
+        // inner fill 2 tall x (62 * ratio) left-aligned (hud.py:220-254).
+        var barCentre = new Vector2(creatureGame.X, creatureGame.Y + 32.0f);
+        float r = (1.0f - ratio) * 0.9f + 0.1f;
+        float g = ratio * 0.9f + 0.1f;
+
+        Vector3 basePos = Mapper.GameToArenaLocal(barCentre, _arenaSideMeters, _worldSize)
+            + new Vector3(0.0f, TargetBarLift, 0.0f);
+        _targetBarBg!.Position = basePos;
+        _targetBarBg.Basis = FlatBasis.Scaled(new Vector3(64.0f * k, 1.0f, 4.0f * k));
+        _targetBarBgMat!.AlbedoColor = new Color(r * 0.6f, g * 0.6f, 0.7f * 0.6f, 0.2f * 0.4f);
+
+        float innerW = Mathf.Max(0.0f, 62.0f * ratio);
+        // Left-aligned fill: shift the centre so the fill grows from the left edge.
+        float offX = (-31.0f + innerW * 0.5f) * k;
+        _targetBarFg!.Position = basePos + new Vector3(offX, 0.0005f, 0.0f);
+        _targetBarFg.Basis = FlatBasis.Scaled(new Vector3(innerW * k, 1.0f, 2.0f * k));
+        _targetBarFgMat!.AlbedoColor = new Color(r, g, 0.7f, 0.2f);
     }
 
     /// <summary>Write interpolated instance transforms for the current frame.

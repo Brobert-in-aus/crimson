@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 10;
+pub const abi_version: u32 = 11;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -140,7 +140,21 @@ pub const PlayerSnap = extern struct {
     // 4 electric). Presentation-only. Append-only.
     weapon_icon_index: i32,
     weapon_ammo_class: i32,
+    // ABI v11 (append-only), all presentation-only:
+    // - spread_heat drives the aim-spread circle (overlays.py), adapted as a
+    //   reticle spread ring in VR.
+    // - shield_timer > 0 draws the counter-rotating SHIELD_RING pair
+    //   (trooper.py:198-243).
+    // - perk_flags: bit0 Doctor (target health bar), bit1 Radioactive (green
+    //   aura), bit2 Sharpshooter (laser sight).
+    spread_heat: f32,
+    shield_timer: f32,
+    perk_flags: u32,
 };
+
+pub const player_perk_flag_doctor: u32 = 1 << 0;
+pub const player_perk_flag_radioactive: u32 = 1 << 1;
+pub const player_perk_flag_sharpshooter: u32 = 1 << 2;
 
 pub const CreatureSnap = extern struct {
     x: f32,
@@ -320,6 +334,10 @@ const HostSessionConfig = struct {
     preserve_bugs: bool = false,
     demo_mode_active: bool = false,
     status_quest_unlock_index: i32 = 0,
+    // Debug fx showcase (VR checklist): flamer/bubblegun-only drops, forced
+    // monster-vision wire flag, and synthetic 1-in-10 aura flags on exported
+    // creatures. Presentation/debug only — never set for replays or verify.
+    debug_fx_showcase: bool = false,
 };
 
 const SessionBox = struct {
@@ -483,6 +501,7 @@ pub export fn crimson_host_session_create(
         .demo_mode_active = config.demo_mode_active,
         .status_quest_unlock_index = config.status_quest_unlock_index,
         .status_quest_unlock_index_full = config.status_quest_unlock_index,
+        .debug_fx_showcase = config.debug_fx_showcase,
     } }) catch |err| {
         gpa.destroy(box);
         setErrorFmt("session init failed: {s}", .{@errorName(err)});
@@ -662,6 +681,12 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         {
             header.monster_vision = 1;
         }
+        // Debug fx showcase: force the flag so the yellow-aura render path can
+        // be validated without grinding for the perk. Presentation-only (the
+        // wire flag is what the frontend reads); the sim is untouched.
+        if (box.runner.session.state.debug_fx_showcase) {
+            header.monster_vision = 1;
+        }
     }
 
     if (header.perk_pending_count > 0) {
@@ -739,10 +764,31 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .level = player.level,
             .weapon_icon_index = crimson_zig.weapon_data.weaponIconIndex(player.weapon.weapon_id),
             .weapon_ammo_class = crimson_zig.weapon_data.weaponAmmoClass(player.weapon.weapon_id),
+            .spread_heat = player.spread_heat,
+            .shield_timer = player.shield_timer,
+            .perk_flags = (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.doctor)) player_perk_flag_doctor else 0) |
+                (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.radioactive)) player_perk_flag_radioactive else 0) |
+                (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.sharpshooter)) player_perk_flag_sharpshooter else 0),
         });
     }
+    // Debug fx showcase: paint 1-in-10 creatures with an aura on the WIRE only
+    // (alternating red poison = SELF_DAMAGE_TICK 0x01 / black plague = the
+    // synthetic wire bit) so the overlay render path can be validated. The
+    // flags are injected into the exported snapshot, never into the sim, so
+    // gameplay (incl. the real self-damage tick) is untouched.
+    const fx_showcase = box.runner.session.state.debug_fx_showcase;
+    var showcase_idx: u32 = 0;
     for (box.runner.session.creatures.entries) |entry| {
         if (!entry.active) continue;
+        var wire_flags: u32 = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0);
+        if (fx_showcase) {
+            if (showcase_idx % 10 == 0) {
+                wire_flags |= 0x01; // poison aura (SELF_DAMAGE_TICK render bit)
+            } else if (showcase_idx % 10 == 5) {
+                wire_flags |= creature_wire_flag_plague;
+            }
+            showcase_idx += 1;
+        }
         writeStruct(out, &offset, CreatureSnap{
             .x = entry.pos.x,
             .y = entry.pos.y,
@@ -753,7 +799,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .max_hp = entry.max_hp,
             .lifecycle_stage = entry.lifecycle_stage,
             .type_id = entry.type_id,
-            .flags = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0),
+            .flags = wire_flags,
             .r = entry.color[0],
             .g = entry.color[1],
             .b = entry.color[2],

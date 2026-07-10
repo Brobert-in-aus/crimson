@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 10u
+#define CRIMSON_HOST_ABI_VERSION 11u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -165,6 +165,13 @@ typedef struct crimson_host_player_snap {
     int32_t level;
     int32_t weapon_icon_index; /* ABI v8+; ui_wicons atlas index (HUD weapon icon) */
     int32_t weapon_ammo_class; /* ABI v8+; 0 bullet / 1 fire / 2 rocket / 4 electric */
+    /* ABI v11+ (append-only), presentation-only: aim-spread heat (reticle
+     * spread ring), shield bonus timer (SHIELD_RING pair while > 0), and perk
+     * flags: bit0 Doctor (target health bar), bit1 Radioactive (green aura),
+     * bit2 Sharpshooter (laser sight). */
+    float spread_heat;
+    float shield_timer;
+    uint32_t perk_flags;
 } crimson_host_player_snap;
 
 typedef struct crimson_host_creature_snap {
@@ -342,8 +349,12 @@ int32_t crimson_host_last_error(uint8_t *buf, uint32_t len);
  *   { "seed": 1, "game_mode": 1, "quest_level_key": 101, "player_count": 1,
  *     "world_size": 1024.0, "tick_rate": 60, "detail_preset": 5,
  *     "gore_disabled": 0, "hardcore": false, "preserve_bugs": false,
- *     "demo_mode_active": false, "status_quest_unlock_index": 0 }
- * Unknown fields are ignored. */
+ *     "demo_mode_active": false, "status_quest_unlock_index": 0,
+ *     "debug_fx_showcase": false }
+ * Unknown fields are ignored. debug_fx_showcase is a DEBUG aid (weapon drops
+ * become flamethrower/bubblegun; the exported snapshot forces monster_vision
+ * and paints 1-in-10 creatures with poison/plague aura flags) - never set it
+ * for replay-verified sessions. */
 int32_t crimson_host_session_create(const uint8_t *config_json,
                                     uint32_t config_len,
                                     uint64_t *out_handle);

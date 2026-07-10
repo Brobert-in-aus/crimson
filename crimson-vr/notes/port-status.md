@@ -201,12 +201,12 @@ panel — art, UV math, alphas and thresholds verified matching `Hud.cs` vs
 
 | Element / behavior | Base | VR status |
 |---|---|---|
-| **Enemy/target health bar** | `hud.py:245-254` — floating bar, color lerps red→green with HP ratio; drawn every frame in all modes | **Missing & was untracked.** High gameplay-readability value. |
-| XP roll-up animation | `HudState.smooth_xp` (`hud.py:95-120`) — displayed XP eases toward target | VR snaps (`Hud.cs:187`). |
-| Ammo "+N" overflow text | shown when clip > bar cap (`hud.py:521-527`) | Missing; and VR clamps bars at 20 while base allows up to 30 (`HUD_AMMO_BAR_LIMIT`, `hud.py:46-47` vs `AmmoBarMax`, `Hud.cs:30`) — clips 21-30 under-display. |
-| HUD fade on perk-menu open/close | whole HUD alpha eases (`survival_mode.py:486`) | VR hard-toggles `_hud.Visible` (`Main.cs:302`). |
-| Reload indicator | world-space clock gauge from `reload_timer/max` (`overlays.py:53-89`, `draw.py:482-537`) | Missing; data already crosses the ABI (`Sim.cs:118-119`) but is only used for haptics. |
-| Aim spread circle | radius scales with `player.spread_heat` (`overlays.py:22-50`) | Missing — **adapt as a reticle spread ring**, not a world overlay (see VR-inapplicable table). **`spread_heat` is not in the ABI at all.** "Custom (VR reticles)" masked both this and the reload gauge. |
+| **Enemy/target health bar** | `hud.py:245-254` — floating bar, color lerps red→green with HP ratio; **Doctor-perk-gated** (`base_gameplay_mode.py:625-669`, first creature within 12u of aim) | **DONE 2026-07-10** (Diorama.UpdateTargetHealthBar; faithful colours/alphas/geometry, Doctor-gated). |
+| XP roll-up animation | `HudState.smooth_xp` (`hud.py:95-120`) — displayed XP eases toward target | **DONE 2026-07-10** (Hud.SmoothXp, faithful step rule). |
+| Ammo "+N" overflow text | shown when clip > bar cap (`hud.py:521-527`) | **DONE 2026-07-10**: bars = clip up to 30, >30 collapses to 20 (native rule), "+ N" text after the row. |
+| HUD fade on perk-menu open/close | whole HUD alpha eases (`survival_mode.py:486`) | **DONE 2026-07-10**: 400 ms ease (also fades on death), via GeometryInstance3D.Transparency. |
+| Reload indicator | world-space clock gauge from `reload_timer/max` (`overlays.py:53-89`, `draw.py:482-537`) | **DONE 2026-07-10**: ui_clockTable/ui_clockPointer gauge at the aim reticle, pointer = progress×360°. In-headset check pending (pointer direction). |
+| Aim spread circle | radius scales with `player.spread_heat` (`overlays.py:22-50`) | **DONE 2026-07-10** as the planned reticle spread ring: `spread_heat` now crosses the ABI (**v11**), ring radius = max(6, dist×heat×0.5)+2 game units at the aim point. |
 | Bonus-HUD slots | 16 slots sliding in/out from screen-left, `ui_indPanel` + icon + timer bar(s), dual-timer 2P variant, compact mode (`bonuses/hud.py`, `hud.py:738-874`) | Missing (needs bonus-HUD state over ABI). |
 | Weapon-name popup | on weapon change: panel + icon + name, 1s fade-in/hold/1s fade-out via `aux_timer` (`hud.py:876-936`) | Missing. |
 | Quest HUD | sliding top panel, progress panel + green bar, analog clock (pointer = 6°/s), mm:ss text; XP/bonus HUD shifts down 80px (`hud.py:530-634,62`) | Missing (mode not surfaced). |
@@ -409,10 +409,11 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    carries the needed fields. Add the **sprite-effect pool** stream to the ABI
    while touching it, plus shield ring / radioactive aura / laser sight (need
    small ABI additions: shield timer, perk flags).
-4. **HUD behaviors**: enemy health bar (untracked until now), reload gauge (data
-   already in ABI), XP roll-up, ammo "+N"/30-bar cap, HUD fade; then bonus-HUD
-   slots + weapon-name popup (need bonus-HUD state over the ABI); `spread_heat`
-   → ABI for the aim circle.
+4. ~~**HUD behaviors**~~ — **mostly DONE 2026-07-10** (enemy health bar, reload
+   gauge, XP roll-up, ammo "+N"/30-cap, HUD fade, spread ring; ABI v11 also
+   exports `shield_timer` + perk flags for Radioactive/Sharpshooter — their
+   RENDER passes are still open). Remaining: bonus-HUD slots + weapon-name
+   popup (need bonus-HUD state over the ABI).
 5. **Audio behaviors**: first-hit random game-tune + crossfade + `gt2_harppen`;
    music-volume-0 stop; reflex-boost pitch (Godot `pitch_scale`); wire "UI Info
    texts" to bonus hover labels or mark it inert.

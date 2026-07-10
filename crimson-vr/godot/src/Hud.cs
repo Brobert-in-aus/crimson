@@ -27,7 +27,10 @@ public sealed partial class Hud : Node3D
     private const float NativeSpan = 580.0f;    // bbox width (-68..512)
 
     // Ammo bars enlarged for VR readability (native was 6-wide / 6-step / 16-tall).
-    private const int AmmoBarMax = 20;         // HUD_AMMO_BAR_CLAMP
+    // Native rule (hud.py:46-47, 498-500): up to 30 bars are drawn; a clip
+    // BIGGER than 30 collapses to 20 bars (+ the "+ N" overflow text).
+    private const int AmmoBarLimit = 30;       // HUD_AMMO_BAR_LIMIT
+    private const int AmmoBarClamp = 20;       // HUD_AMMO_BAR_CLAMP
     private const float AmmoBarStep = 11.0f;
     private const float AmmoBarW = 10.0f;
     private const float AmmoBarH = 30.0f;
@@ -54,11 +57,15 @@ public sealed partial class Hud : Node3D
     private MeshInstance3D? _weaponIcon;
     private StandardMaterial3D? _weaponMat;
     private int _weaponIconShown = -2;
-    private readonly MeshInstance3D[] _ammoBars = new MeshInstance3D[AmmoBarMax];
-    private readonly StandardMaterial3D[] _ammoMats = new StandardMaterial3D[AmmoBarMax];
+    private readonly MeshInstance3D[] _ammoBars = new MeshInstance3D[AmmoBarLimit];
+    private readonly StandardMaterial3D[] _ammoMats = new StandardMaterial3D[AmmoBarLimit];
+    private Label3D _ammoExtra = null!; // "+ N" overflow text (clip > bar count)
     private Label3D _xpValue = null!;
     private Label3D _lvlValue = null!;
     private MeshInstance3D? _xpFill;
+    private int _xpSmoothed; // HudState.smooth_xp roll-up (displayed XP eases to target)
+    private float _fade = 1.0f;
+    private bool _fadeApplied;
 
     private const float HealthBarW = 120.0f; // native health bar width
     private const float XpProgressW = 54.0f;
@@ -106,11 +113,14 @@ public sealed partial class Hud : Node3D
         _weaponIcon = TexQuad(_wicons, 206.0f, 6.0f, 96.0f, 48.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _weaponMat);
 
         // Ammo bars (per-shot, enlarged), textured by ammo class in Update.
-        for (int i = 0; i < AmmoBarMax; i++)
+        for (int i = 0; i < AmmoBarLimit; i++)
         {
             _ammoBars[i] = TexQuad(null, AmmoBaseX + i * AmmoBarStep, AmmoBaseY, AmmoBarW, AmmoBarH, new Color(1, 1, 1, 0.8f), priority: 43, out _ammoMats[i]);
             _ammoBars[i].Visible = false;
         }
+        // "+ N" overflow text when the clip exceeds the drawn bars (hud.py:521-527).
+        _ammoExtra = MakeLabel(AmmoBaseX, AmmoBaseY + 10.0f, HorizontalAlignment.Left);
+        _ammoExtra.Visible = false;
 
         // XP progress fill (left-aligned, updated in Update).
         _xpFill = ColorQuad(26.0f, 91.0f, XpProgressW, 4.0f, new Color(0.1f, 0.3f, 0.6f, 1.0f), priority: 43);
@@ -171,10 +181,17 @@ public sealed partial class Hud : Node3D
             0 => _ammoTex.Length > 0 ? _ammoTex[0] : null,
             _ => _ammoTex.Length > 3 ? _ammoTex[3] : null,
         };
-        int bars = Mathf.Clamp(player.ClipSize, 0, AmmoBarMax);
+        // Native bar-count rule: clip_size bars up to 30; a clip over 30
+        // collapses to 20 bars, and loaded shots beyond the drawn bars show as
+        // "+ N" text after the row (hud.py:498-500, 521-527).
+        int bars = Mathf.Max(player.ClipSize, 0);
+        if (bars > AmmoBarLimit)
+        {
+            bars = AmmoBarClamp;
+        }
         int loaded = Mathf.Max(Mathf.FloorToInt(player.Ammo), 0);
         bool showAmmo = ammoTex != null && player.WeaponIconIndex >= 0;
-        for (int i = 0; i < AmmoBarMax; i++)
+        for (int i = 0; i < AmmoBarLimit; i++)
         {
             bool on = showAmmo && i < bars;
             _ammoBars[i].Visible = on;
@@ -184,17 +201,76 @@ public sealed partial class Hud : Node3D
                 _ammoMats[i].AlbedoColor = new Color(1, 1, 1, i < loaded ? 0.8f : 0.8f * 0.3f);
             }
         }
+        bool overflow = showAmmo && loaded > bars;
+        _ammoExtra.Visible = overflow;
+        if (overflow)
+        {
+            _ammoExtra.Text = $"+ {loaded - bars}";
+            _ammoExtra.Position = new Vector3(LocalX(AmmoBaseX + bars * AmmoBarStep + 8.0f), LocalY(AmmoBaseY + 10.0f), 0.001f);
+        }
 
-        // XP panel text + intra-level progress bar.
-        _xpValue.Text = $"{player.Experience}";
+        // XP panel text + intra-level progress bar. Displayed XP rolls toward
+        // the target like HudState.smooth_xp (hud.py:95-120) instead of snapping.
+        int xp = SmoothXp(player.Experience);
+        _xpValue.Text = $"{xp}";
         _lvlValue.Text = $"{player.Level}";
         if (_xpFill != null)
         {
-            float ratio = SurvivalProgress(player.Experience, player.Level);
+            float ratio = SurvivalProgress(xp, player.Level);
             _xpFill.Visible = ratio > 0.001f;
             _xpFill.Scale = new Vector3(Mathf.Max(ratio, 0.001f), 1.0f, 1.0f);
             float cx = 26.0f + XpProgressW * 0.5f * ratio;
             _xpFill.Position = new Vector3(LocalX(cx), LocalY(91.0f + 2.0f), _xpFill.Position.Z);
+        }
+    }
+
+    // Port of HudState.smooth_xp: step = max(1, dt_ms/2) per frame, scaled up
+    // by diff/100 when more than 1000 behind; approaches from either side.
+    // Called once per 60 Hz sim tick (dt_ms ~= 16).
+    private int SmoothXp(int target)
+    {
+        if (target <= 0)
+        {
+            _xpSmoothed = 0;
+            return 0;
+        }
+        int smoothed = _xpSmoothed;
+        if (smoothed == target)
+        {
+            return smoothed;
+        }
+        int step = Mathf.Max(1, 16 / 2);
+        int diff = Mathf.Abs(smoothed - target);
+        if (diff > 1000)
+        {
+            step *= diff / 100;
+        }
+        smoothed = smoothed < target
+            ? Mathf.Min(smoothed + step, target)
+            : Mathf.Max(smoothed - step, target);
+        _xpSmoothed = smoothed;
+        return smoothed;
+    }
+
+    /// <summary>Whole-HUD fade (0 = hidden, 1 = opaque): the base game eases the
+    /// HUD out/in over the perk-menu transition (survival_mode.py:486) instead
+    /// of hard-toggling. Applied via GeometryInstance3D.Transparency so every
+    /// quad/label fades without touching its material alphas.</summary>
+    public void SetFade(float fade)
+    {
+        fade = Mathf.Clamp(fade, 0.0f, 1.0f);
+        if (fade == _fade && _fadeApplied)
+        {
+            return;
+        }
+        _fade = fade;
+        _fadeApplied = true;
+        foreach (Node child in GetChildren())
+        {
+            if (child is GeometryInstance3D g)
+            {
+                g.Transparency = 1.0f - fade;
+            }
         }
     }
 

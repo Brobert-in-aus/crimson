@@ -40,6 +40,9 @@ pub const SessionConfig = struct {
     quest_stage_major: i32 = 0,
     quest_stage_minor: i32 = 0,
     demo_mode_active: bool = false,
+    // Debug-only fx showcase (VR checklist): weapon drops become flamethrower/
+    // bubblegun so the glow pool is exercised. Never set for replays/verify.
+    debug_fx_showcase: bool = false,
     initial_creature_pool: []const replay_codec.ReplayCreatureSlotResidue = &.{},
 
     pub fn fromReplayHeader(header: replay_codec.ReplayHeader) DeterministicSessionError!SessionConfig {
@@ -213,6 +216,7 @@ pub const DeterministicSession = struct {
         session.state.hardcore = config.hardcore;
         session.state.preserve_bugs = config.preserve_bugs;
         session.state.demo_mode_active = config.demo_mode_active;
+        session.state.debug_fx_showcase = config.debug_fx_showcase;
         session.state.quest_fail_retry_count = config.quest_fail_retry_count;
         session.state.status_quest_unlock_index = config.status_quest_unlock_index;
         session.state.status_quest_unlock_index_full = config.status_quest_unlock_index_full;

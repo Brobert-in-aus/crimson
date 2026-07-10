@@ -38,8 +38,14 @@ public partial class Main : Node3D
     private const float GripThreshold = 0.7f;
 
     // Survival, seed 1, standard 1024 world at 60 Hz (mirrors HostSessionConfig).
-    private const string SurvivalConfig =
-        "{\"seed\":1,\"game_mode\":1,\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60}";
+    // With the Debug setting on at boot, debug_fx_showcase is added: weapon
+    // drops become flamethrower/bubblegun, the monster-vision wire flag is
+    // forced, and 1-in-10 exported creatures carry a poison/plague aura flag —
+    // so the aura + glow-pool render paths can be validated on demand
+    // (checklist items that otherwise need rare spawns/drops).
+    private string SurvivalConfig =>
+        "{\"seed\":1,\"game_mode\":1,\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
+        + (_settings.Debug ? ",\"debug_fx_showcase\":true" : string.Empty) + "}";
 
     private XROrigin3D _origin = null!;
     private XRCamera3D _camera = null!;
@@ -62,6 +68,9 @@ public partial class Main : Node3D
     private Diorama _diorama = null!;
     private AudioBank _audio = null!;
     private Hud _hud = null!;
+    private Sim.PlayerSnap _lastPlayer;   // latest tick's player snap (aim overlays)
+    private bool _hasPlayerSnap;
+    private float _hudFade = 1.0f;        // eased HUD alpha (perk menu / death fade)
     private PerkMenu _perkMenu = null!;
     private int _perkChoice = -1; // pending poke choice for the next tick, -1 = none
     private int _prevPerkPending; // last tick's pending-pick count, for the level-up cue
@@ -646,6 +655,120 @@ public partial class Main : Node3D
         AddChild(_rightReticle);
         AddChild(_leftGuide);
         AddChild(_rightGuide);
+        BuildAimOverlays();
+    }
+
+    // ---- Aim-hand overlays: reload clock gauge + spread ring ----
+    // Base game (draw_aim_indicators): a 32-unit ui_clockTable/ui_clockPointer
+    // gauge at the aim point while reloading (pointer = reload progress * 360),
+    // and the aim-spread circle radius = max(6, dist(player, aim) *
+    // spread_heat * 0.5). The circle is adapted as a flat RING around the aim
+    // reticle per the VR disposition table (no filled world overlay).
+    private Node3D _reloadGauge = null!;
+    private MeshInstance3D _reloadPointer = null!;
+    private MeshInstance3D _spreadRing = null!;
+    private const float ReloadGaugeUnits = 40.0f; // native 32; slightly larger for VR
+
+    private void BuildAimOverlays()
+    {
+        float k = ArenaSideMeters / GameWorldSize;
+        float gauge = ReloadGaugeUnits * k;
+        _reloadGauge = new Node3D { Visible = false };
+        AddChild(_reloadGauge);
+        _reloadGauge.AddChild(new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(gauge, gauge) },
+            MaterialOverride = FlatOverlayMaterial(LoadReticleTex("ui_clockTable.png"), priority: 5),
+        });
+        _reloadPointer = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(gauge, gauge) },
+            Position = new Vector3(0.0f, 0.0005f, 0.0f),
+            MaterialOverride = FlatOverlayMaterial(LoadReticleTex("ui_clockPointer.png"), priority: 6),
+        };
+        _reloadGauge.AddChild(_reloadPointer);
+
+        _spreadRing = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(1.0f, 1.0f) },
+            MaterialOverride = FlatOverlayMaterial(MakeRingTexture(96), priority: 4,
+                color: new Color(1.0f, 1.0f, 1.0f, 0.4f)),
+            Visible = false,
+        };
+        AddChild(_spreadRing);
+    }
+
+    /// <summary>Position/refresh the aim-hand overlays each rendered frame: the
+    /// reload clock at the aim reticle while reloading (pointer sweep = reload
+    /// progress) and the spread ring sized by the live spread_heat (ABI v11).</summary>
+    private void UpdateAimOverlays()
+    {
+        bool inPlay = !MenuOwnsScreen && _sim != null && _hasPlayerSnap
+            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active;
+        XRController3D aimHand = _handSwap ? _leftHand : _rightHand;
+        if (!inPlay || !aimHand.GetHasTrackingData() || _lastPlayer.Health <= 0.0f)
+        {
+            _reloadGauge.Visible = false;
+            _spreadRing.Visible = false;
+            return;
+        }
+        ComputeReticle(aimHand, out _, out Vector3 world);
+
+        bool reloading = _lastPlayer.ReloadActive != 0
+            && _lastPlayer.ReloadTimerMax > 1e-6f && _lastPlayer.ReloadTimer > 1e-6f;
+        _reloadGauge.Visible = reloading;
+        if (reloading)
+        {
+            _reloadGauge.GlobalPosition = world + new Vector3(0.0f, 0.004f, 0.0f);
+            float progress = Mathf.Clamp(_lastPlayer.ReloadTimer / _lastPlayer.ReloadTimerMax, 0.0f, 1.0f);
+            // Clockwise sweep seen from above; flip the sign if it reads backward
+            // in-headset.
+            _reloadPointer.RotationDegrees = new Vector3(0.0f, -progress * 360.0f, 0.0f);
+        }
+
+        // Spread ring radius: max(6, dist(player, aim) * spread_heat * 0.5)
+        // game units (+2 for the native outline), centred on the aim point.
+        var pos = new Vector2(_lastPlayer.X, _lastPlayer.Y);
+        var aim = new Vector2(_lastPlayer.AimX, _lastPlayer.AimY);
+        float radius = Mathf.Max(6.0f, pos.DistanceTo(aim) * _lastPlayer.SpreadHeat * 0.5f);
+        float k = ArenaSideMeters / GameWorldSize;
+        float side = (radius + 2.0f) * 2.0f * k;
+        _spreadRing.Visible = true;
+        _spreadRing.GlobalPosition = world + new Vector3(0.0f, 0.003f, 0.0f);
+        _spreadRing.Scale = new Vector3(side, 1.0f, side);
+    }
+
+    private static StandardMaterial3D FlatOverlayMaterial(Texture2D? tex, int priority, Color? color = null)
+        => new()
+        {
+            AlbedoTexture = tex,
+            AlbedoColor = color ?? Colors.White,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            // Flip V like the reticles: texture top reads toward the far edge
+            // from the player's downward view.
+            Uv1Scale = new Vector3(1.0f, -1.0f, 1.0f),
+            RenderPriority = priority,
+        };
+
+    /// <summary>Thin white ring with soft edges (the VR spread-circle stand-in).</summary>
+    private static ImageTexture MakeRingTexture(int size)
+    {
+        var img = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+        float c = (size - 1) * 0.5f;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float d = new Vector2((x - c) / c, (y - c) / c).Length();
+                // Band centred at r=0.92 with ~0.07 half-width, soft falloff.
+                float a = Mathf.Clamp(1.0f - Mathf.Abs(d - 0.92f) / 0.07f, 0.0f, 1.0f);
+                img.SetPixel(x, y, new Color(1.0f, 1.0f, 1.0f, a * a));
+            }
+        }
+        return ImageTexture.CreateFromImage(img);
     }
 
     private static Texture2D? LoadReticleTex(string name)
@@ -814,6 +937,8 @@ public partial class Main : Node3D
             Sim.PlayerSnap p = snap.Players[0];
             _playerGame = new Vector2(p.X, p.Y);
             _hud.Update(result, p);
+            _lastPlayer = p;
+            _hasPlayerSnap = true;
             health = p.Health;
             reloadActive = p.ReloadActive != 0;
         }
@@ -910,6 +1035,13 @@ public partial class Main : Node3D
             UpdateHandVisual(_leftHand, _leftReticle, _leftGuide, isMoveHand: !_handSwap);
             UpdateHandVisual(_rightHand, _rightReticle, _rightGuide, isMoveHand: _handSwap);
         }
+        UpdateAimOverlays();
+
+        // Ease the whole HUD out over the perk pick and on death instead of
+        // hard-toggling (survival_mode.py hud_alpha, 400 ms transition).
+        float hudTarget = (_perkMenu.Active || (_sim != null && _sim.GameOver)) ? 0.0f : 1.0f;
+        _hudFade = Mathf.MoveToward(_hudFade, hudTarget, (float)delta / 0.4f);
+        _hud.SetFade(_hudFade);
 
         if (_sim != null)
         {
