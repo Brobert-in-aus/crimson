@@ -993,12 +993,27 @@ public partial class Main : Node3D
             return;
         }
 
+        // Death with BANKED level-ups (e.g. the 50/50 bonus killing you with
+        // picks pending): resolve the perk picks FIRST, like the base game —
+        // the death flow otherwise stacked the name-entry keyboard over the
+        // perk cards and the sim never ticked again (no death audio). The
+        // normal tick path below keeps running (dead player input is inert),
+        // feeding the perk choice and draining audio; the death flow starts
+        // once no picks remain.
+        if (_sim.GameOver && _sim.LastResult.PerkPendingCount > 0
+            && !_keyboard.Active && !_gameOverPanel.Active && !_questPanel.Active)
+        {
+            if (!_perkMenu.Active && !_pauseMenu.IsPaused)
+            {
+                _perkMenu.Open();
+            }
+        }
         // Death handling (base game_over.py flow): a short pacing delay over the
         // frozen world, then name entry (only when the score ranks, like the base
         // top-100 gate — ours is the local top-10), then the results panel with
         // Play Again / Main Menu. Sim frozen throughout. Quest mode swaps the
         // score card for the Quest Failed panel (no highscores in quests).
-        if (_sim.GameOver)
+        if (_sim.GameOver && _sim.LastResult.PerkPendingCount == 0)
         {
             if (_keyboard.Active || _gameOverPanel.Active)
             {

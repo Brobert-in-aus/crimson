@@ -44,8 +44,8 @@ public sealed partial class Hud : Node3D
     // Health bar stretched much taller than the native 9px sliver so it reads in
     // VR (doubled again after in-headset feedback; fills the 64-tall top bar).
     private const float HealthBarX = 36.0f;
-    private const float HealthBarY = 4.0f;
-    private const float HealthBarH = 26.0f;
+    private const float HealthBarY = 2.0f;   // hugs the bar top: breathing room over the ammo row
+    private const float HealthBarH = 22.0f;
     private const float HeartBase = 40.0f; // heart quad base size (native ~32)
 
     // Bottom of the laid-out native content (XP panel 60..113): used to anchor

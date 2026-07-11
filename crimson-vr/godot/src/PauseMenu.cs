@@ -75,9 +75,10 @@ public sealed partial class PauseMenu : Node3D
             Modulate = new Color(1.0f, 0.9f, 0.3f),
             OutlineSize = 28,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-            Position = new Vector3(edge + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.16f),
+            // 0.22s along the face: far enough that a wide "x12" never reaches
+            // back over the button label (0.16s clipped the button edge).
+            Position = new Vector3(edge + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.22f),
             RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f),
-            NoDepthTest = true,
             Visible = false,
         };
         AddChild(_levelUpBadge);
