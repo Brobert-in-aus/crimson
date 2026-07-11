@@ -75,7 +75,7 @@ public sealed partial class Hud : Node3D
     private float _fade = 1.0f;
     private bool _fadeApplied;
 
-    private const float HealthBarW = 472.0f; // full top-bar width (36..508)
+    private const float HealthBarW = 446.0f; // full top-bar width (36..482; the box art's body ends ~486)
     private const float XpProgressW = 54.0f;
 
     private static Texture2D? Load(string name)
