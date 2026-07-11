@@ -19,11 +19,15 @@ public sealed partial class StatsMenu : Node3D
     private SmallFontLabel? _survivalScores;
     private SmallFontLabel? _rushScores;
     private Label3D? _fallbackText;
+    private VrButton _weapons = null!;
+    private VrButton _perks = null!;
     private VrButton _back = null!;
 
     public bool IsOpen { get; private set; }
 
     public event Action? OnBack;
+    public event Action? OnWeapons;
+    public event Action? OnPerks;
 
     public void Build(float arenaSideMeters, UserSettings settings)
     {
@@ -57,10 +61,24 @@ public sealed partial class StatsMenu : Node3D
             AddChild(_fallbackText);
         }
 
+        // Bottom row like the flat stats panel's button stack: the databases
+        // live behind the Statistics screen (panels/stats.py Weapons/Perks).
+        _weapons = new VrButton();
+        AddChild(_weapons);
+        _weapons.BuildClassic(s * 0.3f, s * 0.11f, "Weapons");
+        _weapons.Position = new Vector3(-s * 0.38f, -s * 0.48f, 0.0f);
+        _weapons.OnPress += () => OnWeapons?.Invoke();
+
+        _perks = new VrButton();
+        AddChild(_perks);
+        _perks.BuildClassic(s * 0.3f, s * 0.11f, "Perks");
+        _perks.Position = new Vector3(0.0f, -s * 0.48f, 0.0f);
+        _perks.OnPress += () => OnPerks?.Invoke();
+
         _back = new VrButton();
         AddChild(_back);
         _back.BuildClassic(s * 0.3f, s * 0.11f, "Back");
-        _back.Position = new Vector3(0.0f, -s * 0.48f, 0.0f);
+        _back.Position = new Vector3(s * 0.38f, -s * 0.48f, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
         Visible = false;
@@ -80,6 +98,8 @@ public sealed partial class StatsMenu : Node3D
         IsOpen = true;
         Visible = true;
         Refresh();
+        _weapons.ResetPress();
+        _perks.ResetPress();
         _back.ResetPress();
     }
 
@@ -95,6 +115,8 @@ public sealed partial class StatsMenu : Node3D
         {
             return;
         }
+        _weapons.PollPoke(probes);
+        _perks.PollPoke(probes);
         _back.PollPoke(probes);
     }
 

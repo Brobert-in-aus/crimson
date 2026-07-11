@@ -16,14 +16,16 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-11 (theming/stats/legs round
-    // all green after the alignment + draw-order fixes). New batch: the
-    // smaller poke spheres and the permanent ground bake (blood + corpse
-    // stamps into the terrain RT — kill a lot and check nothing pops out).
+    // validation surface changes. Cleared 2026-07-11 (poke spheres + ground
+    // bake both green). New batch: the Databases slice (Statistics ->
+    // Weapons/Perks), plus re-checks for the last round's uncommitted-to-
+    // checklist fixes (HP bar trim/spacing, death with banked level-ups).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("handsphere", "Poke spheres: smaller feels right"),
-        ("groundbake", "Blood/corpses bake in, no pop-out"),
+        ("dbweapons", "Weapons DB: list/scroll/detail+icon"),
+        ("dbperks", "Perks DB: prereq + wrapped desc"),
+        ("hudtrim", "HP bar inside the box, spaced right"),
+        ("deathperks", "50/50 death, banked perks: cards->score"),
     };
 
     private const int PerPage = 4;

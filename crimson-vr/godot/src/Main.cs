@@ -116,12 +116,14 @@ public partial class Main : Node3D
     private QuestSelectMenu _questSelect = null!;
     private QuestResultPanel _questPanel = null!;
     private StatsMenu _statsMenu = null!;
+    private DatabaseMenu _databaseMenu = null!;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
     /// from it) owns the screen: the sim must not tick and gameplay input must not
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
-        || _statsMenu.IsOpen || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
+        || _statsMenu.IsOpen || _databaseMenu.IsOpen
+        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -335,6 +337,23 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_statsMenu);
         _statsMenu.Build(ArenaSideMeters, _settings);
         _statsMenu.OnBack += () => { _statsMenu.Close(); _mainMenu.Open(); };
+
+        // Unlocked Weapons/Perks Databases, behind Statistics like the flat
+        // game (panels/stats.py -> panels/databases_*.py).
+        _databaseMenu = new DatabaseMenu();
+        _arenaRoot.AddChild(_databaseMenu);
+        _databaseMenu.Build(ArenaSideMeters);
+        _statsMenu.OnWeapons += () =>
+        {
+            _statsMenu.Close();
+            _databaseMenu.Open(DatabaseMenu.Db.Weapons, _settings.QuestUnlockIndex);
+        };
+        _statsMenu.OnPerks += () =>
+        {
+            _statsMenu.Close();
+            _databaseMenu.Open(DatabaseMenu.Db.Perks, _settings.QuestUnlockIndex);
+        };
+        _databaseMenu.OnBack += () => { _databaseMenu.Close(); _statsMenu.Open(); };
 
         // Play Game mode select (base play_game.py): Quests / Rush / Survival.
         _playGameMenu = new PlayGameMenu();
@@ -1307,6 +1326,11 @@ public partial class Main : Node3D
         if (_statsMenu.IsOpen)
         {
             _statsMenu.PollPoke(p);
+            return;
+        }
+        if (_databaseMenu.IsOpen)
+        {
+            _databaseMenu.PollPoke(p);
             return;
         }
         // Options / VR Settings opened from the main menu (sim gated by

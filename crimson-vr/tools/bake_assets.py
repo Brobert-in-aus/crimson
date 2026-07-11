@@ -168,15 +168,21 @@ def effect_atlas_table(particles_size: list[int] | None) -> dict[str, dict] | No
 
 
 def weapon_table() -> dict[str, dict]:
-    """weapon_id -> {name, icon_index} (WEAPON_BY_ID), for the game-over score
-    card's most-used-weapon row (icon from ui_wicons, 8x8 grid, frame =
-    icon_index*2 spanning two cells — same layout the HUD uses)."""
+    """weapon_id -> {name, icon_index, stats} (WEAPON_BY_ID): the name/icon feed
+    the game-over score card's most-used-weapon row (icon from ui_wicons, 8x8
+    grid, frame = icon_index*2 spanning two cells — same layout the HUD uses);
+    the stats feed the Unlocked Weapons Database detail pane (databases_weapons
+    .py: rpm = int(60/shot_cooldown), n/a fire rate when ammo_class == 1)."""
     from src.crimson.weapons import WEAPON_BY_ID, weapon_display_name
 
     return {
         str(int(wid)): {
             "name": weapon_display_name(wid, preserve_bugs=False),
             "icon_index": int(meta.icon_index),
+            "clip_size": int(meta.clip_size),
+            "reload_time": float(meta.reload_time),
+            "rpm": int(60.0 / float(meta.shot_cooldown)),
+            "ammo_class": int(meta.ammo_class or 0),
         }
         for wid, meta in WEAPON_BY_ID.items()
     }
@@ -208,6 +214,11 @@ def quest_table() -> list[dict]:
             "index": quest.level.minor,
             "title": str(quest.title),
             "time_limit_ms": int(quest.time_limit_ms),
+            # Unlock rewards (0 = none): the databases recompute native
+            # availability from these + the persisted quest unlock index
+            # (perks/availability.py, weapon_runtime/availability.py).
+            "unlock_weapon_id": int(quest.unlock_weapon_id or 0),
+            "unlock_perk_id": int(quest.unlock_perk_id or 0),
         }
         for quest in all_quests()
     ]
@@ -230,6 +241,14 @@ def perk_descriptions() -> dict[str, str]:
     from src.crimson.perks.ids import PERK_BY_ID, perk_display_description
 
     return {str(int(pid)): perk_display_description(pid, preserve_bugs=False) for pid in PERK_BY_ID}
+
+
+def perk_prereqs() -> dict[str, int]:
+    """perk_id -> FIRST prereq perk id, for the Perks Database 'Requires:' line
+    (databases_perks.py shows only prereq[0]). Perks without prereqs are omitted."""
+    from src.crimson.perks.ids import PERK_BY_ID
+
+    return {str(int(pid)): int(meta.prereq[0]) for pid, meta in PERK_BY_ID.items() if meta.prereq}
 
 
 def main() -> None:
@@ -382,6 +401,8 @@ def main() -> None:
         "perks": perk_names(),
         # Perk id -> description for the VR perk-menu '?' press-and-hold popups.
         "perk_descriptions": perk_descriptions(),
+        # Perk id -> first prereq perk id (Perks Database "Requires:" line).
+        "perk_prereqs": perk_prereqs(),
         # Weapon id -> display name + ui_wicons icon index, for the game-over
         # score card's most-used-weapon row (ABI v10 most_used_weapon_id).
         "weapons": weapon_table(),
