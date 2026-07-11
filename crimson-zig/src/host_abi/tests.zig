@@ -14,6 +14,7 @@ const crimson_zig = @import("crimson_zig");
 const exports = @import("exports.zig");
 
 const live_runner = crimson_zig.live_runner;
+const state_mod = crimson_zig.state;
 const verify_native = crimson_zig.verify_native;
 
 const survival_fixture = @embedFile("testdata/gameplay_diff_capture.survival.run1.crd");
@@ -55,8 +56,39 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v15" {
-    try std.testing.expectEqual(@as(u32, 15), exports.crimson_host_abi_version());
+test "abi version reports v16" {
+    try std.testing.expectEqual(@as(u32, 16), exports.crimson_host_abi_version());
+}
+
+test "abi weapon usage counts: seeded via config, queryable" {
+    // Seed shotgun (id 3) with 7 prior uses. Spawn does NOT increment usage
+    // (resetPlayers hands out the 10-round pistol without going through
+    // weapon assignment — native parity; only pickups increment), so right
+    // after create the query must return the seeded values verbatim.
+    const config_json =
+        \\{"seed": 99, "game_mode": 1, "player_count": 1, "world_size": 1024.0,
+        \\ "tick_rate": 60,
+        \\ "status_weapon_usage_counts": [0,0,0,7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        \\  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        \\  0,0,0,0]}
+    ;
+    var handle: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_session_create(
+        config_json.ptr,
+        @intCast(config_json.len),
+        &handle,
+    ));
+    defer exports.crimson_host_session_destroy(handle);
+
+    // Size query.
+    const needed = exports.crimson_host_status_weapon_usage(handle, null, 0);
+    try std.testing.expectEqual(-@as(i32, @intCast(state_mod.weapon_count_size)), needed);
+
+    var counts: [state_mod.weapon_count_size]u32 = undefined;
+    const written = exports.crimson_host_status_weapon_usage(handle, &counts, counts.len);
+    try std.testing.expectEqual(@as(i32, @intCast(state_mod.weapon_count_size)), written);
+    try std.testing.expectEqual(@as(u32, 7), counts[3]); // seeded roundtrip
+    try std.testing.expectEqual(@as(u32, 0), counts[1]); // spawn pistol does NOT count
 }
 
 test "abi verify passthrough matches native verifier byte for byte" {

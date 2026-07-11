@@ -264,6 +264,16 @@ public sealed class SimSession : IDisposable
         return info;
     }
 
+    /// <summary>Current per-weapon usage counts (ABI v16): the persisted values
+    /// seeded at create plus this run's pickup assigns. Index = weapon id,
+    /// slot 0 unused (save-status parity). Null on error.</summary>
+    public uint[]? WeaponUsageCounts()
+    {
+        var counts = new uint[Sim.WeaponUsageSlots];
+        int rc = Sim.StatusWeaponUsage(Handle, counts, (uint)counts.Length);
+        return rc == counts.Length ? counts : null;
+    }
+
     /// <summary>Tear down and recreate the session with the same config.</summary>
     public void Restart() => Restart(_configJson);
 

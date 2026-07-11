@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 15u
+#define CRIMSON_HOST_ABI_VERSION 16u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -385,16 +385,31 @@ int32_t crimson_host_last_error(uint8_t *buf, uint32_t len);
  *     "world_size": 1024.0, "tick_rate": 60, "detail_preset": 5,
  *     "gore_disabled": 0, "hardcore": false, "preserve_bugs": false,
  *     "demo_mode_active": false, "status_quest_unlock_index": 0,
+ *     "status_quest_unlock_index_full": 0,
+ *     "status_weapon_usage_counts": [0, ...],  (v16; exactly 54 entries)
  *     "debug_fx_showcase": false }
  * Unknown fields are ignored. debug_fx_showcase is a DEBUG aid: each reload
  * press cycles the player to the next real weapon (arsenal tour). Visual
  * debug forcing (auras, shield ring, laser sight, monster vision) lives in
- * the frontend now - never set this for replay-verified sessions. */
+ * the frontend now - never set this for replay-verified sessions.
+ * v16 status fields (save-status parity): status_quest_unlock_index_full
+ * advances only on HARDCORE quest completions natively and gates the
+ * Splitter Gun; status_weapon_usage_counts (index = weapon id, slot 0
+ * unused, omit for all zeros) feeds the 50% used-weapon drop reroll. */
 int32_t crimson_host_session_create(const uint8_t *config_json,
                                     uint32_t config_len,
                                     uint64_t *out_handle);
 
 void crimson_host_session_destroy(uint64_t handle);
+
+/* v16: reads the session's CURRENT per-weapon usage counts (the seeded
+ * config values plus this run's weapon-pickup assigns; index = weapon id,
+ * slot 0 unused). Writes up to max entries into out_counts and returns the
+ * count written (54), or the negative required count if out_counts is NULL
+ * or max is too small. Persist at run end like the native save status. */
+int32_t crimson_host_status_weapon_usage(uint64_t handle,
+                                         uint32_t *out_counts,
+                                         uint32_t max);
 
 /* Advances exactly one fixed tick (1/tick_rate seconds).
  * inputs must contain one entry per player. out_result may be NULL. */

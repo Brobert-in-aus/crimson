@@ -14,12 +14,12 @@ namespace CrimsonVR;
 /// poke-to-select (rows are VrButtons), and the scrollwheel becomes page
 /// up/down poke arrows (stepping VISIBLE_ROWS-1 like the flat PageUp/PageDown).
 ///
-/// Unlocked sets are recomputed from the baked quest unlock table + the
-/// persisted quest unlock index, mirroring perks/availability.py and
-/// weapon_runtime/availability.py. Documented deviations: the flat weapons DB
-/// also includes any weapon with a lifetime usage count (VR doesn't track
-/// usage), and the Splitter Gun's unlock_index_full >= 40 gate uses the
-/// frontier index (the only one VR persists).
+/// Unlocked sets are recomputed exactly like the flat game: the baked quest
+/// unlock table + the persisted unlock indices rebuild the availability lists
+/// (perks/availability.py, weapon_runtime/availability.py), the persisted
+/// per-weapon usage counts (ABI v16 save-status parity) add every weapon the
+/// player has ever picked up, and availability is evaluated under the
+/// last-selected game mode like the flat config.gameplay.mode.
 /// </summary>
 public sealed partial class DatabaseMenu : Node3D
 {
@@ -173,11 +173,11 @@ public sealed partial class DatabaseMenu : Node3D
         return t;
     }
 
-    public void Open(Db db, int unlockIndex)
+    public void Open(Db db, UserSettings settings)
     {
         _db = db;
         _ids.Clear();
-        _ids.AddRange(db == Db.Weapons ? BuildWeaponIds(unlockIndex) : BuildPerkIds(unlockIndex));
+        _ids.AddRange(db == Db.Weapons ? BuildWeaponIds(settings) : BuildPerkIds(settings.QuestUnlockIndex));
         _scroll = 0;
         _selectedId = _ids.Count > 0 ? _ids[0] : -1;
         IsOpen = true;
@@ -383,25 +383,38 @@ public sealed partial class DatabaseMenu : Node3D
 
     // ---- unlocked-set rules (perks/availability.py, weapon_runtime/availability.py) ----
 
-    private IEnumerable<int> BuildWeaponIds(int unlockIndex)
+    private IEnumerable<int> BuildWeaponIds(UserSettings settings)
     {
-        var ids = new SortedSet<int>
-        {
-            1, // pistol, always
-            // Survival mode extras (the flat DB evaluates availability under the
-            // configured mode, survival by default): assault rifle/shotgun/smg.
-            2, 3, 5,
-        };
-        for (int i = 0; i < unlockIndex && i < _questUnlockWeapons.Count; i++)
+        // build_weapon_availability: pistol + quest unlock rewards up to the
+        // frontier index + the survival trio when the (persisted) mode is
+        // survival + the Splitter Gun once the FULL (hardcore) unlock index
+        // reaches 40.
+        var ids = new SortedSet<int> { 1 };
+        for (int i = 0; i < settings.QuestUnlockIndex && i < _questUnlockWeapons.Count; i++)
         {
             if (_questUnlockWeapons[i] > 0)
             {
                 ids.Add(_questUnlockWeapons[i]);
             }
         }
-        if (unlockIndex >= 40)
+        if (settings.LastGameMode == 1)
+        {
+            ids.Add(2); // assault rifle
+            ids.Add(3); // shotgun
+            ids.Add(5); // submachine gun
+        }
+        if (settings.QuestUnlockIndexFull >= 40)
         {
             ids.Add(29); // splitter gun (native gate: quest_unlock_index_full >= 0x28)
+        }
+        // databases_weapons.py additionally includes every weapon with a
+        // lifetime usage count (i.e. ever picked up).
+        for (int id = 1; id < settings.WeaponUsageCounts.Length; id++)
+        {
+            if (settings.WeaponUsageCounts[id] != 0)
+            {
+                ids.Add(id);
+            }
         }
         ids.RemoveWhere(id => !_weapons.ContainsKey(id));
         return ids;

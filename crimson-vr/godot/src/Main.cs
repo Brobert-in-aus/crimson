@@ -49,8 +49,12 @@ public partial class Main : Node3D
         + (_gameMode == GameModeQuests ? $",\"quest_level_key\":{_questKey}" : string.Empty)
         + ",\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
         // The persisted quest-unlock progression also gates the survival/rush
-        // weapon-drop pool, like the base game's status blob.
+        // weapon-drop pool, like the base game's status blob. The FULL index
+        // (hardcore-only progression) gates the Splitter Gun; the usage counts
+        // drive the native 50% used-weapon drop reroll.
         + $",\"status_quest_unlock_index\":{_settings.QuestUnlockIndex}"
+        + $",\"status_quest_unlock_index_full\":{_settings.QuestUnlockIndexFull}"
+        + $",\"status_weapon_usage_counts\":[{string.Join(',', _settings.WeaponUsageCounts)}]"
         + (_settings.Debug ? ",\"debug_fx_showcase\":true" : string.Empty) + "}";
 
     // Sim.GameModeId values (game_ids.zig).
@@ -330,7 +334,7 @@ public partial class Main : Node3D
         _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(); };
         _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
         _mainMenu.OnStatistics += () => { _mainMenu.Close(); _statsMenu.Open(); };
-        _mainMenu.OnQuit += () => GetTree().Quit();
+        _mainMenu.OnQuit += () => { CaptureWeaponUsage(); GetTree().Quit(); };
 
         // Statistics + high-scores browser (lifetime per-mode aggregates).
         _statsMenu = new StatsMenu();
@@ -346,12 +350,12 @@ public partial class Main : Node3D
         _statsMenu.OnWeapons += () =>
         {
             _statsMenu.Close();
-            _databaseMenu.Open(DatabaseMenu.Db.Weapons, _settings.QuestUnlockIndex);
+            _databaseMenu.Open(DatabaseMenu.Db.Weapons, _settings);
         };
         _statsMenu.OnPerks += () =>
         {
             _statsMenu.Close();
-            _databaseMenu.Open(DatabaseMenu.Db.Perks, _settings.QuestUnlockIndex);
+            _databaseMenu.Open(DatabaseMenu.Db.Perks, _settings);
         };
         _databaseMenu.OnBack += () => { _databaseMenu.Close(); _statsMenu.Open(); };
 
@@ -437,6 +441,9 @@ public partial class Main : Node3D
     private void StartRun(int gameMode, int questKey = 0)
     {
         _gameMode = gameMode;
+        // The base game persists the selected mode (config.gameplay.mode);
+        // the weapons database evaluates availability under it.
+        _settings.LastGameMode = gameMode;
         if (questKey > 0)
         {
             _questKey = questKey;
@@ -460,6 +467,10 @@ public partial class Main : Node3D
         {
             return;
         }
+        // Harvest the outgoing session's weapon usage before it's destroyed —
+        // native save-status parity: usage accrues on every pickup and
+        // survives aborted runs too, not just completed ones.
+        CaptureWeaponUsage();
         _sim.Restart(SessionConfig);
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
@@ -483,6 +494,19 @@ public partial class Main : Node3D
 
     /// <summary>0-based global quest index from a quest_level_key.</summary>
     private static int QuestGlobalIndex(int key) => (key / 100 - 1) * 10 + (key % 100 - 1);
+
+    /// <summary>Persist the live session's per-weapon usage counts (ABI v16
+    /// query) into settings — the VR stand-in for the native save-status
+    /// blob. Called before every session teardown/restart and on app exit.</summary>
+    private void CaptureWeaponUsage()
+    {
+        uint[]? counts = _sim?.WeaponUsageCounts();
+        if (counts != null)
+        {
+            _settings.WeaponUsageCounts = counts;
+            _settings.Save();
+        }
+    }
 
     /// <summary>Fold the finished run into the mode's lifetime stats (called
     /// once per run, when the end panel first shows).</summary>

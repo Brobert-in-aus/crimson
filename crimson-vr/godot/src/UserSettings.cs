@@ -55,6 +55,22 @@ public sealed class UserSettings
     // playable; completing quest N (== the index) advances it to N+1.
     public int QuestUnlockIndex;
 
+    // Full unlock index (base game_status quest_unlock_index_full): advances
+    // only on HARDCORE quest completions (quests/results.py) and gates the
+    // Splitter Gun. Stays 0 until the hardcore toggle slice lands.
+    public int QuestUnlockIndexFull;
+
+    // Lifetime per-weapon usage counts (base save-status weapon_usage_counts,
+    // index = weapon id, slot 0 unused). Seeded into every sim session (the
+    // native 50% used-weapon drop reroll reads them) and read back at run end;
+    // also feeds the Unlocked Weapons Database inclusion rule.
+    public uint[] WeaponUsageCounts = new uint[Sim.WeaponUsageSlots];
+
+    // Last-selected game mode (base config.gameplay.mode is persisted): the
+    // Unlocked Weapons Database evaluates availability under it (the survival
+    // trio only lists in survival). 1 = survival.
+    public int LastGameMode = 1;
+
     // Per-mode local highscore tables: Survival keeps the original list (and
     // its legacy cfg key); Rush gets its own. Quests have no score table.
     public readonly List<HighscoreEntry> Highscores = new();
@@ -84,6 +100,28 @@ public sealed class UserSettings
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
         QuestUnlockIndex = cf.GetValue("game", "quest_unlock_index", QuestUnlockIndex).AsInt32();
+        QuestUnlockIndexFull = cf.GetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull).AsInt32();
+        LastGameMode = cf.GetValue("game", "last_game_mode", LastGameMode).AsInt32();
+        string wu = cf.GetValue("game", "weapon_usage", string.Empty).AsString();
+        if (!string.IsNullOrEmpty(wu))
+        {
+            try
+            {
+                uint[]? counts = JsonSerializer.Deserialize<uint[]>(wu);
+                if (counts != null)
+                {
+                    // Re-shape to the current slot count so an ABI size change
+                    // can't emit a config array the sim refuses to parse.
+                    for (int i = 0; i < WeaponUsageCounts.Length && i < counts.Length; i++)
+                    {
+                        WeaponUsageCounts[i] = counts[i];
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
 
         LoadHighscoreList(cf, "highscores", Highscores);
         LoadHighscoreList(cf, "highscores_rush", RushHighscores);
@@ -136,6 +174,9 @@ public sealed class UserSettings
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
+        cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);
+        cf.SetValue("game", "last_game_mode", LastGameMode);
+        cf.SetValue("game", "weapon_usage", JsonSerializer.Serialize(WeaponUsageCounts));
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
         cf.SetValue("game", "highscores_rush", JsonSerializer.Serialize(RushHighscores));
         cf.SetValue("game", "stats", JsonSerializer.Serialize(Stats));

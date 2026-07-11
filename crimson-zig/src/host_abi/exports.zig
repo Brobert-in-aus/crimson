@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 15;
+pub const abi_version: u32 = 16;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -378,6 +378,18 @@ const HostSessionConfig = struct {
     preserve_bugs: bool = false,
     demo_mode_active: bool = false,
     status_quest_unlock_index: i32 = 0,
+    // ABI v16: the full unlock index advances only on HARDCORE quest
+    // completions natively (quests/results.py advance_quest_unlocks) — it
+    // gates the Splitter Gun. Distinct from the frontier index; defaults 0.
+    status_quest_unlock_index_full: i32 = 0,
+    // ABI v16: persisted per-weapon usage counts (save-status parity: index =
+    // weapon id, slot 0 unused). The sim increments on every weapon assign and
+    // uses nonzero counts for the 50% used-weapon drop reroll
+    // (weapon_pick_random_available). Exactly weapon_count_size entries when
+    // present; omit for all zeros. Read back via
+    // crimson_host_status_weapon_usage after (or during) a run.
+    status_weapon_usage_counts: [state_mod.weapon_count_size]u32 =
+        [_]u32{0} ** state_mod.weapon_count_size,
     // Debug fx showcase (VR debug menu): each reload press cycles the player
     // to the next real weapon so the whole arsenal can be toured in one run.
     // The visual force-toggles (auras, shield ring, laser, monster vision)
@@ -546,7 +558,8 @@ pub export fn crimson_host_session_create(
         .preserve_bugs = config.preserve_bugs,
         .demo_mode_active = config.demo_mode_active,
         .status_quest_unlock_index = config.status_quest_unlock_index,
-        .status_quest_unlock_index_full = config.status_quest_unlock_index,
+        .status_quest_unlock_index_full = config.status_quest_unlock_index_full,
+        .status_weapon_usage_counts = config.status_weapon_usage_counts,
         .debug_fx_showcase = config.debug_fx_showcase,
     } }) catch |err| {
         gpa.destroy(box);
@@ -566,6 +579,33 @@ pub export fn crimson_host_session_create(
     session_slots[slot_index] = box;
     out.* = handleFor(slot_index, box.generation);
     return ok;
+}
+
+/// ABI v16: read the session's CURRENT per-weapon usage counts (persisted-in
+/// values + this run's assigns; save-status parity, index = weapon id, slot 0
+/// unused). Writes up to `max` u32 entries; returns the count written, or
+/// -needed if the buffer is too small (call with null/0 to size). The host
+/// persists these at run end so the used-weapon drop reroll and the Unlocked
+/// Weapons Database survive across sessions like the native save status.
+pub export fn crimson_host_status_weapon_usage(
+    handle: u64,
+    out_counts: ?[*]u32,
+    max: u32,
+) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    const needed: u32 = @intCast(state_mod.weapon_count_size);
+    const out = out_counts orelse return -@as(i32, @intCast(needed));
+    if (max < needed) return -@as(i32, @intCast(needed));
+    const counts = &box.runner.session.state.status_weapon_usage_counts;
+    var idx: usize = 0;
+    while (idx < state_mod.weapon_count_size) : (idx += 1) {
+        out[idx] = counts.get(@enumFromInt(idx));
+    }
+    return @intCast(needed);
 }
 
 pub export fn crimson_host_session_destroy(handle: u64) void {

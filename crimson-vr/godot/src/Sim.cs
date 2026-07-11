@@ -22,7 +22,12 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 15;
+    public const uint ExpectedAbiVersion = 16;
+
+    // Save-status weapon usage table size (Zig state.weapon_count_size):
+    // index = weapon id, slot 0 unused. The session-create JSON array must be
+    // exactly this long (std.json fixed-array parse).
+    public const int WeaponUsageSlots = 54;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostInput
@@ -376,6 +381,12 @@ public static partial class Sim
 
     [LibraryImport(LibName, EntryPoint = "crimson_host_session_destroy")]
     public static partial void SessionDestroy(ulong handle);
+
+    // ABI v16: current per-weapon usage counts (seeded config values + this
+    // run's pickup assigns). Returns entries written (WeaponUsageSlots) or the
+    // negative required count.
+    [LibraryImport(LibName, EntryPoint = "crimson_host_status_weapon_usage")]
+    public static partial int StatusWeaponUsage(ulong handle, Span<uint> outCounts, uint max);
 
     [LibraryImport(LibName, EntryPoint = "crimson_host_session_tick")]
     public static partial int SessionTick(ulong handle, ReadOnlySpan<HostInput> inputs, uint inputCount, out TickResult result);
