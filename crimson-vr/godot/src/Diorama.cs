@@ -271,7 +271,10 @@ public sealed partial class Diorama : Node3D
     private int _corpseCursor;
     private int _corpseCount;
     private const int CorpseCap = 1024;
-    private const float CorpseLift = 0.0018f; // above blood, below shadows
+    // Just above the floor plane: the dying-creature sprite drops here while
+    // its corpse stamp bakes into the ground BELOW it — a taller lift read as
+    // a parallax-separated double corpse in-headset.
+    private const float CorpseLift = 0.0004f;
     private int _corpseGrid = 4;
     private float _corpseUvScale = 0.25f;
     private readonly Dictionary<int, int> _corpseFrames = new(); // type_id -> bodyset frame

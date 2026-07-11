@@ -29,8 +29,12 @@ public sealed partial class Hud : Node3D
     // Ammo bars enlarged for VR readability (native was 6-wide / 6-step / 16-tall).
     // Native rule (hud.py:46-47, 498-500): up to 30 bars are drawn; a clip
     // BIGGER than 30 collapses to 20 bars (+ the "+ N" overflow text).
-    private const int AmmoBarLimit = 30;       // HUD_AMMO_BAR_LIMIT
-    private const int AmmoBarClamp = 20;       // HUD_AMMO_BAR_CLAMP
+    // Native HUD_AMMO_BAR_LIMIT/CLAMP are 30/20, but our ENLARGED bars (11u
+    // pitch from x=318) run off the 512u top-bar art past 16 bars (in-headset:
+    // big clips spilled onto bare terrain). Clamp to what the art fits; the
+    // "+ N" overflow label covers the rest.
+    private const int AmmoBarLimit = 16;
+    private const int AmmoBarClamp = 14;
     private const float AmmoBarStep = 11.0f;
     private const float AmmoBarW = 10.0f;
     private const float AmmoBarH = 30.0f;
