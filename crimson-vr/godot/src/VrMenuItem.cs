@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -7,7 +7,7 @@ namespace CrimsonVR;
 /// A floating, pressable main-menu item rendered from the ORIGINAL Crimsonland
 /// menu art (PLAN M4): the ui_menuItem plate with a label sub-rect from the
 /// ui_itemTexts atlas composited on top. Unlike <see cref="VrButton"/> it has no
-/// fabricated socket/box chrome — the textured plate itself sits proud of the
+/// fabricated socket/box chrome â€” the textured plate itself sits proud of the
 /// menu and is poked in with a controller tip (the visible hand sphere is the
 /// collider, matching VrButton), firing <see cref="OnPress"/> on the press-down
 /// edge at ~90% depression.
@@ -28,7 +28,7 @@ public sealed partial class VrMenuItem : Node3D
     private const float AtlasH = 256.0f;
     private const float LabelRectW = 122.0f;
     private const float LabelRectH = 32.0f;
-    // The hand-marker sphere (this radius) is the collider — matches VrButton.
+    // The hand-marker sphere (this radius) is the collider â€” matches VrButton.
     private const float PokeRadius = 0.02f;
 
     private Node3D _group = null!;   // plate + label; slides along local Z on poke
@@ -37,7 +37,7 @@ public sealed partial class VrMenuItem : Node3D
     private float _proud;
     private float _pressDepth;
     private bool _pressed;
-    // Must be seen released once before it can fire again — stops an instant press
+    // Must be seen released once before it can fire again â€” stops an instant press
     // when the menu is (re)shown with a fingertip already inside the item volume.
     private bool _armed;
     // Presses are also ignored for a short settle window after the item is shown,
@@ -69,7 +69,7 @@ public sealed partial class VrMenuItem : Node3D
 
         // The full ui_menuItem art (rail + plate). Falls back to a translucent grey
         // slab if the art isn't staged.
-        _plateMat = FlatTexMat(plateTex, new Color(0.55f, 0.57f, 0.65f, 0.9f), priority: 30);
+        _plateMat = FlatTexMat(plateTex, new Color(0.55f, 0.57f, 0.65f, 0.9f), priority: 65); // poke-UI band (58-67): over the HUD
         var plate = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(width, height) },
@@ -97,7 +97,7 @@ public sealed partial class VrMenuItem : Node3D
                 TextureRepeat = false,
                 Uv1Scale = new Vector3(LabelRectW / AtlasW, LabelRectH / AtlasH, 1.0f),
                 Uv1Offset = new Vector3(0.0f, labelRow * LabelRectH / AtlasH, 0.0f),
-                RenderPriority = 31,
+                RenderPriority = 66,
             };
             var label = new MeshInstance3D
             {
@@ -195,7 +195,7 @@ public sealed partial class VrMenuItem : Node3D
     }
 
     /// <summary>Reset to the unpressed rest state. Call when the menu is shown OR
-    /// hidden — it re-arms and starts the settle window.</summary>
+    /// hidden â€” it re-arms and starts the settle window.</summary>
     public void ResetPress()
     {
         _pressed = false;

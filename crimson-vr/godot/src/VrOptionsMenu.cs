@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -44,7 +44,7 @@ public sealed partial class VrOptionsMenu : Node3D
         float wp = s * 0.62f;
         float hp = s * 0.78f;
 
-        // No full-screen backing panel — the terrain shows through, matching the
+        // No full-screen backing panel â€” the terrain shows through, matching the
         // original menu. The buttons keep their own dark neon-bar plate. (panelTex
         // is unused for now; kept in the signature for a future fitted panel skin.)
         _ = panelTex;
@@ -137,7 +137,7 @@ public sealed partial class VrOptionsMenu : Node3D
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                RenderPriority = 25,
+                RenderPriority = 59,
             },
         });
     }

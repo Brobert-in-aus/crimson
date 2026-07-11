@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -7,7 +7,7 @@ namespace CrimsonVR;
 /// M4 slice 4: the settings menu (MVP). A panel above the arena, opened from the
 /// pause menu's Settings button, holding the non-deferred settings: a hand-swap
 /// toggle (which hand moves) and a dead-zone grab-drag slider, plus Back. Arena
-/// scale/height + seated calibration are their own later slices (PLAN §5, M4).
+/// scale/height + seated calibration are their own later slices (PLAN Â§5, M4).
 ///
 /// A child of ArenaRoot; hidden until opened. Reflects the current values and
 /// raises events Main applies live. Layout first-pass; tune in-headset.
@@ -228,7 +228,7 @@ public sealed partial class SettingsMenu : Node3D
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                RenderPriority = 25,
+                RenderPriority = 59,
             },
         });
     }

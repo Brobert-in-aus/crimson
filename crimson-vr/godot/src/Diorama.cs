@@ -1070,7 +1070,7 @@ public sealed partial class Diorama : Node3D
     /// <summary>The base terrain-slot texture applied to the arena floor (null
     /// until <see cref="ApplyTerrainInfo"/> succeeds), so the surrounding world
     /// floor can share the same ground.</summary>
-    public Texture2D? FloorTexture => _floorMaterial?.AlbedoTexture as Texture2D;
+    public Texture2D? FloorTexture => CleanGroundTexture ?? _floorMaterial?.AlbedoTexture as Texture2D;
 
     /// <summary>Texture the floor from the session's terrain info (ABI v3):
     /// generate the faithful ground render target from the three slots + seed
@@ -1083,18 +1083,22 @@ public sealed partial class Diorama : Node3D
         {
             return;
         }
-        if (GenerateGround(info) is Texture2D ground)
+        if (GenerateGround(info) is Texture2D ground && _floor != null)
         {
-            _floorMaterial.AlbedoTexture = ground;
-            _floorMaterial.AlbedoColor = Colors.White;
-            // The RT is the full world square: map it 1:1 onto the PLAYABLE zone
-            // (the floor mesh extends FloorMarginScale past it; repeat wraps the
-            // margin, which the border strip + fog keep unobtrusive). The RT is
-            // already composed art — sample it smooth, not Nearest.
-            _floorMaterial.Uv1Scale = new Vector3(FloorMarginScale, FloorMarginScale, 1.0f);
-            _floorMaterial.Uv1Offset = new Vector3(-(FloorMarginScale - 1.0f) * 0.5f, -(FloorMarginScale - 1.0f) * 0.5f, 0.0f);
-            _floorMaterial.TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear;
+            // Two-texture floor: the PLAYABLE zone samples the baked RT
+            // (scatter + permanent blood/corpses); the margin band samples the
+            // CLEAN scatter-only RT wrapped — so bakes never mirror outside
+            // the playfield (in-headset finding: the wrap duplicated corpses).
+            var mat = new ShaderMaterial { Shader = FloorShader };
+            mat.SetShaderParameter("baked", ground);
+            mat.SetShaderParameter("clean_t", CleanGroundTexture ?? ground);
+            mat.SetShaderParameter("margin_scale", FloorMarginScale);
+            _floor.MaterialOverride = mat;
             return;
+        }
+        if (_floor != null)
+        {
+            _floor.MaterialOverride = _floorMaterial; // fallback path below
         }
         if (_terrainSlots.TryGetValue(info.Slot0, out string? file)
             && ResourceLoader.Exists(SpriteDir + file)
@@ -1295,6 +1299,26 @@ public sealed partial class Diorama : Node3D
             _corpses.VisibleInstanceCount = _corpseCount;
         }
     }
+
+    // Playable zone = baked RT (blood/corpses); margin band = clean scatter,
+    // wrapped. Unshaded like the old floor material; fog still applies.
+    private Shader? _floorShader;
+    private Shader FloorShader => _floorShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled;
+            uniform sampler2D baked : source_color;
+            uniform sampler2D clean_t : source_color, repeat_enable;
+            uniform float margin_scale = 1.3;
+            void fragment() {
+                vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
+                bool inside = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
+                vec3 c = inside ? texture(baked, uv).rgb : texture(clean_t, fract(uv)).rgb;
+                ALBEDO = c;
+            }
+            """,
+    };
 
     /// <summary>Bodyset frame for a creature type (manifest map, id fallback).</summary>
     private int CorpseFrameFor(int creatureTypeId)

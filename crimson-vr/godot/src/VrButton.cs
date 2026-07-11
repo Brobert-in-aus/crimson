@@ -269,6 +269,9 @@ public sealed partial class VrButton : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = _plate ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            // Poke-UI band (58-67): transparent plate faces must beat the HUD
+            // (40-44). Opaque flat faces depth-test and don't care.
+            RenderPriority = _plate ? 65 : 0,
         };
         _face = new MeshInstance3D
         {
@@ -299,6 +302,7 @@ public sealed partial class VrButton : Node3D
             // bleed through overlapping panels/keys.
             Position = new Vector3(0.0f, 0.0f, 0.004f),
             Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
+            RenderPriority = 67, // poke-UI band: button labels top the stack
         };
         _face.AddChild(_label);
     }

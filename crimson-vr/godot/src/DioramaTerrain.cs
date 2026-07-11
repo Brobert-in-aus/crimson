@@ -23,8 +23,18 @@ public sealed partial class Diorama
 
     private SubViewport? _groundViewport;
     private GroundStampCanvas? _groundCanvas;
+    // A second scatter-only RT with NO bakes: the surrounding world floor and
+    // the arena's margin band sample this, so blood/corpses never mirror
+    // outside the playable zone (the baked RT is playfield-only, like native).
+    private SubViewport? _groundCleanViewport;
+    private GroundStampCanvas? _groundCleanCanvas;
+    private Texture2D? _cleanGroundTex;
     private Texture2D? _bakeParticles; // decal art (effect atlas)
     private Texture2D? _bakeBodyset;   // corpse frames (4x4)
+
+    /// <summary>The bake-free ground texture for surfaces OUTSIDE the playable
+    /// zone (world floor, margin band); null until generated.</summary>
+    public Texture2D? CleanGroundTexture => _cleanGroundTex;
 
     /// <summary>True when terrain FX can bake permanently into the ground RT
     /// (native behavior) instead of the ring-buffered quad fallback.</summary>
@@ -113,11 +123,29 @@ public sealed partial class Diorama
             _groundViewport.AddChild(_groundCanvas);
         }
 
+        if (_groundCleanViewport == null)
+        {
+            _groundCleanViewport = new SubViewport
+            {
+                Size = new Vector2I(size, size),
+                RenderTargetUpdateMode = SubViewport.UpdateMode.Once,
+                Disable3D = true,
+            };
+            AddChild(_groundCleanViewport);
+            _groundCleanCanvas = new GroundStampCanvas();
+            _groundCleanViewport.AddChild(_groundCleanCanvas);
+        }
+
         _groundViewport.Size = new Vector2I(size, size);
+        _groundCleanViewport.Size = new Vector2I(size, size);
         _groundCanvas!.Configure(size, info.TerrainSeed, baseTex, overlayTex, detailTex);
+        _groundCleanCanvas!.Configure(size, info.TerrainSeed, baseTex, overlayTex, detailTex);
         _groundCanvas.QueueRedraw();
-        // Re-render the one-shot target for this generation.
+        _groundCleanCanvas.QueueRedraw();
+        // Re-render the one-shot targets for this generation.
         _groundViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
+        _groundCleanViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
+        _cleanGroundTex = _groundCleanViewport.GetTexture();
         _bakeParticles ??= LoadSprite("particles");
         _bakeBodyset ??= LoadSprite("bodyset");
         return _groundViewport.GetTexture();

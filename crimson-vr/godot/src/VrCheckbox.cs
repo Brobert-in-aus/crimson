@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -45,7 +45,7 @@ public sealed partial class VrCheckbox : Node3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-            RenderPriority = 32,
+            RenderPriority = 66,
         };
         var box = new MeshInstance3D
         {

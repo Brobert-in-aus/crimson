@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -6,7 +6,7 @@ namespace CrimsonVR;
 /// <summary>
 /// A segmented value slider rendered like the original Crimsonland Options screen:
 /// a row of cells drawn from ui_rectOn (filled) / ui_rectOff (empty). Instead of a
-/// mouse drag it is POKED — a fingertip over a cell sets the value to that cell
+/// mouse drag it is POKED â€” a fingertip over a cell sets the value to that cell
 /// (poke-drag while held), so it fits the physical VR UI model. Values are integer
 /// steps in [min, max]; cell i is filled when i &lt; value.
 ///
@@ -85,7 +85,7 @@ public sealed partial class VrSegmentedSlider : Node3D
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                RenderPriority = 31,
+                RenderPriority = 65,
             };
             AddChild(new MeshInstance3D { Mesh = mesh, Position = new Vector3(x, 0.0f, 0.0f), MaterialOverride = backMat });
 
@@ -96,7 +96,7 @@ public sealed partial class VrSegmentedSlider : Node3D
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                RenderPriority = 33,
+                RenderPriority = 66,
             };
             var cell = new MeshInstance3D
             {
@@ -137,7 +137,7 @@ public sealed partial class VrSegmentedSlider : Node3D
             }
         }
 
-        // Arm only once the hand has LEFT the strip — so a finger resting on the
+        // Arm only once the hand has LEFT the strip â€” so a finger resting on the
         // slider when the menu appears (or lingering from another control) can't set
         // a value until it's moved clear and comes back. Plus the settle window.
         if (!overFootprint)
