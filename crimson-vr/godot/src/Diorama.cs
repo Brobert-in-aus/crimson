@@ -1211,6 +1211,32 @@ public sealed partial class Diorama : Node3D
     /// they accumulate rather than reset each tick.</summary>
     public void RenderTerrainFx(in TerrainFxView fx)
     {
+        // Native behavior: decals/corpses bake PERMANENTLY into the ground RT
+        // (terrain_render.py bake_decals / bake_corpse_decals — no cap, no
+        // pop-out). The ring-buffered quads below remain as the fallback when
+        // the generated ground isn't available. Corpses run as two batch
+        // passes (all shadows, then all colors) like the native two-pass bake.
+        if (GroundBakeReady)
+        {
+            foreach (Sim.TerrainDecalSnap d in fx.Decals)
+            {
+                BakeDecal(d);
+            }
+            if (_bakeBodyset != null)
+            {
+                foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                {
+                    BakeCorpseShadow(c, CorpseFrameFor(c.CreatureTypeId));
+                }
+                foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                {
+                    BakeCorpseColor(c, CorpseFrameFor(c.CreatureTypeId));
+                }
+            }
+            FlushGroundBakes();
+            return;
+        }
+
         float k = _arenaSideMeters / _worldSize;
         if (_decals != null)
         {
@@ -1239,8 +1265,7 @@ public sealed partial class Diorama : Node3D
         {
             foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
             {
-                int frame = _corpseFrames.TryGetValue(c.CreatureTypeId, out int f) ? f : (c.CreatureTypeId & 0xF);
-                frame &= _corpseGrid * _corpseGrid - 1;
+                int frame = CorpseFrameFor(c.CreatureTypeId);
                 // Reference centres the corpse at top_left + scale*0.5 and rotates
                 // by heading - 90deg (grim.terrain_render corpse pass). Orientation
                 // convention needs an in-headset check (flag with the streaks).
@@ -1264,6 +1289,13 @@ public sealed partial class Diorama : Node3D
             }
             _corpses.VisibleInstanceCount = _corpseCount;
         }
+    }
+
+    /// <summary>Bodyset frame for a creature type (manifest map, id fallback).</summary>
+    private int CorpseFrameFor(int creatureTypeId)
+    {
+        int frame = _corpseFrames.TryGetValue(creatureTypeId, out int f) ? f : (creatureTypeId & 0xF);
+        return frame & (_corpseGrid * _corpseGrid - 1);
     }
 
     /// <summary>Clear the accumulated terrain FX (blood/corpses). Call on session

@@ -16,19 +16,14 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-10 (terraingen PASS); now
-    // covers the mega-batch: the base-game menu theming pass (button plates +
-    // small font + panel backdrops + stage icons + banner arts), the quest
-    // HUD timer, the animated player legs + torso recoil (ABI v15), and the
-    // Statistics screen with the per-mode high-score tables.
+    // validation surface changes. Cleared 2026-07-11 (theming/stats/legs round
+    // all green after the alignment + draw-order fixes). New batch: the
+    // smaller poke spheres and the permanent ground bake (blood + corpse
+    // stamps into the terrain RT — kill a lot and check nothing pops out).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("playmenu", "Menus themed like base game"),
-        ("smallfont", "Classic font on menu text"),
-        ("questtimer", "Quest timer on HUD (mm:ss/limit)"),
-        ("legs", "Player legs animate, torso recoils"),
-        ("statsmenu", "Statistics screen from main menu"),
-        ("hiscores", "High-score tables (both modes)"),
+        ("handsphere", "Poke spheres: smaller feels right"),
+        ("groundbake", "Blood/corpses bake in, no pop-out"),
     };
 
     private const int PerPage = 4;

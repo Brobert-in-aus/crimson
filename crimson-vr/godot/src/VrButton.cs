@@ -389,8 +389,9 @@ public sealed partial class VrButton : Node3D
     /// rendered frame while the button is visible.</summary>
     // The hand-marker sphere (this radius) is the collider: its leading surface,
     // PokeRadius ahead of the tracked centre, pushes the button face in. So the
-    // visible sphere and the collision line up.
-    private const float PokeRadius = 0.02f;
+    // visible sphere and the collision line up. Keep in sync with
+    // Main.HandMarkerRadius (2/3 of the original 0.02 for button precision).
+    private const float PokeRadius = 0.0133f;
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {

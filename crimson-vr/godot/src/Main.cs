@@ -716,10 +716,15 @@ public partial class Main : Node3D
         }
     }
 
+    // Keep in sync with VrButton.PokeRadius — the visible sphere IS the poke
+    // collider. 2/3 of the original 0.02 (in-headset: full size felt clumsy
+    // for button pressing).
+    private const float HandMarkerRadius = 0.0133f;
+
     private static MeshInstance3D MakeHandMarker(Color color)
         => new()
         {
-            Mesh = new SphereMesh { Radius = 0.02f, Height = 0.04f },
+            Mesh = new SphereMesh { Radius = HandMarkerRadius, Height = HandMarkerRadius * 2.0f },
             MaterialOverride = new StandardMaterial3D { AlbedoColor = color },
         };
 
