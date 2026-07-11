@@ -29,24 +29,23 @@ public sealed partial class Hud : Node3D
     // Ammo bars enlarged for VR readability (native was 6-wide / 6-step / 16-tall).
     // Native rule (hud.py:46-47, 498-500): up to 30 bars are drawn; a clip
     // BIGGER than 30 collapses to 20 bars (+ the "+ N" overflow text).
-    // Native HUD_AMMO_BAR_LIMIT/CLAMP are 30/20, but our ENLARGED bars (11u
-    // pitch from x=318) run off the 512u top-bar art past 16 bars (in-headset:
-    // big clips spilled onto bare terrain). Clamp to what the art fits; the
-    // "+ N" overflow label covers the rest.
-    private const int AmmoBarLimit = 16;
-    private const int AmmoBarClamp = 14;
+    // Two-row layout (VR glanceability): row 1 = full-width HP, row 2 = weapon
+    // icon + full-width ammo. The full-width ammo row fits the native 30/20
+    // limit/clamp again (96 + 30*11 + 10 <= 508).
+    private const int AmmoBarLimit = 30;       // HUD_AMMO_BAR_LIMIT
+    private const int AmmoBarClamp = 20;       // HUD_AMMO_BAR_CLAMP
     private const float AmmoBarStep = 11.0f;
     private const float AmmoBarW = 10.0f;
-    private const float AmmoBarH = 30.0f;
-    private const float AmmoBaseX = 318.0f;
-    private const float AmmoBaseY = 17.0f;
+    private const float AmmoBarH = 26.0f;
+    private const float AmmoBaseX = 96.0f;
+    private const float AmmoBaseY = 34.0f;
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
 
     // Health bar stretched much taller than the native 9px sliver so it reads in
     // VR (doubled again after in-headset feedback; fills the 64-tall top bar).
-    private const float HealthBarX = 64.0f;
+    private const float HealthBarX = 36.0f;
     private const float HealthBarY = 4.0f;
-    private const float HealthBarH = 56.0f;
+    private const float HealthBarH = 26.0f;
     private const float HeartBase = 40.0f; // heart quad base size (native ~32)
 
     // Bottom of the laid-out native content (XP panel 60..113): used to anchor
@@ -76,7 +75,7 @@ public sealed partial class Hud : Node3D
     private float _fade = 1.0f;
     private bool _fadeApplied;
 
-    private const float HealthBarW = 120.0f; // native health bar width
+    private const float HealthBarW = 472.0f; // full top-bar width (36..508)
     private const float XpProgressW = 54.0f;
 
     private static Texture2D? Load(string name)
@@ -113,15 +112,17 @@ public sealed partial class Hud : Node3D
         // Survival XP panel (ind_panel), behind its text.
         TexQuad(Load("ui_indPanel"), -68.0f, 60.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
 
-        // Pulsing heart (updated each frame), vertically centred in the bar.
-        _heart = TexQuad(Load("ui_lifeHeart"), 27.0f - HeartBase * 0.5f, 32.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43);
+        // Pulsing heart (updated each frame), on the HP row's left edge.
+        _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43);
 
-        // Health bar (tall): dim full background + bright left-aligned fill (both ind_life).
-        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1, 1, 1, 0.5f), priority: 42);
-        _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1, 1, 1, 0.8f), priority: 43, out _healthFillMat);
+        // ROW 1 — full-width health bar. VR glanceability: a near-opaque
+        // DARKENED track under an overbright fill, so the missing section
+        // reads at a glance (the flat game's subtle dim didn't survive VR).
+        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42);
+        _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1.35f, 1.35f, 1.35f, 1.0f), priority: 43, out _healthFillMat);
 
-        // Weapon icon (wicons sub-cell, set per weapon in Update).
-        _weaponIcon = TexQuad(_wicons, 206.0f, 6.0f, 96.0f, 48.0f, new Color(1, 1, 1, 0.8f), priority: 43, out _weaponMat);
+        // ROW 2 — weapon icon at the left, ammo bars across the rest.
+        _weaponIcon = TexQuad(_wicons, 36.0f, 34.0f, 52.0f, 26.0f, new Color(1, 1, 1, 0.9f), priority: 43, out _weaponMat);
 
         // Ammo bars (per-shot, enlarged), textured by ammo class in Update.
         for (int i = 0; i < AmmoBarLimit; i++)
