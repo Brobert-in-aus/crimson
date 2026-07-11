@@ -418,11 +418,14 @@ public sealed partial class Diorama
     private void EmitAtlasSprite(MultiMesh? mesh, ref int n, int cap, Vector2 game, float sizeUnits,
         float rotation, Color color, Vector3 uv)
     {
+        // Death-cinematic zoom: magnify into window space first — the existing
+        // draw-bounds cull then doubles as the window-edge clip.
+        game = ViewGame(game);
         if (mesh == null || n >= cap || sizeUnits <= 1e-3f || OutsideDrawBounds(game))
         {
             return;
         }
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
             + new Vector3(0.0f, ProjPlaneLift, 0.0f);
         Basis basis = FlatFacingBasis(ForwardFromHeading(rotation), sizeUnits * k);
@@ -435,6 +438,12 @@ public sealed partial class Diorama
     private void EmitStretch(MultiMesh? mesh, ref int n, int cap, Vector2 startGame, Vector2 endGame,
         float halfWidthUnits, Color color, float customX = 0.0f, bool custom = true)
     {
+        // Death-cinematic zoom: transform the endpoints into window space (the
+        // segment length magnifies with them; only the width needs the factor)
+        // and let the existing bounds clamp clip at the window edge.
+        startGame = ViewGame(startGame);
+        endGame = ViewGame(endGame);
+        halfWidthUnits *= _viewZoom;
         if (mesh == null || n >= cap || !ClampToDrawBounds(ref startGame, ref endGame))
         {
             return;
@@ -657,11 +666,12 @@ public sealed partial class Diorama
 
     private void EmitBulletHead(Vector2 game, float sizeUnits, float rotation, Color color)
     {
-        if (_bulletHeadMesh == null || _bulletHeadN >= BulletHeadCap)
+        game = ViewGame(game);
+        if (_bulletHeadMesh == null || _bulletHeadN >= BulletHeadCap || OutsideDrawBounds(game))
         {
             return;
         }
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
             + new Vector3(0.0f, ProjPlaneLift, 0.0f);
         Basis basis = FlatFacingBasis(ForwardFromHeading(rotation), sizeUnits * k);

@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 16u
+#define CRIMSON_HOST_ABI_VERSION 17u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -182,6 +182,11 @@ typedef struct crimson_host_player_snap {
     /* ABI v15 (append-only): walk-cycle phase for the trooper leg frame
      * (leg = clamp(int(move_phase+0.5), 0, 14), torso = leg + 16). */
     float move_phase;
+    /* ABI v17 (append-only): death-animation countdown (16 -> <0 at 20/s
+     * once health <= 0). Corpse frame = clamp(32 + (int)((16 - death_timer)
+     * * 1.25), 32, 52); the flat game-over transition waits for it to pass
+     * 0. Presentation-only. */
+    float death_timer;
 } crimson_host_player_snap;
 
 typedef struct crimson_host_creature_snap {

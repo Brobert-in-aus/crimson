@@ -56,8 +56,28 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v16" {
-    try std.testing.expectEqual(@as(u32, 16), exports.crimson_host_abi_version());
+test "abi version reports v17" {
+    try std.testing.expectEqual(@as(u32, 17), exports.crimson_host_abi_version());
+}
+
+test "abi player snapshot carries the death timer" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    var inputs = [_]exports.CrimsonHostInput{scriptedInput(0)};
+    var buf: [1 << 20]u8 = undefined;
+    var len: u32 = @intCast(buf.len);
+
+    // Alive: death_timer sits at its 16.0 reset value.
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, null));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_snapshot(handle, &buf, &len));
+    const header = std.mem.bytesToValue(exports.SnapshotHeader, buf[0..@sizeOf(exports.SnapshotHeader)]);
+    try std.testing.expect(header.player_count >= 1);
+    const player = std.mem.bytesToValue(
+        exports.PlayerSnap,
+        buf[@sizeOf(exports.SnapshotHeader)..][0..@sizeOf(exports.PlayerSnap)],
+    );
+    try std.testing.expectEqual(@as(f32, 16.0), player.death_timer);
 }
 
 test "abi weapon usage counts: seeded via config, queryable" {

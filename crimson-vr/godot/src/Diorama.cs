@@ -310,6 +310,35 @@ public sealed partial class Diorama : Node3D
         new Basis(Vector3.Right, -Mathf.DegToRad(SpriteTiltDegrees));
     private static readonly float SpriteTiltSin = Mathf.Sin(Mathf.DegToRad(SpriteTiltDegrees));
 
+    // ---- Death-cinematic view zoom (VR adaptation) ----
+    // While a player death plays out, the view magnifies about the corpse
+    // WITHIN the same physical arena window: positions and sizes scale about
+    // the centre, anything pushed past the visible floor square is culled
+    // (OutsideDrawBounds — the window edge), and the ground shader samples the
+    // matching shrunk window. 1.0 = off. Driven per tick by Main.
+    private float _viewZoom = 1.0f;
+    private Vector2 _viewCenterGame;
+
+    public void SetViewZoom(float zoom, Vector2 centerGame)
+    {
+        _viewZoom = Mathf.Max(1.0f, zoom);
+        _viewCenterGame = centerGame;
+        if (_floor?.MaterialOverride is ShaderMaterial sm)
+        {
+            sm.SetShaderParameter("view_zoom", _viewZoom);
+            sm.SetShaderParameter("view_center", _viewCenterGame / _worldSize);
+        }
+    }
+
+    public void ResetViewZoom() => SetViewZoom(1.0f, new Vector2(_worldSize * 0.5f, _worldSize * 0.5f));
+
+    /// <summary>View-transformed game position (magnified about the zoom centre).</summary>
+    private Vector2 ViewGame(Vector2 game) =>
+        _viewCenterGame + (game - _viewCenterGame) * _viewZoom;
+
+    /// <summary>Game-units -&gt; metres, including the view magnification.</summary>
+    private float ViewK => _arenaSideMeters / _worldSize * _viewZoom;
+
     public void Configure(float arenaSideMeters, float worldSize)
     {
         _arenaSideMeters = arenaSideMeters;
@@ -736,7 +765,7 @@ public sealed partial class Diorama : Node3D
         {
             return;
         }
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         int n = 0;
 
         void Emit(Vector2 game, float sizeGame, Color color)
@@ -745,8 +774,13 @@ public sealed partial class Diorama : Node3D
             {
                 return;
             }
+            Vector2 viewGame = ViewGame(game);
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                return;
+            }
             float m = Mathf.Max(sizeGame * k, 0.001f);
-            Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+            Vector3 pos = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
                 + new Vector3(0.0f, 0.0075f, 0.0f); // over decals/shadows, under sprites
             _overlays.SetInstanceTransform(n, new Transform3D(FlatQuadBasis(0.0f, m, m), pos));
             _overlays.SetInstanceColor(n, color);
@@ -806,7 +840,7 @@ public sealed partial class Diorama : Node3D
             return;
         }
         bool hasLarge = _effectUv.TryGetValue(GlowLargeEffectId, out Vector3 uvLarge);
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         int n = 0;
 
         void Emit(Vector2 game, float wGame, float hGame, float rot, Color color, Vector3 uv)
@@ -815,7 +849,12 @@ public sealed partial class Diorama : Node3D
             {
                 return;
             }
-            Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+            Vector2 viewGame = ViewGame(game);
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                return;
+            }
+            Vector3 pos = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
                 + new Vector3(0.0f, 0.0078f, 0.0f);
             _glowMesh.SetInstanceTransform(n, new Transform3D(FlatQuadBasis(rot, wGame * k, hGame * k), pos));
             _glowMesh.SetInstanceColor(n, color);
@@ -883,7 +922,7 @@ public sealed partial class Diorama : Node3D
             _freezeMesh.VisibleInstanceCount = 0;
             return;
         }
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         int n = 0;
         int idx = 0;
         foreach (Sim.CreatureSnap c in view.Creatures)
@@ -892,9 +931,15 @@ public sealed partial class Diorama : Node3D
             {
                 break;
             }
+            Vector2 viewGame = ViewGame(new Vector2(c.X, c.Y));
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                idx++;
+                continue;
+            }
             float size = Mathf.Max(c.Size * k, 0.001f);
             float rot = idx * 0.01f + c.Heading; // matches draw_freeze_overlay
-            Vector3 pos = Mapper.GameToArenaLocal(new Vector2(c.X, c.Y), _arenaSideMeters, _worldSize)
+            Vector3 pos = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
                 + new Vector3(0.0f, 0.009f, 0.0f); // just over the creature plane
             Basis basis = FlatQuadBasis(rot, size, size);
             _freezeMesh.SetInstanceTransform(n, new Transform3D(basis, pos));
@@ -915,7 +960,7 @@ public sealed partial class Diorama : Node3D
         {
             return;
         }
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         int n = 0;     // alpha pass
         int na = 0;    // additive pass
         foreach (Sim.ParticleSnap p in view.Particles)
@@ -932,9 +977,14 @@ public sealed partial class Diorama : Node3D
             {
                 continue;
             }
+            Vector2 viewGame = ViewGame(new Vector2(p.X, p.Y));
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                continue;
+            }
             float w = Mathf.Max(p.HalfWidth * 2.0f * p.Scale * k, 0.001f);
             float h = Mathf.Max(p.HalfHeight * 2.0f * p.Scale * k, 0.001f);
-            Vector3 pos = Mapper.GameToArenaLocal(new Vector2(p.X, p.Y), _arenaSideMeters, _worldSize)
+            Vector3 pos = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
                 + new Vector3(0.0f, 0.007f, 0.0f);
             // Flat on the plane, spun by the effect's rotation. Build the scaled
             // columns directly (local X = width, Y = height, Z = up): Basis.Scaled
@@ -1314,8 +1364,14 @@ public sealed partial class Diorama : Node3D
             uniform sampler2D baked : source_color;
             uniform sampler2D clean_t : source_color, repeat_enable;
             uniform float margin_scale = 1.3;
+            // Death-cinematic view zoom: sample a shrunk window about
+            // view_center (uv space) so the ground magnifies in lockstep with
+            // the sprite view transform. 1.0 = off.
+            uniform float view_zoom = 1.0;
+            uniform vec2 view_center = vec2(0.5);
             void fragment() {
                 vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
+                uv = view_center + (uv - view_center) / view_zoom;
                 bool inside = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
                 vec3 c = inside ? texture(baked, uv).rgb : texture(clean_t, fract(uv)).rgb;
                 ALBEDO = c;
@@ -1449,6 +1505,17 @@ public sealed partial class Diorama : Node3D
             // = leg frame + 16 rotated by the AIM heading with the recoil
             // offset (muzzle_flash_alpha * 12 units along aim + 90 deg).
             var game = new Vector2(p.X, p.Y);
+            if (p.Health <= 0.0f)
+            {
+                // Dead: the corpse frame ramp (trooper.py:276 — frame = 32 +
+                // int((16 - death_timer) * 1.25), clamped 32..52, rotated by
+                // aim). One quad on the torso layer; no legs, no recoil. The
+                // low lifecycle stage drops it to ground level like a dying
+                // creature so it lies flat on the arena.
+                int corpseFrame = Mathf.Clamp(32 + (int)((16.0f - p.DeathTimer) * 1.25f), 32, 52);
+                _players.Add(game, p.AimHeading, p.Size, lifecycleStage: 0.0f, frame: corpseFrame);
+                continue;
+            }
             int legFrame = Mathf.Clamp((int)(p.MovePhase + 0.5f), 0, 14);
             _playerLegs.Add(game, p.Heading, p.Size, frame: legFrame);
             float recoilDir = p.AimHeading + Mathf.Pi * 0.5f;
@@ -1628,16 +1695,21 @@ public sealed partial class Diorama : Node3D
     /// fx mesh (positions are tick-captured; transient, not interpolated).</summary>
     private void EmitFx()
     {
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         _fxCount = 0;
         for (int i = 0; i < _muzzleCount; i++)
         {
             Muzzle m = _muzzles[i];
+            Vector2 viewGame = ViewGame(m.Game);
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                continue;
+            }
             // At the gun barrel, a touch ahead of the player along aim (was ~4
             // sprite-lengths out; the flash blob is large so it still reads as the
             // muzzle even sitting close to the player).
             Vector3 dir = ForwardFromHeading(m.Heading);
-            Vector3 arena = Mapper.GameToArenaLocal(m.Game, _arenaSideMeters, _worldSize)
+            Vector3 arena = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
                 + dir * (m.SizeGame * k * 0.2f) + new Vector3(0.0f, 0.012f, 0.0f);
             float s = Mathf.Max(m.SizeGame * k * 2.2f * m.Alpha, 0.002f);
             var color = new Color(1.0f, 0.85f, 0.5f, m.Alpha);
@@ -1660,7 +1732,7 @@ public sealed partial class Diorama : Node3D
 
     private void InterpolateLayer(Layer layer, float frac, bool sprite, bool castShadow = false)
     {
-        float k = _arenaSideMeters / _worldSize;
+        float k = ViewK;
         // Interpolate only when the active set is unchanged (equal counts);
         // dense arrays have no stable ids so a spawn/death frame reorders them,
         // which would streak tokens across the arena for a frame (M2 finding).
@@ -1679,7 +1751,17 @@ public sealed partial class Diorama : Node3D
                 sizeGame = Mathf.Lerp(prev.SizeGame, cur.SizeGame, frac);
             }
 
-            Vector3 arena = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize);
+            // Death-cinematic zoom: magnified positions past the visible floor
+            // square (the zoomed window's edge) collapse to nothing.
+            Vector2 viewGame = ViewGame(game);
+            if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                layer.Mesh.SetInstanceTransform(i, new Transform3D(
+                    new Basis(Vector3.Zero, Vector3.Zero, Vector3.Zero), Vector3.Zero));
+                continue;
+            }
+
+            Vector3 arena = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize);
             // Flat on the plane at a constant per-layer lift; layering is by draw
             // order (RenderPriority), not physical height.
             Vector3 pos = arena + new Vector3(0.0f, layer.Lift, 0.0f);

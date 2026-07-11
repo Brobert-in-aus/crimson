@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 16;
+pub const abi_version: u32 = 17;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -165,6 +165,12 @@ pub const PlayerSnap = extern struct {
     // frame (trooper.py:156 — leg = clamp(int(move_phase+0.5), 0, 14), torso =
     // leg + 16). Presentation-only.
     move_phase: f32,
+    // ABI v17 (append-only): the death-animation countdown (16 -> below 0 at
+    // 20/s once health <= 0; hits-while-dead drain an extra 28/s). Drives the
+    // corpse frame ramp (trooper.py:276 — frame = clamp(32 + int((16 -
+    // death_timer) * 1.25), 32, 52)); the flat game-over transition waits for
+    // it to pass 0. Presentation-only.
+    death_timer: f32,
 };
 
 pub const player_perk_flag_doctor: u32 = 1 << 0;
@@ -859,6 +865,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.sharpshooter)) player_perk_flag_sharpshooter else 0) |
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.ion_gun_master)) player_perk_flag_ion_gun_master else 0),
             .move_phase = player.move_phase,
+            .death_timer = player.death_timer,
         });
     }
     for (box.runner.session.creatures.entries) |entry| {

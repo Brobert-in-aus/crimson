@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 16;
+    public const uint ExpectedAbiVersion = 17;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -134,6 +134,7 @@ public static partial class Sim
         public float ShieldTimer;   // ABI v11+: shield bonus timer (> 0 = ring pair)
         public uint PerkFlags;      // ABI v11+: bit0 Doctor / bit1 Radioactive / bit2 Sharpshooter
         public float MovePhase;     // ABI v15+: walk cycle (leg frame = clamp(int(+0.5),0,14))
+        public float DeathTimer;    // ABI v17+: 16 -> <0 at 20/s once dead (corpse frames 32..52)
 
         public const uint PerkFlagDoctor = 1u << 0;
         public const uint PerkFlagRadioactive = 1u << 1;

@@ -109,6 +109,11 @@ public partial class Main : Node3D
     private VirtualKeyboard _keyboard = null!;
     private GameOverPanel _gameOverPanel = null!;
     private int _deathTicks;     // pacing counter: death -> results (base death-timer delay)
+    // Death cinematic: the view zooms in on the corpse over roughly the death
+    // animation's length (16/20 s = 48 ticks), holding until the run resets.
+    private Vector2 _deathZoomCenter;
+    private const float DeathZoomMax = 2.0f;
+    private const int DeathZoomTicks = 48;
     private int _deathRank = int.MaxValue; // 0-based insertion rank of the death score
 
     // ~1.2 s at 60 Hz between death and the results flow, standing in for the
@@ -480,6 +485,7 @@ public partial class Main : Node3D
         _sim.Restart(SessionConfig);
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
+        _diorama.ResetViewZoom(); // death cinematic ends with the run
         _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
     }
 
@@ -1074,7 +1080,18 @@ public partial class Main : Node3D
             {
                 return;
             }
+            // Death cinematic (VR adaptation): the view zooms in on the corpse
+            // over the death animation — same physical arena window, magnified
+            // content — while creatures keep milling; the score panel follows.
+            if (_deathTicks == 0)
+            {
+                _deathZoomCenter = _playerGame;
+            }
             _deathTicks++;
+            float zoomT = Mathf.Clamp(_deathTicks / (float)DeathZoomTicks, 0.0f, 1.0f);
+            _diorama.SetViewZoom(
+                1.0f + (DeathZoomMax - 1.0f) * Mathf.SmoothStep(0.0f, 1.0f, zoomT),
+                _deathZoomCenter);
             if (_deathTicks >= DeathPacingTicks)
             {
                 _audio.PlayUi(AudioBank.UiPanel);

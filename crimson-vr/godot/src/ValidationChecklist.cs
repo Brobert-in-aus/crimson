@@ -22,10 +22,10 @@ public sealed partial class ValidationChecklist : Node3D
     // checklist fixes (HP bar trim/spacing, death with banked level-ups).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("dbweapons", "Weapons DB: list/scroll/detail+icon"),
         ("dbperks", "Perks DB: prereq + wrapped desc"),
-        ("hudtrim", "HP bar inside the box, spaced right"),
-        ("deathperks", "50/50 death, banked perks: cards->score"),
+        ("deathanim", "Death: corpse frames play on the arena"),
+        ("deathzoom", "Death: view zooms in, edges stay put"),
+        ("seedvary", "Runs differ (spawns/drops not identical)"),
     };
 
     private const int PerPage = 4;
