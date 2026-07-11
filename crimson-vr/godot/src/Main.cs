@@ -37,14 +37,18 @@ public partial class Main : Node3D
     private const float TriggerThreshold = 0.5f;
     private const float GripThreshold = 0.7f;
 
-    // Survival, seed 1, standard 1024 world at 60 Hz (mirrors HostSessionConfig).
-    // With the Debug setting on at boot, debug_fx_showcase is added: weapon
-    // drops become flamethrower/bubblegun, the monster-vision wire flag is
-    // forced, and 1-in-10 exported creatures carry a poison/plague aura flag —
-    // so the aura + glow-pool render paths can be validated on demand
-    // (checklist items that otherwise need rare spawns/drops).
+    // Standard 1024 world at 60 Hz (mirrors HostSessionConfig). With the Debug
+    // setting on at boot, debug_fx_showcase is added: reload cycles the player
+    // through the arsenal for a one-run weapon tour.
+    //
+    // The seed is randomized PER RUN like the base game (base_gameplay_mode
+    // seeds each reset from the live app RNG state, so no two runs replay the
+    // same stream). A fixed seed made every run's spawn order, drop rolls, and
+    // perk coin flips (Fatal Lottery!) repeat across similar runs.
+    private uint _runSeed = 1;
+
     private string SessionConfig =>
-        "{\"seed\":1"
+        $"{{\"seed\":{_runSeed}"
         + $",\"game_mode\":{_gameMode}"
         + (_gameMode == GameModeQuests ? $",\"quest_level_key\":{_questKey}" : string.Empty)
         + ",\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
@@ -392,6 +396,7 @@ public partial class Main : Node3D
 
         try
         {
+            _runSeed = GD.Randi();
             _sim = new SimSession(SessionConfig);
             // Static terrain generation info (ABI v3): slots pick the ground atlas
             // sheets, seed drives the stamp layout. The terrain-base quad render is
@@ -471,6 +476,7 @@ public partial class Main : Node3D
         // native save-status parity: usage accrues on every pickup and
         // survives aborted runs too, not just completed ones.
         CaptureWeaponUsage();
+        _runSeed = GD.Randi();
         _sim.Restart(SessionConfig);
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
