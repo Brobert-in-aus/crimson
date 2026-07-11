@@ -112,7 +112,10 @@ public sealed partial class SmallFontLabel : MeshInstance3D
     private string _text = string.Empty;
 
     /// <param name="pixelSize">metres per font pixel (glyph line height = 16 px).</param>
-    public void Build(SmallFont font, float pixelSize, Color color, bool center = true)
+    /// <param name="priority">Render priority: all diegetic UI is transparent
+    /// with depth-write off, so priority IS the draw order. Panel text defaults
+    /// above the panel backdrop (58) and the HUD (40-44).</param>
+    public void Build(SmallFont font, float pixelSize, Color color, bool center = true, int priority = 62)
     {
         _font = font;
         _pixelSize = pixelSize;
@@ -125,6 +128,7 @@ public sealed partial class SmallFontLabel : MeshInstance3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+            RenderPriority = priority,
         };
         MaterialOverride = _mat;
     }
@@ -247,6 +251,7 @@ public static class ClassicTitle
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
                 Uv1Scale = new Vector3(1.0f, 1.0f / rows, 1.0f),
                 Uv1Offset = new Vector3(0.0f, row / rows, 0.0f),
+                RenderPriority = 59, // over the panel backdrop (58), under text
             },
         });
     }
@@ -274,6 +279,7 @@ public static class ClassicTitle
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+                RenderPriority = 59, // over the panel backdrop (58), under text
             },
         };
         parent.AddChild(quad);
@@ -350,6 +356,10 @@ public static class ClassicPanel
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
                 Uv1Scale = new Vector3((texW - Inset * 2.0f) / texW, srcH / texH, 1.0f),
                 Uv1Offset = new Vector3(Inset / texW, srcY / texH, 0.0f),
+                // Panels must draw OVER the HUD (40-44): all diegetic UI is
+                // transparent with depth-write off, so priority is the only
+                // layering — the panel stack owns 58..67.
+                RenderPriority = 58,
             };
             parent.AddChild(new MeshInstance3D
             {

@@ -92,6 +92,7 @@ public sealed partial class QuestResultPanel : Node3D
             OutlineSize = 26,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
             Position = new Vector3(0.0f, y, 0.0f),
+            RenderPriority = 63, // panel stack: over backdrop/banners, under buttons
         };
         AddChild(l);
         return l;

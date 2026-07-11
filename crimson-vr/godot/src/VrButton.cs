@@ -141,6 +141,7 @@ public sealed partial class VrButton : Node3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+            RenderPriority = 65, // proud of the panel stack, like classic faces
         };
         _face = new MeshInstance3D
         {
@@ -182,6 +183,10 @@ public sealed partial class VrButton : Node3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.Linear,
+            // Buttons sit proud of the panel: above the backdrop (58) and any
+            // panel backing (game-over uses 60), so they never render dimmed
+            // under a backing drawn later (all UI is priority-ordered).
+            RenderPriority = 65,
         };
         _face = new MeshInstance3D
         {
@@ -199,6 +204,7 @@ public sealed partial class VrButton : Node3D
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            RenderPriority = 66,
         };
         _hoverFill = new MeshInstance3D
         {
@@ -210,7 +216,7 @@ public sealed partial class VrButton : Node3D
 
         // Small-font label: native buttons are 32px tall with 16px glyphs.
         _smallLabel = new SmallFontLabel();
-        _smallLabel.Build(font, height / 32.0f, new Color(1.0f, 1.0f, 1.0f, 0.7f));
+        _smallLabel.Build(font, height / 32.0f, new Color(1.0f, 1.0f, 1.0f, 0.7f), priority: 67);
         _smallLabel.Position = new Vector3(0.0f, 0.0f, 0.004f);
         _smallLabel.SetText(text ?? string.Empty);
         _labelText = text ?? string.Empty;
@@ -417,16 +423,19 @@ public sealed partial class VrButton : Node3D
 
         bool nowPressed = inside && z <= _pressDepth;
         _mat.AlbedoColor = nowPressed ? _pressedColor : _baseColor;
-        if (_classic)
-        {
-            UpdateClassicHover(overFootprint);
-        }
         // Re-arm only once the fingertip has fully LEFT the button's dead-zone
         // volume: laterally out of the footprint, OR pulled back past a clearance
         // of 2x the button depth in front of the rest face. So a hand resting/
         // hovering just above a button (e.g. after pressing Back, or when a menu
         // reopens under it) must be deliberately moved clear before it can fire.
         bool inDeadZone = overFootprint && nearestSurface <= _proud + DeadZoneClearance;
+        if (_classic)
+        {
+            // Hover highlight only when the sphere is CLOSE: the same volume as
+            // the double-press dead zone (footprint + 2x button depth of
+            // clearance), not the full column above the button.
+            UpdateClassicHover(inDeadZone);
+        }
         if (!inDeadZone)
         {
             _armed = true;
