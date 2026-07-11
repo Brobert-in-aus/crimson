@@ -20,6 +20,8 @@ public sealed partial class QuestResultPanel : Node3D
     // as a fallback when the art isn't baked.
     private MeshInstance3D? _wellDoneArt;
     private MeshInstance3D? _reaperArt;
+    private SmallFontLabel? _titleSmall;
+    private SmallFontLabel? _timeSmall;
     private VrButton _primary = null!; // Next Quest (completed) / Retry (failed)
     private VrButton _questMenu = null!;
     private VrButton _mainMenu = null!;
@@ -48,6 +50,23 @@ public sealed partial class QuestResultPanel : Node3D
         _banner.Visible = _wellDoneArt == null; // art replaces the text banner
         _questTitle = MakeLabel(s, y: s * 0.26f, fontSize: 120, new Color(0.9f, 0.9f, 0.95f));
         _timeLabel = MakeLabel(s, y: s * 0.15f, fontSize: 100, new Color(0.8f, 0.8f, 0.88f));
+
+        // Classic small font replaces the system-font labels when baked (the
+        // Label3D versions rendered oversized and spilled off the panel).
+        SmallFont? font = SmallFont.Shared();
+        if (font != null)
+        {
+            _titleSmall = new SmallFontLabel();
+            _titleSmall.Build(font, s / 560.0f, new Color(1.0f, 1.0f, 1.0f, 0.9f));
+            _titleSmall.Position = new Vector3(0.0f, s * 0.26f, 0.0f);
+            AddChild(_titleSmall);
+            _timeSmall = new SmallFontLabel();
+            _timeSmall.Build(font, s / 620.0f, new Color(1.0f, 1.0f, 1.0f, 0.8f));
+            _timeSmall.Position = new Vector3(0.0f, s * 0.16f, 0.0f);
+            AddChild(_timeSmall);
+            _questTitle.Visible = false;
+            _timeLabel.Visible = false;
+        }
 
         float w = s * 0.5f;
         float h = s * 0.13f;
@@ -105,7 +124,10 @@ public sealed partial class QuestResultPanel : Node3D
         }
         _questTitle.Text = questTitle;
         long totalSeconds = elapsedMs / 1000;
-        _timeLabel.Text = $"Time  {totalSeconds / 60:D2}:{totalSeconds % 60:D2}";
+        string time = $"Time  {totalSeconds / 60:D2}:{totalSeconds % 60:D2}";
+        _timeLabel.Text = time;
+        _titleSmall?.SetText(questTitle);
+        _timeSmall?.SetText(time);
         _primary.SetText(completed ? "Next Quest" : "Retry");
         _primary.Visible = !completed || hasNext;
         _primary.ResetPress();

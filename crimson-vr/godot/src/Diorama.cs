@@ -327,12 +327,12 @@ public sealed partial class Diorama : Node3D
         // torso floats at the player lift (0.012) above the swarm.
         if (manifest?.player is { } pd)
         {
-            _playerLegs = BuildPlayerLayer(pd, lift: 0.008f);
-            _players = BuildPlayerLayer(pd, lift: 0.012f);
+            _playerLegs = BuildPlayerLayer(pd, lift: 0.008f, sizeScale: PlayerLegScale);
+            _players = BuildPlayerLayer(pd, lift: 0.012f, sizeScale: 1.0f);
         }
         else
         {
-            _playerLegs = BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 15);
+            _playerLegs = BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.008f, sizeScale: PlayerLegScale, renderPriority: 15);
             _players = BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift: 0.012f, sizeScale: 1.0f, renderPriority: 15);
         }
 
@@ -407,19 +407,25 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Textured layer showing one static frame of a sheet. Falls back
     /// to a colored layer if the texture can't be loaded (assets not baked).</summary>
+    // VR-readability deviation (native = 1.0): the leg art is a ~11px blob in
+    // the 64px trooper cell, fully inside the torso footprint, so faithful
+    // scale reads as "no legs" from the table view. Modest oversize makes the
+    // walk cycle legible under the torso. Set to 1.0f for exact native.
+    private const float PlayerLegScale = 1.5f;
+
     /// <summary>A player part layer: UV-indexed (per-instance frame) from the
     /// trooper sheet, at the given plane lift.</summary>
-    private Layer BuildPlayerLayer(SpriteDesc desc, float lift)
+    private Layer BuildPlayerLayer(SpriteDesc desc, float lift, float sizeScale)
     {
         string path = SpriteDir + desc.sheet;
         if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
-            return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 15);
+            return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift, sizeScale, renderPriority: 15);
         }
         var material = new ShaderMaterial { Shader = SpriteShader, RenderPriority = desc.priority };
         material.SetShaderParameter("sheet", tex);
-        Layer layer = BuildLayer(PlayerCap, material, lift, sizeScale: 1.0f, useCustomData: true);
+        Layer layer = BuildLayer(PlayerCap, material, lift, sizeScale, useCustomData: true);
         layer.UvIndexed = true;
         layer.Grid = Mathf.Max(desc.grid, 1);
         layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);

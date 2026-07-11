@@ -294,9 +294,20 @@ public static class ClassicPanel
     private const float DstBottomH = 116.0f;
     private const float Inset = 1.0f;
     private const float InsetWidth = 510.0f;
+    private const float InsetHeight = 254.0f;
+    // The panel BODY (the dark plate) is off-centre in the art: the left side
+    // is the antenna decoration + transparent space. Measured from the alpha
+    // channel (columns 183..495, rows 17..242 of the 512x256 texture). The
+    // width/height the caller asks for maps to the BODY, centred on the
+    // origin, so panel content lines up with the visible plate.
+    private const float BodyX0 = 183.0f;
+    private const float BodyX1 = 495.0f;
+    private const float BodyY0 = 17.0f;
+    private const float BodyY1 = 242.0f;
 
-    /// <summary>Add the panel quads to <paramref name="parent"/>: a widthMeters x
-    /// heightMeters backdrop centred on the parent origin at local z.</summary>
+    /// <summary>Add the panel quads to <paramref name="parent"/>: the panel
+    /// BODY spans widthMeters x heightMeters centred on the parent origin at
+    /// local z (the antenna trim extends beyond to the left/top like the art).</summary>
     public static void Build(Node3D parent, float widthMeters, float heightMeters, float z)
     {
         const string path = "res://assets/sprites/ui_menuPanel.png";
@@ -306,11 +317,18 @@ public static class ClassicPanel
         }
         float texW = tex.GetWidth();
         float texH = tex.GetHeight();
-        // Metres per native panel pixel (dst width maps the 510px inset width).
-        float scale = widthMeters / InsetWidth;
-        float topH = DstTopH * scale;
-        float bottomH = DstBottomH * scale;
-        float midH = heightMeters - topH - bottomH;
+        // Metres per native texture pixel, so the BODY maps to the asked size.
+        float sx = widthMeters / (BodyX1 - BodyX0);
+        float sy = heightMeters / (BodyY1 - BodyY0);
+        float fullW = InsetWidth * sx;
+        float fullH = InsetHeight * sy;
+        // Shift so the body centre (not the texture centre) sits at x=0/y=0.
+        float xOff = ((Inset + texW - Inset) * 0.5f - (BodyX0 + BodyX1) * 0.5f) * sx;
+        float yOff = ((Inset + texH - Inset) * 0.5f - (BodyY0 + BodyY1) * 0.5f) * sy;
+
+        float topH = DstTopH * (fullW / InsetWidth);
+        float bottomH = DstBottomH * (fullW / InsetWidth);
+        float midH = fullH - topH - bottomH;
 
         void Quad(float y, float h, float srcY, float srcH)
         {
@@ -320,7 +338,7 @@ public static class ClassicPanel
             }
             var mesh = new PlaneMesh
             {
-                Size = new Vector2(widthMeters, h),
+                Size = new Vector2(fullW, h),
                 Orientation = PlaneMesh.OrientationEnum.Z,
             };
             var mat = new StandardMaterial3D
@@ -337,14 +355,14 @@ public static class ClassicPanel
             {
                 Mesh = mesh,
                 MaterialOverride = mat,
-                Position = new Vector3(0.0f, y - h * 0.5f, z),
+                Position = new Vector3(xOff, y - h * 0.5f, z),
             });
         }
 
-        float top = heightMeters * 0.5f;
+        float top = fullH * 0.5f + yOff;
         if (midH <= 0.0f)
         {
-            Quad(top, heightMeters, Inset, texH - Inset * 2.0f);
+            Quad(top, fullH, Inset, texH - Inset * 2.0f);
             return;
         }
         Quad(top, topH, Inset, SrcSliceY1 - Inset);
