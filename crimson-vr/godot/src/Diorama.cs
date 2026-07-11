@@ -1218,22 +1218,27 @@ public sealed partial class Diorama : Node3D
         // passes (all shadows, then all colors) like the native two-pass bake.
         if (GroundBakeReady)
         {
-            foreach (Sim.TerrainDecalSnap d in fx.Decals)
+            // Most ticks drain nothing — only re-render the RT on ticks that
+            // actually add stamps (each redraw replays the full scatter+bakes).
+            if (fx.Decals.Length > 0 || fx.Corpses.Length > 0)
             {
-                BakeDecal(d);
-            }
-            if (_bakeBodyset != null)
-            {
-                foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                foreach (Sim.TerrainDecalSnap d in fx.Decals)
                 {
-                    BakeCorpseShadow(c, CorpseFrameFor(c.CreatureTypeId));
+                    BakeDecal(d);
                 }
-                foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                if (_bakeBodyset != null)
                 {
-                    BakeCorpseColor(c, CorpseFrameFor(c.CreatureTypeId));
+                    foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                    {
+                        BakeCorpseShadow(c, CorpseFrameFor(c.CreatureTypeId));
+                    }
+                    foreach (Sim.TerrainCorpseSnap c in fx.Corpses)
+                    {
+                        BakeCorpseColor(c, CorpseFrameFor(c.CreatureTypeId));
+                    }
                 }
+                FlushGroundBakes();
             }
-            FlushGroundBakes();
             return;
         }
 

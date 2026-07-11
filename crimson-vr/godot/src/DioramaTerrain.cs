@@ -76,10 +76,10 @@ public sealed partial class Diorama
             new Color(c.R, c.G, c.B, c.A)));
     }
 
-    /// <summary>Render queued bakes into the persistent ground RT this frame.</summary>
+    /// <summary>Re-render the ground RT with the newly queued bakes.</summary>
     private void FlushGroundBakes()
     {
-        if (_groundCanvas != null && _groundViewport != null && _groundCanvas.HasPendingWork)
+        if (_groundCanvas != null && _groundViewport != null)
         {
             _groundCanvas.QueueRedraw();
             _groundViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
@@ -115,9 +115,6 @@ public sealed partial class Diorama
 
         _groundViewport.Size = new Vector2I(size, size);
         _groundCanvas!.Configure(size, info.TerrainSeed, baseTex, overlayTex, detailTex);
-        // The regeneration render must clear once; afterwards the buffer
-        // persists so decal/corpse bakes accumulate like the native ground RT.
-        _groundViewport.RenderTargetClearMode = SubViewport.ClearMode.Once;
         _groundCanvas.QueueRedraw();
         // Re-render the one-shot target for this generation.
         _groundViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
@@ -158,21 +155,25 @@ public sealed partial class Diorama
         }
     }
 
-    /// <summary>The 2D canvas that stamps the ground: a full clear + scatter on
-    /// (re)generation, then INCREMENTAL decal/corpse bakes on the persistent
-    /// render target (ClearMode Once — the buffer survives between renders,
-    /// like the native ground RT that decals are baked into forever).</summary>
+    /// <summary>The 2D canvas that stamps the ground. Every redraw records the
+    /// FULL state — clear + scatter + every bake so far — so the render target
+    /// never depends on buffer persistence or on how many times the canvas is
+    /// re-dirtied before its one-shot render (a consume-once regenerate flag
+    /// here previously left an EMPTY command list when _Draw ran twice before
+    /// the render, wiping the ground to grey). Bakes accumulate for the run;
+    /// redraws only happen on ticks that add stamps.</summary>
     private sealed partial class GroundStampCanvas : Node2D
     {
+        // Far beyond any realistic run (the old quad rings were 4096 + 1024);
+        // a hard FIFO cap so a marathon can't grow the list unbounded.
+        private const int BakedCap = 24000;
+
         private int _size = 1024;
         private uint _seed;
         private Texture2D? _base;
         private Texture2D? _overlay;
         private Texture2D? _detail;
-        private bool _regenerate;
-        private readonly System.Collections.Generic.List<BakedStamp> _pending = new();
-
-        public bool HasPendingWork => _regenerate || _pending.Count > 0;
+        private readonly System.Collections.Generic.List<BakedStamp> _baked = new();
 
         public void Configure(int size, uint seed, Texture2D baseTex, Texture2D overlayTex, Texture2D detailTex)
         {
@@ -181,11 +182,17 @@ public sealed partial class Diorama
             _base = baseTex;
             _overlay = overlayTex;
             _detail = detailTex;
-            _regenerate = true;
-            _pending.Clear();
+            _baked.Clear();
         }
 
-        public void Enqueue(in BakedStamp stamp) => _pending.Add(stamp);
+        public void Enqueue(in BakedStamp stamp)
+        {
+            _baked.Add(stamp);
+            if (_baked.Count > BakedCap)
+            {
+                _baked.RemoveRange(0, _baked.Count - BakedCap);
+            }
+        }
 
         public override void _Draw()
         {
@@ -193,22 +200,17 @@ public sealed partial class Diorama
             {
                 return;
             }
-            if (_regenerate)
-            {
-                _regenerate = false;
-                DrawRect(new Rect2(0.0f, 0.0f, _size, _size), TerrainClearColor);
-                var rng = new TerrainGen.CrtRand(_seed);
-                Scatter(_base, TerrainBaseTint, ref rng, TerrainGen.DensityBase);
-                Scatter(_overlay, TerrainOverlayTint, ref rng, TerrainGen.DensityOverlay);
-                Scatter(_detail, TerrainDetailTint, ref rng, TerrainGen.DensityDetail);
-            }
-            foreach (BakedStamp s in _pending)
+            DrawRect(new Rect2(0.0f, 0.0f, _size, _size), TerrainClearColor);
+            var rng = new TerrainGen.CrtRand(_seed);
+            Scatter(_base, TerrainBaseTint, ref rng, TerrainGen.DensityBase);
+            Scatter(_overlay, TerrainOverlayTint, ref rng, TerrainGen.DensityOverlay);
+            Scatter(_detail, TerrainDetailTint, ref rng, TerrainGen.DensityDetail);
+            foreach (BakedStamp s in _baked)
             {
                 DrawSetTransform(s.Center, s.Rotation, Vector2.One);
                 DrawTextureRectRegion(s.Tex,
                     new Rect2(-s.Size * 0.5f, s.Size), s.Src, s.Tint);
             }
-            _pending.Clear();
             DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
         }
 
