@@ -72,6 +72,13 @@ public sealed partial class AudioBank : Node3D
     private AudioStream? _panelClickStream;
     private int _typeClickNext;
 
+    // Trooper death VO (player_damage.py _PLAYER_DEATH_SFX: trooper_die_01/02).
+    // The sim emits these only for DAMAGE deaths; Main plays one for perk-kill
+    // deaths (Grim Deal / lost Fatal Lottery, natively silent) at the death
+    // cinematic, using the timestamp to avoid doubling a damage death's VO.
+    private readonly List<int> _trooperDieIds = new();
+    private ulong _lastTrooperDieMs;
+
     public void Configure(float arenaSideMeters, float worldSize)
     {
         _arenaSideMeters = arenaSideMeters;
@@ -123,6 +130,13 @@ public sealed partial class AudioBank : Node3D
         for (int i = 0; i < files.Length; i++)
         {
             string name = files[i];
+            // Only the 01/02 pair — the player-death VO set. die_03 belongs to
+            // the trooper CREATURE's pool (creatures/damage.py) and must not
+            // trip the recent-VO suppression when a trooper enemy dies nearby.
+            if (name is "trooper_die_01.ogg" or "trooper_die_02.ogg")
+            {
+                _trooperDieIds.Add(i);
+            }
             if (!byName.TryGetValue(name, out AudioStream? stream))
             {
                 string path = AudioDir + name;
@@ -212,8 +226,32 @@ public sealed partial class AudioBank : Node3D
 
         foreach (int sfxId in view.Sfx)
         {
+            if (_trooperDieIds.Contains(sfxId))
+            {
+                _lastTrooperDieMs = Time.GetTicksMsec();
+            }
             Play(sfxId, centre);
         }
+    }
+
+    /// <summary>True when a player-death VO played within the window — the sim
+    /// emits one for damage deaths, so the frontend's perk-death VO must not
+    /// stack a second cry on top of it.</summary>
+    public bool TrooperDieRecent(ulong withinMs)
+        => _lastTrooperDieMs != 0 && Time.GetTicksMsec() - _lastTrooperDieMs <= withinMs;
+
+    /// <summary>Play the trooper death VO at the player (random of the 01/02
+    /// pair, like player_damage.py's rand &amp; 1). VR adaptation for perk-kill
+    /// deaths, which are natively silent.</summary>
+    public void PlayTrooperDie(Vector2 playerGame)
+    {
+        if (!_ready || _trooperDieIds.Count == 0)
+        {
+            return;
+        }
+        _lastTrooperDieMs = Time.GetTicksMsec();
+        int pick = _trooperDieIds[(int)(GD.Randi() % (uint)_trooperDieIds.Count)];
+        Play(pick, Mapper.GameToArenaLocal(playerGame, _arenaSideMeters, _worldSize));
     }
 
     private void PlayWeapon(Dictionary<int, int> map, int weaponId, Vector3 pos)

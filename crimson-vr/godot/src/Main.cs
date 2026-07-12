@@ -111,8 +111,11 @@ public partial class Main : Node3D
     private int _deathTicks;     // pacing counter: death -> results (base death-timer delay)
     // Death cinematic: the view zooms in on the corpse over roughly the death
     // animation's length (16/20 s = 48 ticks), holding until the run resets.
+    // The zoom factor is computed at death so the corpse spans about a quarter
+    // of the arena side regardless of the player's size stat.
     private Vector2 _deathZoomCenter;
-    private const float DeathZoomMax = 2.0f;
+    private float _deathZoomMax = 2.0f;
+    private const float DeathZoomCorpseFraction = 0.25f;
     private const int DeathZoomTicks = 48;
     private int _deathRank = int.MaxValue; // 0-based insertion rank of the death score
 
@@ -1082,15 +1085,31 @@ public partial class Main : Node3D
             }
             // Death cinematic (VR adaptation): the view zooms in on the corpse
             // over the death animation — same physical arena window, magnified
-            // content — while creatures keep milling; the score panel follows.
+            // content. The sim KEEPS TICKING through the pacing window (falls
+            // through to the tick path below) so the corpse frame ramp plays
+            // (death_timer only drains on ticks) and the creatures keep
+            // milling; the world freezes once the score panel is up.
             if (_deathTicks == 0)
             {
                 _deathZoomCenter = _playerGame;
+                // Zoom target: the corpse spans ~a quarter of the arena side.
+                float corpseSize = _hasPlayerSnap ? Mathf.Max(_lastPlayer.Size, 1.0f) : 32.0f;
+                _deathZoomMax = Mathf.Clamp(
+                    DeathZoomCorpseFraction * GameWorldSize / corpseSize, 2.0f, 16.0f);
+                // Perk-kill deaths (Grim Deal, a lost Fatal Lottery) set health
+                // directly with no damage path, so the sim emits no death VO —
+                // natively they're silent. VR adaptation: give every death the
+                // trooper death cry; skip it when the damage path just played
+                // one so ordinary deaths don't double up.
+                if (!_audio.TrooperDieRecent(withinMs: 500))
+                {
+                    _audio.PlayTrooperDie(_playerGame);
+                }
             }
             _deathTicks++;
             float zoomT = Mathf.Clamp(_deathTicks / (float)DeathZoomTicks, 0.0f, 1.0f);
             _diorama.SetViewZoom(
-                1.0f + (DeathZoomMax - 1.0f) * Mathf.SmoothStep(0.0f, 1.0f, zoomT),
+                1.0f + (_deathZoomMax - 1.0f) * Mathf.SmoothStep(0.0f, 1.0f, zoomT),
                 _deathZoomCenter);
             if (_deathTicks >= DeathPacingTicks)
             {
@@ -1117,8 +1136,10 @@ public partial class Main : Node3D
                 {
                     _gameOverPanel.Show(_sim.LastResult, _deathRank);
                 }
+                return;
             }
-            return;
+            // Fall through: the world stays live during the cinematic (dead
+            // player input is inert in the sim).
         }
 
         // Quest completed (ABI v14): pace like the death flow, then show the
@@ -1146,7 +1167,12 @@ public partial class Main : Node3D
             }
             return;
         }
-        _deathTicks = 0;
+        // The death cinematic falls through here still counting; only a live
+        // run resets the pacing counter.
+        if (!_sim.GameOver)
+        {
+            _deathTicks = 0;
+        }
 
         // Paused: freeze the sim (stop advancing). _Process still renders the last
         // frame and polls the pause panel so Resume/Quit work.
