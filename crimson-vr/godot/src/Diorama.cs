@@ -44,6 +44,7 @@ public sealed partial class Diorama : Node3D
         public Color BaseColor;      // creatures only; per-creature tint multiplier
         public float HitFlash;       // creatures only; white hit-flash timer
         public int Frame;            // UvIndexed layers (bonuses); atlas cell index
+        public ulong Identity;       // creatures only; pool slot + reuse generation
     }
 
     private sealed class Layer
@@ -56,6 +57,7 @@ public sealed partial class Diorama : Node3D
         public float Lift;
         public float SizeScale;
         public float HeadingOffset; // radians; corrects a sheet's baked art facing
+        public bool HasStableIdentity;
 
         // Animation (creature layers): pick the 8x8 frame per instance from
         // anim_phase + flags via CreatureAnim.SelectFrame, written into the
@@ -95,7 +97,7 @@ public sealed partial class Diorama : Node3D
             CurrCount = 0;
         }
 
-        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0, int typeId = 0, float maxHp = 0.0f, float lifecycleStage = 16.0f, Color? baseColor = null, float hitFlash = 0.0f, int frame = 0)
+        public void Add(Vector2 game, float angle, float sizeGame, float animPhase = 0.0f, uint flags = 0, int typeId = 0, float maxHp = 0.0f, float lifecycleStage = 16.0f, Color? baseColor = null, float hitFlash = 0.0f, int frame = 0, ulong identity = 0)
         {
             if (CurrCount >= Curr.Length)
             {
@@ -114,6 +116,7 @@ public sealed partial class Diorama : Node3D
                 BaseColor = baseColor ?? Colors.White,
                 HitFlash = hitFlash,
                 Frame = frame,
+                Identity = identity,
             };
         }
     }
@@ -332,6 +335,27 @@ public sealed partial class Diorama : Node3D
 
     public void ResetViewZoom() => SetViewZoom(1.0f, new Vector2(_worldSize * 0.5f, _worldSize * 0.5f));
 
+    /// <summary>Discard entity history when the native session is replaced so
+    /// the first frame of a new run cannot interpolate from the old run.</summary>
+    public void ResetInterpolation()
+    {
+        static void Clear(Layer layer)
+        {
+            layer.PrevCount = 0;
+            layer.CurrCount = 0;
+            layer.Mesh.VisibleInstanceCount = 0;
+        }
+
+        Clear(_players);
+        Clear(_playerLegs);
+        Clear(_bonuses);
+        foreach (Layer layer in _creatureLayers.Values)
+        {
+            Clear(layer);
+        }
+        Clear(_creatureFallback);
+    }
+
     /// <summary>View-transformed game position (magnified about the zoom centre).</summary>
     private Vector2 ViewGame(Vector2 game) =>
         _viewCenterGame + (game - _viewCenterGame) * _viewZoom;
@@ -378,6 +402,7 @@ public sealed partial class Diorama : Node3D
                     Layer layer =
                         BuildAnimatedSpriteLayer(CreatureCapPerType, kv.Value, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f);
                     layer.ClampRefSize = true;
+                    layer.HasStableIdentity = true;
                     _creatureLayers[typeId] = layer;
                 }
             }
@@ -385,6 +410,7 @@ public sealed partial class Diorama : Node3D
         // Fallback for unmapped creature types (e.g. bosses) so nothing vanishes.
         _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
         _creatureFallback.ClampRefSize = true;
+        _creatureFallback.HasStableIdentity = true;
 
         // Native pass order (top of the stack): player < projectiles/effects <
         // bonuses/UI. Projectiles/secondaries now use the faithful per-type
@@ -1546,7 +1572,8 @@ public sealed partial class Diorama : Node3D
             Layer target = _creatureLayers.TryGetValue(c.TypeId, out Layer? l) ? l : _creatureFallback;
             target.Add(new Vector2(c.X, c.Y), c.Heading, c.Size, c.AnimPhase, c.Flags,
                 maxHp: c.MaxHp, lifecycleStage: c.LifecycleStage,
-                baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer);
+                baseColor: new Color(c.R, c.G, c.B, c.A), hitFlash: c.HitFlashTimer,
+                identity: ((ulong)c.Generation << 32) | (uint)c.PoolIndex);
         }
 
         // Projectiles + secondaries: faithful per-type renderers (tick-rate; the
@@ -1743,7 +1770,7 @@ public sealed partial class Diorama : Node3D
             Vector2 game = cur.Game;
             float angle = cur.Angle;
             float sizeGame = cur.SizeGame;
-            if (interp)
+            if (interp && (!layer.HasStableIdentity || layer.Prev[i].Identity == cur.Identity))
             {
                 Ent prev = layer.Prev[i];
                 game = prev.Game.Lerp(cur.Game, frac);

@@ -66,18 +66,26 @@ if (Test-Path $simCs) {
     if ($abiMatch) { $abiExpected = [int]$abiMatch.Matches[0].Groups[1].Value }
 }
 $objdump = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\ndk\*\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-objdump.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($abiExpected -and $objdump) {
-    $dis = & $objdump.FullName -d --disassemble-symbols=crimson_host_abi_version $preflight['arm64 native lib (build_libcrimson.ps1 -android)'] 2>$null
-    $mv = $dis | Select-String 'mov\s+w0, #(0x[0-9a-fA-F]+|\d+)' | Select-Object -First 1
-    if ($mv) {
-        $rawVer = $mv.Matches[0].Groups[1].Value
-        $libVer = if ($rawVer -like '0x*') { [Convert]::ToInt32($rawVer.Substring(2), 16) } else { [int]$rawVer }
-        if ($libVer -ne $abiExpected) {
-            throw "preflight failed: arm64 libcrimson_host.so reports ABI v$libVer but Sim.cs expects v$abiExpected - rebuild it (build_libcrimson.ps1 -android)"
-        }
-        Write-Host "    arm64 lib ABI v$libVer matches Sim.cs" -ForegroundColor DarkGray
-    }
+if (-not $abiExpected) {
+    throw "preflight failed: could not read ExpectedAbiVersion from $simCs"
 }
+if (-not $objdump) {
+    throw "preflight failed: llvm-objdump not found under the Android NDK; cannot verify the arm64 native ABI"
+}
+$dis = & $objdump.FullName -d --disassemble-symbols=crimson_host_abi_version $preflight['arm64 native lib (build_libcrimson.ps1 -android)'] 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw "preflight failed: llvm-objdump could not disassemble crimson_host_abi_version"
+}
+$mv = $dis | Select-String 'mov\s+w0, #(0x[0-9a-fA-F]+|\d+)' | Select-Object -First 1
+if (-not $mv) {
+    throw "preflight failed: could not decode crimson_host_abi_version from the arm64 native library"
+}
+$rawVer = $mv.Matches[0].Groups[1].Value
+$libVer = if ($rawVer -like '0x*') { [Convert]::ToInt32($rawVer.Substring(2), 16) } else { [int]$rawVer }
+if ($libVer -ne $abiExpected) {
+    throw "preflight failed: arm64 libcrimson_host.so reports ABI v$libVer but Sim.cs expects v$abiExpected - rebuild it (build_libcrimson.ps1 -android)"
+}
+Write-Host "    arm64 lib ABI v$libVer matches Sim.cs" -ForegroundColor DarkGray
 if ($Install) {
     $adbPre = (Get-Command adb -ErrorAction SilentlyContinue).Source
     if (-not $adbPre) { $adbPre = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }

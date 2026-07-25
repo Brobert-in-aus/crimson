@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 17;
+    public const uint ExpectedAbiVersion = 18;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -160,6 +160,8 @@ public static partial class Sim
         public float B;
         public float A;
         public float HitFlashTimer;
+        public int PoolIndex;       // ABI v18+: stable pool slot for render interpolation
+        public uint Generation;     // ABI v18+: increments whenever the slot is reused
     }
 
     [StructLayout(LayoutKind.Sequential)]

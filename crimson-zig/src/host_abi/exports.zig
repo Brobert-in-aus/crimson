@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 17;
+pub const abi_version: u32 = 18;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -198,6 +198,10 @@ pub const CreatureSnap = extern struct {
     b: f32,
     a: f32,
     hit_flash_timer: f32,
+    // ABI v18: stable presentation identity. Pool slots are reused, so the
+    // generation changes on every new occupant.
+    pool_index: i32,
+    generation: u32,
 };
 
 pub const ProjectileSnap = extern struct {
@@ -868,7 +872,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .death_timer = player.death_timer,
         });
     }
-    for (box.runner.session.creatures.entries) |entry| {
+    for (box.runner.session.creatures.entries, 0..) |entry, creature_slot| {
         if (!entry.active) continue;
         const wire_flags: u32 = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0);
         writeStruct(out, &offset, CreatureSnap{
@@ -887,6 +891,8 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .b = entry.color[2],
             .a = entry.color[3],
             .hit_flash_timer = entry.hit_flash_timer,
+            .pool_index = @intCast(creature_slot),
+            .generation = entry.presentation_generation,
         });
     }
     for (box.runner.session.projectiles.entries, 0..) |entry, proj_slot| {

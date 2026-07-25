@@ -56,8 +56,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v17" {
-    try std.testing.expectEqual(@as(u32, 17), exports.crimson_host_abi_version());
+test "abi version reports v18" {
+    try std.testing.expectEqual(@as(u32, 18), exports.crimson_host_abi_version());
 }
 
 test "abi player snapshot carries the death timer" {
@@ -419,6 +419,9 @@ test "abi creature snapshot carries tint and hit flash" {
         for (0..header.creature_count) |ci| {
             var c: exports.CreatureSnap = undefined;
             @memcpy(std.mem.asBytes(&c), buf[off + ci * @sizeOf(exports.CreatureSnap) ..][0..@sizeOf(exports.CreatureSnap)]);
+            try std.testing.expect(c.pool_index >= 0);
+            try std.testing.expect(c.pool_index < crimson_zig.creatures.max_creatures);
+            try std.testing.expect(c.generation > 0);
             // Tint channels are valid [0,1] multipliers.
             try std.testing.expect(c.r >= 0.0 and c.r <= 1.0);
             try std.testing.expect(c.g >= 0.0 and c.g <= 1.0);

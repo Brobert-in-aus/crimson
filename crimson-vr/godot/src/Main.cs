@@ -208,6 +208,17 @@ public partial class Main : Node3D
             : $"sim unavailable: {_simError ?? "native lib missing"}";
     }
 
+    public override void _ExitTree()
+    {
+        // Menu Quit is not the only shutdown path: desktop window close and
+        // platform lifecycle teardown also reach here. Persist the live status
+        // before releasing the native session.
+        CaptureWeaponUsage();
+        _sim?.Dispose();
+        _sim = null;
+        VrButton.OnAnyPress = null;
+    }
+
     private string? _simError; // SimSession ctor failure message (for the status line)
 
     private void StartSession()
@@ -486,6 +497,7 @@ public partial class Main : Node3D
         CaptureWeaponUsage();
         _runSeed = GD.Randi();
         _sim.Restart(SessionConfig);
+        _diorama.ResetInterpolation();
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
         _diorama.ResetViewZoom(); // death cinematic ends with the run
@@ -1156,7 +1168,7 @@ public partial class Main : Node3D
                 _questEndShown = true;
                 RecordRunStats();
                 int gi = QuestGlobalIndex(_questKey);
-                if (gi == _settings.QuestUnlockIndex && gi < 49)
+                if (gi == _settings.QuestUnlockIndex)
                 {
                     _settings.QuestUnlockIndex = gi + 1;
                     _settings.Save();

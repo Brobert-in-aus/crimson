@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 17u
+#define CRIMSON_HOST_ABI_VERSION 18u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -209,6 +209,10 @@ typedef struct crimson_host_creature_snap {
     float b;
     float a;
     float hit_flash_timer;
+    /* ABI v18: stable render identity. pool_index identifies the slot and
+     * generation increments whenever that slot receives a new creature. */
+    int32_t pool_index;
+    uint32_t generation;
 } crimson_host_creature_snap;
 
 typedef struct crimson_host_projectile_snap {

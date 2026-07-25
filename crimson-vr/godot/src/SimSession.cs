@@ -281,14 +281,18 @@ public sealed class SimSession : IDisposable
     /// select: game_mode / quest_level_key / unlock index change per run).</summary>
     public void Restart(string configJson)
     {
-        if (Handle != 0)
-        {
-            Sim.SessionDestroy(Handle);
-        }
+        // Create first so a bad config/allocation leaves the current session
+        // usable. Only publish the new handle after creation succeeds.
+        ulong newHandle = Sim.SessionCreate(configJson);
+        ulong oldHandle = Handle;
+        Handle = newHandle;
         _configJson = configJson;
-        Handle = Sim.SessionCreate(configJson);
         LastResult = default;
         _curSlot = -1;
+        if (oldHandle != 0)
+        {
+            Sim.SessionDestroy(oldHandle);
+        }
     }
 
     public void Dispose()

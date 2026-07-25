@@ -54,6 +54,9 @@ fn unpackBonusOnDeathArgs(link_index: i32) ?struct { bonus_id: game_ids.BonusId,
 
 pub const CreatureState = struct {
     active: bool = false,
+    // Presentation-only identity generation. Incremented whenever this pool
+    // slot is assigned to a new creature.
+    presentation_generation: u32 = 0,
     type_id: i32 = 0,
     pos: state_mod.Vec2 = .{},
     target: state_mod.Vec2 = .{},
@@ -205,9 +208,11 @@ pub const CreaturePool = struct {
         const stale_link_index = self.entries[slot].link_index;
         const stale_target_heading = self.entries[slot].target_heading;
         const stale_heading = self.entries[slot].heading;
+        const presentation_generation = self.entries[slot].presentation_generation +% 1;
 
         self.entries[slot] = .{
             .active = true,
+            .presentation_generation = presentation_generation,
             .type_id = @intFromEnum(init.type_id),
             .pos = .{
                 .x = narrowF32(init.pos.x),
@@ -3855,6 +3860,32 @@ pub fn applyPlayerContactDamage(
 
 fn expectFloatClose(expected: f32, actual: f32) !void {
     try std.testing.expectApproxEqAbs(expected, actual, 1e-6);
+}
+
+test "creature presentation generation changes when a pool slot is reused" {
+    var pool: CreaturePool = .{};
+    const init: spawn_mod.CreatureInit = .{
+        .origin_template_id = -1,
+        .pos = .{ .x = 10.0, .y = 20.0 },
+        .heading = 0.0,
+        .phase_seed = 0.0,
+        .type_id = .alien,
+        .flags = 0,
+        .size = 44.0,
+        .move_speed = 0.0,
+        .health = 10.0,
+        .max_health = 10.0,
+        .reward_value = 0.0,
+        .contact_damage = 0.0,
+    };
+
+    const first_slot = pool.spawnInit(init);
+    const first_generation = pool.entries[first_slot].presentation_generation;
+    pool.entries[first_slot].active = false;
+    const second_slot = pool.spawnInit(init);
+
+    try std.testing.expectEqual(first_slot, second_slot);
+    try std.testing.expectEqual(first_generation +% 1, pool.entries[second_slot].presentation_generation);
 }
 
 test "bloody mess quick learner reward is still doubled by double experience bonus" {
