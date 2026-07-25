@@ -16,13 +16,18 @@
 # Usage:
 #   pwsh -File crimson-vr/tools/build_quest.ps1 [-Install] [-Device <ip:port>]
 #     -Install        adb install -r the signed APK to -Device afterward
+#     -InstallOnly    skip the build; install the existing signed APK
 #     -Device         wireless adb target (default 192.168.8.100:5555)
 #     -ExportTimeoutSec  hard cap on the export wait (default 600)
+#     -WaitDeviceSec  how long to wait for a sleeping/powered-off Quest before
+#                     skipping the install (default 300; the APK is kept either way)
 
 param(
     [switch]$Install,
+    [switch]$InstallOnly,
     [string]$Device = '192.168.8.100:5555',
     [int]$ExportTimeoutSec = 600,
+    [int]$WaitDeviceSec = 300,
     [string]$Godot = 'D:\Projects\CrimsonVR\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
 )
 
@@ -35,6 +40,53 @@ $inject = Join-Path $PSScriptRoot 'inject_native_and_sign.ps1'
 
 if (-not (Test-Path $Godot)) { throw "Godot not found: $Godot" }
 if (-not (Test-Path $inject)) { throw "inject script not found: $inject" }
+
+function Install-QuestApk {
+    # Installs the signed APK, treating an unreachable Quest as a normal state
+    # rather than a build failure: wireless-adb targets are connect'ed first,
+    # then polled up to $WaitDeviceSec (a sleeping headset joins the network a
+    # few seconds after waking). Returns $true only when the install succeeded;
+    # on timeout the APK stays on disk and the caller prints the follow-up.
+    param([string]$Apk)
+    $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
+    if (-not $adb) { $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
+    if (-not (Test-Path $adb)) { throw "adb not found (install to $Device manually)" }
+
+    Write-Host "==> Installing to $Device..." -ForegroundColor Cyan
+    $deadline = (Get-Date).AddSeconds($WaitDeviceSec)
+    $announced = $false
+    while ($true) {
+        # tcp serials must be adb-connect'ed each attempt; when the host is down
+        # the TCP timeout (~20s) provides most of the retry pacing by itself.
+        # Probes run via cmd /c: under EAP Stop, PS 5.1 turns any native stderr
+        # line (e.g. adb's "device not found") into a terminating error.
+        if ($Device -match ':') { cmd /c "`"$adb`" connect $Device >nul 2>nul" | Out-Null }
+        $list = (cmd /c "`"$adb`" devices 2>nul" | Out-String)
+        if ($list -match ([regex]::Escape($Device) + "\s+device")) {
+            & $adb -s $Device install -r $Apk
+            if ($LASTEXITCODE -ne 0) { throw "adb install failed ($LASTEXITCODE)" }
+            return $true
+        }
+        if ((Get-Date) -gt $deadline) { break }
+        if (-not $announced) {
+            Write-Host ("    Quest not reachable (powered off / asleep?). Waiting up to {0}s -- wake it to install; Ctrl+C is safe, the APK is already built." -f $WaitDeviceSec) -ForegroundColor Yellow
+            $announced = $true
+        }
+        Start-Sleep -Seconds 5
+    }
+    Write-Warning ("Quest not reachable at {0} after {1}s -- install skipped, the signed APK is kept." -f $Device, $WaitDeviceSec)
+    Write-Host "    Install once it's awake with: build_quest.ps1 -InstallOnly" -ForegroundColor DarkGray
+    return $false
+}
+
+if ($InstallOnly) {
+    if (-not (Test-Path $questApk)) { throw "-InstallOnly: no signed APK at $questApk (run a full build first)" }
+    if (-not (Install-QuestApk $questApk)) { exit 1 }
+    Write-Host ""
+    Write-Host ("DONE: installed {0}" -f $questApk) -ForegroundColor Green
+    Write-Host "Launch from the in-headset app library (adb launch is gated by the controllers dialog)." -ForegroundColor DarkGray
+    exit 0
+}
 
 # Preflight everything the post-export steps need, so a missing keystore / tool /
 # native lib / vendors plugin fails now instead of after the multi-minute export.
@@ -207,17 +259,16 @@ foreach ($e in $required) {
 }
 Write-Host ("    payload OK ({0} required entries present)" -f $required.Count) -ForegroundColor DarkGray
 
+$installed = $false
 if ($Install) {
-    $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
-    if (-not $adb) { $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
-    if (-not (Test-Path $adb)) { throw "adb not found (install to $Device manually)" }
-    Write-Host "==> Installing to $Device..." -ForegroundColor Cyan
-    & $adb -s $Device install -r $questApk
-    if ($LASTEXITCODE -ne 0) { throw "adb install failed ($LASTEXITCODE)" }
+    $installed = Install-QuestApk $questApk
 }
 
 $questMb = [math]::Round((Get-Item $questApk).Length / 1MB, 1)
 Write-Host ""
-Write-Host ("DONE: {0} ({1} MB)" -f $questApk, $questMb) -ForegroundColor Green
-if (-not $Install) { Write-Host "Install with: adb -s $Device install -r `"$questApk`"" -ForegroundColor DarkGray }
+Write-Host ("DONE: {0} ({1} MB){2}" -f $questApk, $questMb, $(if ($installed) { ' -- installed' } else { '' })) -ForegroundColor Green
+if (-not $installed) {
+    $hint = if ($Install) { "build_quest.ps1 -InstallOnly" } else { "build_quest.ps1 -InstallOnly  (or: adb -s $Device install -r `"$questApk`")" }
+    Write-Host "Install with: $hint" -ForegroundColor DarkGray
+}
 Write-Host "Launch from the in-headset app library (adb launch is gated by the controllers dialog)." -ForegroundColor DarkGray
