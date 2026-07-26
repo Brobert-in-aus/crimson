@@ -96,6 +96,27 @@ public sealed partial class Diorama
         }
     }
 
+    /// <summary>An Android app-resume can recreate the render targets (their
+    /// contents are lost while the headset sleeps); replay the full ground
+    /// state — scatter plus every accumulated stamp — into the fresh RTs.</summary>
+    public override void _Notification(int what)
+    {
+        if (what != NotificationApplicationResumed)
+        {
+            return;
+        }
+        if (_groundCanvas != null && _groundViewport != null)
+        {
+            _groundCanvas.InvalidateBake();
+            _groundViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
+        }
+        if (_groundCleanCanvas != null && _groundCleanViewport != null)
+        {
+            _groundCleanCanvas.QueueRedraw();
+            _groundCleanViewport.RenderTargetUpdateMode = SubViewport.UpdateMode.Once;
+        }
+    }
+
     /// <summary>Generate the ground into the shared viewport texture. Returns
     /// null when any slot sheet is missing (caller falls back to tiling).</summary>
     private Texture2D? GenerateGround(in Sim.TerrainInfo info)
@@ -183,17 +204,21 @@ public sealed partial class Diorama
         }
     }
 
-    /// <summary>The 2D canvas that stamps the ground. Every redraw records the
-    /// FULL state — clear + scatter + every bake so far — so the render target
-    /// never depends on buffer persistence or on how many times the canvas is
-    /// re-dirtied before its one-shot render (a consume-once regenerate flag
-    /// here previously left an EMPTY command list when _Draw ran twice before
-    /// the render, wiping the ground to grey). Bakes accumulate for the run;
-    /// redraws only happen on ticks that add stamps.</summary>
+    /// <summary>The 2D canvas that stamps the ground. The render-target buffer
+    /// persists between one-shot renders (ClearMode.Once), so a redraw only
+    /// needs to record the stamps not yet in the RT: the base (clear + scatter)
+    /// is drawn when _pendingStart == 0 (new run / resume), and per-kill
+    /// flushes record just the NEW stamps — the previous full-state redraw made
+    /// every bloody tick cost O(entire run's stamps), a measurable frame spike
+    /// late in a run. Pending stamps are only retired once a frame has actually
+    /// rendered the recorded list (FramePostDraw): a consume-once flag here
+    /// previously left an EMPTY command list when _Draw ran twice before the
+    /// one-shot render, wiping the ground to grey.</summary>
     private sealed partial class GroundStampCanvas : Node2D
     {
         // Far beyond any realistic run (the old quad rings were 4096 + 1024);
-        // a hard FIFO cap so a marathon can't grow the list unbounded.
+        // a hard FIFO cap so a marathon can't grow the list unbounded. With the
+        // incremental path the full list is only replayed on a resume redraw.
         private const int BakedCap = 24000;
 
         private int _size = 1024;
@@ -202,6 +227,34 @@ public sealed partial class Diorama
         private Texture2D? _overlay;
         private Texture2D? _detail;
         private readonly System.Collections.Generic.List<BakedStamp> _baked = new();
+        private int _pendingStart;         // first stamp not yet rendered into the RT
+        private int _recordedThrough = -1; // stamp count captured by the last _Draw, -1 = none
+
+        public override void _EnterTree() => RenderingServer.FramePostDraw += CommitRendered;
+
+        public override void _ExitTree() => RenderingServer.FramePostDraw -= CommitRendered;
+
+        /// <summary>The frame finished rendering, so the command list recorded
+        /// by the last _Draw is in the render target; those stamps never need
+        /// recording again (until a full invalidation).</summary>
+        private void CommitRendered()
+        {
+            if (_recordedThrough >= 0)
+            {
+                _pendingStart = _recordedThrough;
+                _recordedThrough = -1;
+            }
+        }
+
+        /// <summary>Force the next redraw to record the full state (clear +
+        /// scatter + all stamps). Needed when the RT contents are gone: a new
+        /// run's Configure, or an Android app-resume that recreated the RT.</summary>
+        public void InvalidateBake()
+        {
+            _pendingStart = 0;
+            _recordedThrough = -1;
+            QueueRedraw();
+        }
 
         public void Configure(int size, uint seed, Texture2D baseTex, Texture2D overlayTex, Texture2D detailTex)
         {
@@ -211,6 +264,8 @@ public sealed partial class Diorama
             _overlay = overlayTex;
             _detail = detailTex;
             _baked.Clear();
+            _pendingStart = 0;
+            _recordedThrough = -1;
         }
 
         public void Enqueue(in BakedStamp stamp)
@@ -218,7 +273,13 @@ public sealed partial class Diorama
             _baked.Add(stamp);
             if (_baked.Count > BakedCap)
             {
-                _baked.RemoveRange(0, _baked.Count - BakedCap);
+                int drop = _baked.Count - BakedCap;
+                _baked.RemoveRange(0, drop);
+                _pendingStart = System.Math.Max(0, _pendingStart - drop);
+                if (_recordedThrough >= 0)
+                {
+                    _recordedThrough = System.Math.Max(0, _recordedThrough - drop);
+                }
             }
         }
 
@@ -228,18 +289,23 @@ public sealed partial class Diorama
             {
                 return;
             }
-            DrawRect(new Rect2(0.0f, 0.0f, _size, _size), TerrainClearColor);
-            var rng = new TerrainGen.CrtRand(_seed);
-            Scatter(_base, TerrainBaseTint, ref rng, TerrainGen.DensityBase);
-            Scatter(_overlay, TerrainOverlayTint, ref rng, TerrainGen.DensityOverlay);
-            Scatter(_detail, TerrainDetailTint, ref rng, TerrainGen.DensityDetail);
-            foreach (BakedStamp s in _baked)
+            if (_pendingStart == 0)
             {
+                DrawRect(new Rect2(0.0f, 0.0f, _size, _size), TerrainClearColor);
+                var rng = new TerrainGen.CrtRand(_seed);
+                Scatter(_base, TerrainBaseTint, ref rng, TerrainGen.DensityBase);
+                Scatter(_overlay, TerrainOverlayTint, ref rng, TerrainGen.DensityOverlay);
+                Scatter(_detail, TerrainDetailTint, ref rng, TerrainGen.DensityDetail);
+            }
+            for (int i = _pendingStart; i < _baked.Count; i++)
+            {
+                BakedStamp s = _baked[i];
                 DrawSetTransform(s.Center, s.Rotation, Vector2.One);
                 DrawTextureRectRegion(s.Tex,
                     new Rect2(-s.Size * 0.5f, s.Size), s.Src, s.Tint);
             }
             DrawSetTransform(Vector2.Zero, 0.0f, Vector2.One);
+            _recordedThrough = _baked.Count;
         }
 
         // One scatter pass: the full slot texture drawn as 128x128 patches
