@@ -118,6 +118,7 @@ public partial class Main : Node3D
     private const float DeathZoomCorpseFraction = 0.25f;
     private const int DeathZoomTicks = 48;
     private int _deathRank = int.MaxValue; // 0-based insertion rank of the death score
+    private int _deathScore;               // score pinned when the death screen opened
 
     // ~1.2 s at 60 Hz between death and the results flow, standing in for the
     // base game's death VO + death-timer delay before the panel slides in
@@ -1078,17 +1079,18 @@ public partial class Main : Node3D
                 _perkMenu.Open();
             }
         }
-        // Death handling (base game_over.py flow): a short pacing delay over the
-        // frozen world, then name entry (only when the score ranks, like the base
-        // top-100 gate — ours is the local top-10), then the results panel with
-        // Play Again / Main Menu. Sim frozen throughout. Quest mode swaps the
-        // score card for the Quest Failed panel (no highscores in quests).
-        if (_sim.GameOver && _sim.LastResult.PerkPendingCount == 0)
+        // Death handling (base game_over.py flow): a short pacing delay, then
+        // name entry (only when the score ranks, like the base top-100 gate —
+        // ours is the local top-10), then the results panel with Play Again /
+        // Main Menu. VR adaptation (user request): the world is NOT frozen
+        // under the death screen — the branch is skipped while the keyboard/
+        // panel is up, so the tick path below keeps the swarm milling around
+        // the corpse (dead input is inert; the score was pinned at show time).
+        // Quest mode swaps the score card for the Quest Failed panel (no
+        // highscores in quests) and freezes via the quest-panel guard above.
+        if (_sim.GameOver && _sim.LastResult.PerkPendingCount == 0
+            && !_keyboard.Active && !_gameOverPanel.Active)
         {
-            if (_keyboard.Active || _gameOverPanel.Active)
-            {
-                return;
-            }
             // A pause opened just before death keeps the screen until resolved
             // (Resume resumes the death flow; Quit already routes to the menu).
             if (_pauseMenu.IsPaused)
@@ -1134,6 +1136,10 @@ public partial class Main : Node3D
                     return;
                 }
                 int score = _sim.LastResult.PlayerExperience;
+                // Pin the score now: the sim keeps ticking under the death
+                // screen, and posthumous kills must not drift the saved entry
+                // away from the rank/panel computed here.
+                _deathScore = score;
                 _deathRank = HighscoreRank(score);
                 // One composite death screen (base game_over.py two-phase panel):
                 // the results panel appears immediately; a ranking score raises it
@@ -1545,7 +1551,10 @@ public partial class Main : Node3D
         {
             return;
         }
-        int score = _sim.LastResult.PlayerExperience;
+        // The score pinned when the death screen opened, NOT the live tick
+        // result: the world keeps simulating during name entry and posthumous
+        // kills would otherwise drift the entry away from the shown rank.
+        int score = _deathScore;
         if (!string.IsNullOrEmpty(name))
         {
             _settings.AddHighscore(name, score, _gameMode);
