@@ -829,6 +829,12 @@ public sealed partial class Diorama : Node3D
                 continue;
             }
             var game = new Vector2(c.X, c.Y);
+            // Off-terrain spawns are edge-faded to invisible; their auras
+            // must not give them away outside the arena.
+            if (EdgeFadeAlpha(game) <= 0.01f)
+            {
+                continue;
+            }
             if (monsterVision)
             {
                 Emit(game, 90.0f, new Color(1.0f, 1.0f, 0.0f, fade));
@@ -959,6 +965,12 @@ public sealed partial class Diorama : Node3D
             }
             Vector2 viewGame = ViewGame(new Vector2(c.X, c.Y));
             if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
+            {
+                idx++;
+                continue;
+            }
+            // Edge-faded off-terrain spawns keep their ice block hidden too.
+            if (EdgeFadeAlpha(new Vector2(c.X, c.Y)) <= 0.01f)
             {
                 idx++;
                 continue;
@@ -1799,9 +1811,14 @@ public sealed partial class Diorama : Node3D
                 : sizeGame;
             float meters = Mathf.Max(sizeUnits * k * layer.SizeScale, 0.002f);
 
+            // Edge fade applies to creature layers only (players/bonuses never
+            // leave the terrain): shadows shrink with it, sprites fade via the
+            // tint alpha below.
+            float edgeFade = layer.HasStableIdentity ? EdgeFadeAlpha(game) : 1.0f;
+
             if (castShadow)
             {
-                AddShadow(arena, meters);
+                AddShadow(arena, meters * edgeFade);
             }
 
             Basis basis;
@@ -1890,7 +1907,9 @@ public sealed partial class Diorama : Node3D
 
             if (layer.Tinted)
             {
-                layer.Mesh.SetInstanceColor(i, CreatureTint(cur));
+                Color tint = CreatureTint(cur);
+                tint.A *= edgeFade;
+                layer.Mesh.SetInstanceColor(i, tint);
             }
 
             if (sprite && _debug && _needles != null)
@@ -1899,6 +1918,24 @@ public sealed partial class Diorama : Node3D
             }
         }
         layer.Mesh.VisibleInstanceCount = layer.CurrCount;
+    }
+
+    // ---- Arena-edge spawn treatment (PLAN §6, presentation-only) ----
+    // Survival creatures spawn up to 40 game units OUTSIDE the terrain and walk
+    // in (rand_survival_spawn_pos: -40 / size+40). The flat game's camera crops
+    // that, but the diorama shows the whole plane, so they popped into
+    // existence standing on the margin band. Fade them in across a short band
+    // inside the bounds instead; fully outside = invisible. Spawn positions
+    // are exact sim state — only the presentation fades.
+    private const float EdgeFadeBandGame = 24.0f;
+
+    /// <summary>0 outside the terrain bounds, ramping to 1 a fade-band inside.</summary>
+    private float EdgeFadeAlpha(Vector2 game)
+    {
+        float edge = Mathf.Min(
+            Mathf.Min(game.X, _worldSize - game.X),
+            Mathf.Min(game.Y, _worldSize - game.Y));
+        return Mathf.Clamp(edge / EdgeFadeBandGame, 0.0f, 1.0f);
     }
 
     /// <summary>Per-creature draw tint (draw.py draw_creatures): the spawn-template
