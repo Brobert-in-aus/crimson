@@ -474,7 +474,11 @@ fn clampUnit(v: f32) f32 {
 }
 
 fn aimPointFromHeading(pos: state_mod.Vec2, heading: f32, radius: f32) state_mod.Vec2 {
-    return add(pos, state_mod.Vec2.fromAngle(heading).mul(radius));
+    // Game HEADING convention, not the math angle: from_heading(h) =
+    // from_angle(h - pi/2), i.e. heading 0 points (0, -1). Passing the heading
+    // straight to fromAngle anchored keyboard/joystick/pad-idle aim 90 deg off
+    // (caught when this suite was first wired into `zig build test`).
+    return add(pos, state_mod.Vec2.fromAngle(heading - std.math.pi / 2.0).mul(radius));
 }
 
 fn add(a: state_mod.Vec2, b: state_mod.Vec2) state_mod.Vec2 {
@@ -542,6 +546,12 @@ const FakeSampler = struct {
     }
 };
 
+// Typed empty slice: an inline `&[_]S{}` is a pointer-to-empty-ARRAY, whose
+// comptime-known zero length makes `@TypeOf(&creatures[0])` in creatureAt a
+// compile error; a slice defers the bounds to runtime.
+const TestCreature = struct { active: bool, hp: f32, pos: state_mod.Vec2 };
+const no_creatures: []const TestCreature = &.{};
+
 fn makePlayer(index: i32, pos: state_mod.Vec2, aim: state_mod.Vec2, aim_heading: f32) state_mod.PlayerState {
     return .{
         .index = index,
@@ -565,7 +575,7 @@ test "computer aim auto fires without fire pressed" {
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 612.0, .y = 512.0 } },
     };
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
 
     try std.testing.expect(out.flags.fire_down);
     try std.testing.expect(!out.flags.fire_pressed);
@@ -585,7 +595,7 @@ test "static mode conflict precedence matches native" {
             .{ .player_index = 0, .code = formats.crimson_cfg.playerBindBlock(&cfg, 0).turn_right, .value = true },
         },
     };
-    const out = interpreter.buildPlayerInput(sampler, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{});
+    const out = interpreter.buildPlayerInput(sampler, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, no_creatures);
 
     try expectFloatClose(-1.0, out.move_x);
     try expectFloatClose(-1.0, out.move_y);
@@ -617,7 +627,7 @@ test "relative mode single player uses alt arrow fallback" {
     });
 
     const out = interpreter.buildPlayerInput(
-        .{ .down = &.{
+        FakeSampler{ .down = &.{
             .{ .player_index = 0, .code = alt_move_key_up, .value = true },
             .{ .player_index = 0, .code = alt_move_key_left, .value = true },
         } },
@@ -629,7 +639,7 @@ test "relative mode single player uses alt arrow fallback" {
         .{},
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
 
     try std.testing.expect(out.flags.move_forward_pressed.?);
@@ -664,7 +674,7 @@ test "relative mode multiplayer does not use alt arrow fallback" {
     });
 
     const out = interpreter.buildPlayerInput(
-        .{ .down = &.{
+        FakeSampler{ .down = &.{
             .{ .player_index = 0, .code = alt_move_key_up, .value = true },
             .{ .player_index = 0, .code = alt_move_key_left, .value = true },
         } },
@@ -676,7 +686,7 @@ test "relative mode multiplayer does not use alt arrow fallback" {
         .{},
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
 
     try std.testing.expectEqual(@as(bool, false), out.flags.move_forward_pressed.?);
@@ -693,7 +703,7 @@ test "mouse point click marks move to cursor press" {
 
     const mouse_world: state_mod.Vec2 = .{ .x = 160.0, .y = 140.0 };
     const out = interpreter.buildPlayerInput(
-        .{
+        FakeSampler{
             .down = &.{.{ .player_index = 0, .code = @bitCast(cfg.keybind_reload), .value = true }},
             .pressed = &.{.{ .player_index = 0, .code = @bitCast(cfg.keybind_reload), .value = true }},
         },
@@ -705,7 +715,7 @@ test "mouse point click marks move to cursor press" {
         mouse_world,
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
 
     try std.testing.expect(out.flags.reload_pressed);
@@ -724,7 +734,7 @@ test "computer move mode near center heads toward target" {
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 560.0, .y = 500.0 } },
     };
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
 
     try expectFloatClose(1.0, out.move_x);
     try expectFloatClose(0.0, out.move_y);
@@ -739,7 +749,7 @@ test "computer move mode far from center heads toward center" {
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 960.0, .y = 900.0 } },
     };
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, creatures[0..]);
     const expected = normalized(sub(computer_arena_center, player.pos));
     try expectFloatClose(expected.x, out.move_x);
     try expectFloatClose(expected.y, out.move_y);
@@ -752,7 +762,7 @@ test "joystick aim uses pov not aim keybinds" {
     cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_joystick));
 
     const out = interpreter.buildPlayerInput(
-        .{ .down = &.{.{ .player_index = 0, .code = formats.crimson_cfg.playerBindBlock(&cfg, 0).aim_right, .value = true }} },
+        FakeSampler{ .down = &.{.{ .player_index = 0, .code = formats.crimson_cfg.playerBindBlock(&cfg, 0).aim_right, .value = true }} },
         0,
         1,
         &player,
@@ -761,7 +771,7 @@ test "joystick aim uses pov not aim keybinds" {
         .{},
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
 
     try expectFloatClose(100.0, out.aim_x);
@@ -775,7 +785,7 @@ test "joystick aim turns with pov input" {
     cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_joystick));
 
     const out = interpreter.buildPlayerInput(
-        .{ .down = &.{.{ .player_index = 0, .code = aim_pov_right_code, .value = true }} },
+        FakeSampler{ .down = &.{.{ .player_index = 0, .code = aim_pov_right_code, .value = true }} },
         0,
         1,
         &player,
@@ -784,7 +794,7 @@ test "joystick aim turns with pov input" {
         .{},
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
     const expected = aimPointFromHeading(player.pos, 0.4, aim_radius_keyboard);
     try expectFloatClose(expected.x, out.aim_x);
@@ -799,7 +809,7 @@ test "dual action pad aim uses native radius scale" {
 
     const binds = formats.crimson_cfg.playerBindBlock(&cfg, 0);
     const out = interpreter.buildPlayerInput(
-        .{ .axes = &.{.{ .player_index = 0, .code = binds.axis_aim_x, .value = 1.0 }} },
+        FakeSampler{ .axes = &.{.{ .player_index = 0, .code = binds.axis_aim_x, .value = 1.0 }} },
         0,
         1,
         &player,
@@ -808,7 +818,7 @@ test "dual action pad aim uses native radius scale" {
         .{},
         .{},
         0.1,
-        &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{},
+        no_creatures,
     );
 
     try expectFloatClose(238.0, out.aim_x);
@@ -821,7 +831,7 @@ test "keyboard aim in static mode reanchors to heading" {
     var cfg = formats.crimson_cfg.defaultConfig();
     cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_keyboard));
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{});
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, no_creatures);
 
     try expectFloatClose(100.0, out.aim_x);
     try expectFloatClose(40.0, out.aim_y);
@@ -834,7 +844,7 @@ test "keyboard aim with non relative move mode keeps world aim" {
     cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_keyboard));
     cfg.player_mode_flag_p1 = @intCast(movement_control_dual_action_pad);
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{});
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, no_creatures);
 
     try expectFloatClose(180.0, out.aim_x);
     try expectFloatClose(130.0, out.aim_y);
@@ -847,7 +857,7 @@ test "relative mouse aim centered keeps world aim" {
     cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_mouse_relative));
     const center: state_mod.Vec2 = .{ .x = 320.0, .y = 200.0 };
 
-    const out = interpreter.buildPlayerInput(.{}, 0, 1, &player, &cfg, center, .{}, center, 0.1, &[_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{});
+    const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, center, .{}, center, 0.1, no_creatures);
 
     try expectFloatClose(180.0, out.aim_x);
     try expectFloatClose(130.0, out.aim_y);

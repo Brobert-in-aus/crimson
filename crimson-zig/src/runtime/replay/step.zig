@@ -1072,7 +1072,13 @@ test "step tick applies freeze corpse effects when freeze is not last pickup" {
     const result = try stepTick(
         &context,
         0,
-        &[_]player_runtime.GameInput{.{}},
+        &[_]player_runtime.GameInput{.{
+            .move_x = 0.0,
+            .move_y = 0.0,
+            .aim_x = 0.0,
+            .aim_y = 0.0,
+            .flags = .{ .fire_down = false, .fire_pressed = false, .reload_pressed = false },
+        }},
         &.{},
         context.dt_nominal,
         .{},

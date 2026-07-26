@@ -3895,6 +3895,8 @@ test "creature presentation generation changes when a pool slot is reused" {
 
 test "bloody mess quick learner reward is still doubled by double experience bonus" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     state.bonuses.double_experience = 5.0;
     var bonuses: bonus_runtime.BonusPool = .{};
@@ -3944,6 +3946,8 @@ test "split-on-death children use original source when first child reuses source
     const seed: u32 = 243_988;
 
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     for (&pool.entries) |*entry| {
         entry.* = .{
             .active = true,
@@ -3963,6 +3967,14 @@ test "split-on-death children use original source when first child reuses source
         .move_speed = 2.0,
         .contact_damage = 10.0,
     };
+    // Free the source slot plus one: the alloc reuses the first inactive slot,
+    // so child 1 lands IN the source's slot — the aliasing case this test pins
+    // (child 2 must still derive from the ORIGINAL source snapshot, not from
+    // the child that just overwrote it). A completely full pool would instead
+    // exercise creature_alloc_slot's random-overwrite roll, whose placement is
+    // seed-dependent and not what this test is about.
+    pool.entries[0].active = false;
+    pool.entries[1].active = false;
 
     var state = state_mod.GameplayState.init(seed);
     spawnSplitChildrenOnDeath(&pool, &state, &pool.entries[0]);
@@ -3979,6 +3991,8 @@ test "explosion xp uses pre-split reward when source slot is reused by split chi
     const seed: u32 = 243_988;
 
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     for (&pool.entries) |*entry| {
         entry.* = .{
             .active = true,
@@ -4028,6 +4042,8 @@ test "explosion xp uses pre-split reward when source slot is reused by split chi
 
 test "applyDamage skips death side effects when lifecycle is already below alive sentinel" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     pool.entries[0] = .{
         .active = true,
         .flags = spawn_mod.CreatureFlags.split_on_death,
@@ -4072,6 +4088,8 @@ test "applyDamage skips death side effects when lifecycle is already below alive
 
 test "applyExplosionDamage skips first death side effects when lifecycle is below alive sentinel" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     pool.entries[0] = .{
         .active = true,
         .flags = spawn_mod.CreatureFlags.split_on_death,
@@ -5127,17 +5145,22 @@ test "template spawn supports quest spawner templates and slot ticks" {
         expected_interval: f32,
         expected_child_template: i32,
     }{
-        .{ .template_id = 0x00, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.zombie), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong | spawn_mod.CreatureFlags.anim_long_strip, .expected_health = 8500.0, .expected_move_speed = 1.3, .expected_reward = 6600.0, .expected_size = 64.0, .expected_contact = 50.0, .expected_timer = 1.0, .expected_limit = 812, .expected_interval = 0.7, .expected_child_template = 0x41 },
-        .{ .template_id = 0x07, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 2.0, .expected_reward = 3000.0, .expected_size = 50.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 100, .expected_interval = 2.2, .expected_child_template = 0x1D },
-        .{ .template_id = 0x08, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 2.0, .expected_reward = 3000.0, .expected_size = 50.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 100, .expected_interval = 2.8, .expected_child_template = 0x1D },
-        .{ .template_id = 0x09, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 450.0, .expected_move_speed = 2.0, .expected_reward = 1000.0, .expected_size = 40.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 16, .expected_interval = 2.0, .expected_child_template = 0x1D },
-        .{ .template_id = 0x0A, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 1.5, .expected_reward = 3000.0, .expected_size = 55.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 5.0, .expected_child_template = 0x32 },
-        .{ .template_id = 0x0B, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 3500.0, .expected_move_speed = 1.5, .expected_reward = 5000.0, .expected_size = 65.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 6.0, .expected_child_template = 0x3C },
-        .{ .template_id = 0x0C, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 2.8, .expected_reward = 1000.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 1.5, .expected_limit = 100, .expected_interval = 2.0, .expected_child_template = 0x31 },
-        .{ .template_id = 0x0D, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 1.3, .expected_reward = 1000.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 6.0, .expected_child_template = 0x31 },
-        .{ .template_id = 0x10, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 2.8, .expected_reward = 800.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 1.5, .expected_limit = 100, .expected_interval = 2.3, .expected_child_template = 0x32 },
+        .{ .template_id = 0x00, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.zombie), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong | spawn_mod.CreatureFlags.anim_long_strip, .expected_health = 8500.0, .expected_move_speed = 1.3, .expected_reward = 6600.0, .expected_size = 64.0, .expected_contact = 50.0, .expected_timer = 1.0, .expected_limit = 812, .expected_interval = 0.9, .expected_child_template = 0x41 },
+        .{ .template_id = 0x07, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 2.0, .expected_reward = 3000.0, .expected_size = 50.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 100, .expected_interval = 2.4, .expected_child_template = 0x1D },
+        .{ .template_id = 0x08, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 2.0, .expected_reward = 3000.0, .expected_size = 50.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 100, .expected_interval = 3.0, .expected_child_template = 0x1D },
+        .{ .template_id = 0x09, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 450.0, .expected_move_speed = 2.0, .expected_reward = 1000.0, .expected_size = 40.0, .expected_contact = 0.0, .expected_timer = 1.0, .expected_limit = 16, .expected_interval = 2.2, .expected_child_template = 0x1D },
+        .{ .template_id = 0x0A, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 1000.0, .expected_move_speed = 1.5, .expected_reward = 3000.0, .expected_size = 55.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 5.2, .expected_child_template = 0x32 },
+        .{ .template_id = 0x0B, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 3500.0, .expected_move_speed = 1.5, .expected_reward = 5000.0, .expected_size = 65.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 6.2, .expected_child_template = 0x3C },
+        .{ .template_id = 0x0C, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 2.8, .expected_reward = 1000.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 1.5, .expected_limit = 100, .expected_interval = 2.2, .expected_child_template = 0x31 },
+        .{ .template_id = 0x0D, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 1.3, .expected_reward = 1000.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 2.0, .expected_limit = 100, .expected_interval = 6.2, .expected_child_template = 0x31 },
+        .{ .template_id = 0x10, .expected_type_id = @intFromEnum(spawn_mod.CreatureTypeId.alien), .expected_flags = spawn_mod.CreatureFlags.anim_ping_pong, .expected_health = 50.0, .expected_move_speed = 2.8, .expected_reward = 800.0, .expected_size = 32.0, .expected_contact = 0.0, .expected_timer = 1.5, .expected_limit = 100, .expected_interval = 2.5, .expected_child_template = 0x32 },
     };
 
+    // expected_interval values are the raw template interval + 0.2:
+    // applySpawnDifficultyAdjustments' non-hardcore easing adds 0.2 to the
+    // spawn interval of every 0x04-flagged (ping-pong) spawner, and all the
+    // templates below carry that flag. (Hardcore would keep the raw interval
+    // but scale the creature stats instead.)
     for (spawners) |spawner| {
         var pool: CreaturePool = .{};
         var rng = spawn_mod.Crand.init(1);
@@ -6016,6 +6039,8 @@ test "tough reloader spread heat uses post-reload damage before thick skinned" {
 
 test "doctor increases projectile damage by 20 percent" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6055,6 +6080,8 @@ test "doctor increases projectile damage by 20 percent" {
 
 test "pyromaniac increases fire damage and consumes rng" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6100,6 +6127,8 @@ test "pyromaniac increases fire damage and consumes rng" {
 
 test "fire damage without pyromaniac keeps base damage and rng state" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6144,6 +6173,8 @@ test "fire damage without pyromaniac keeps base damage and rng state" {
 
 test "living fortress scales projectile damage by alive player timers" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6186,6 +6217,8 @@ test "living fortress scales projectile damage by alive player timers" {
 
 test "barrel greaser increases projectile damage by 40 percent" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6264,6 +6297,8 @@ test "ion gun master increases ion damage by 20 percent" {
 
 test "uranium filled bullets doubles projectile damage" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6303,6 +6338,8 @@ test "uranium filled bullets doubles projectile damage" {
 
 test "split on death spawns two smaller children" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(0);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
@@ -6359,6 +6396,8 @@ test "split on death spawns two smaller children" {
 
 test "kill no corpse does not award xp for non-player owner" {
     var pool: CreaturePool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
     var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};

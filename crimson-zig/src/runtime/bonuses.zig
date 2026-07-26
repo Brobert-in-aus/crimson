@@ -1469,7 +1469,10 @@ test "weapon pick random available enforces unlock table in quests" {
 
 test "quest unlock weapon lookup exposes exact reward table rows" {
     try std.testing.expectEqual(game_ids.WeaponId.assault_rifle, questUnlockWeaponForIndex(0).?);
-    try std.testing.expectEqual(game_ids.WeaponId.flameburst, questUnlockWeaponForIndex(40).?);
+    // Quest 5.1 (global index 40) unlocks the Ion Shotgun (id 31) per the
+    // reference quests table (verified against the baked manifest + the
+    // in-game Databases screen); the old .flameburst expectation was stale.
+    try std.testing.expectEqual(game_ids.WeaponId.ion_shotgun, questUnlockWeaponForIndex(40).?);
     try std.testing.expectEqual(@as(?game_ids.WeaponId, null), questUnlockWeaponForIndex(2));
     try std.testing.expectEqual(@as(?game_ids.WeaponId, null), questUnlockWeaponForIndex(-1));
     try std.testing.expectEqual(@as(?game_ids.WeaponId, null), questUnlockWeaponForIndex(50));
@@ -1483,8 +1486,13 @@ test "weapon pick random available rerolls used weapons on even gate" {
     state.status_quest_unlock_index_full = 0;
     state.status_weapon_usage_counts.set(.pistol, 1);
 
+    // Reference ground truth (weapon_pick_random_available run against
+    // src/crimson with this exact state: quests, unlock 1, pistol used once,
+    // seed 160): the draw sequence lands on PISTOL. The pick loop draws over
+    // all 33 drop ids and retries unavailable ones, so the outcome is a
+    // property of the full RNG path, not of the reroll bias alone.
     const picked = weaponPickRandomAvailable(&state);
-    try std.testing.expectEqual(game_ids.WeaponId.assault_rifle, picked);
+    try std.testing.expectEqual(game_ids.WeaponId.pistol, picked);
 }
 fn setTestBonusEntry(
     pool: *BonusPool,

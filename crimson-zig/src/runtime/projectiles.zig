@@ -1046,6 +1046,8 @@ test "projectile hit consumes hit-presentation rng" {
         },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     _ = creatures.spawnInit(.{
         .origin_template_id = -1,
@@ -1100,7 +1102,9 @@ test "ion and plasma hit rings use native small impact geometry" {
     try expectFloatClose(4.0, ion_ring.?.half_height);
     try expectFloatClose(0.0, ion_ring.?.age);
     try expectFloatClose(0.32, ion_ring.?.lifetime);
-    try expectFloatClose(54.0, ion_ring.?.scale_step);
+    // ring_scale 1.2 * 45.0 evaluated in f32 like the native binary
+    // (54.000002...), not the Python reference's f64 (exactly 54.0).
+    try expectFloatClose(@as(f32, 1.2) * 45.0, ion_ring.?.scale_step);
 
     effects.reset();
     emitProjectileTypeHitEffects(
@@ -1135,6 +1139,8 @@ test "pulse gun hit applies post-hit target push" {
         },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     _ = creatures.spawnInit(.{
         .origin_template_id = -1,
@@ -1196,6 +1202,8 @@ test "projectile hit pass does not retarget newly spawned split children in new 
         },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
 
     _ = creatures.spawnInit(.{
@@ -1247,6 +1255,8 @@ test "poison bullets sets weak self-damage flag when rng roll hits" {
     players[0].perk_counts.set(PerkId.poison_bullets, 1);
 
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     _ = creatures.spawnInit(.{
         .origin_template_id = -1,
@@ -1290,6 +1300,8 @@ test "poison bullets does not set self-damage flag when rng roll misses" {
     players[0].perk_counts.set(PerkId.poison_bullets, 1);
 
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     _ = creatures.spawnInit(.{
         .origin_template_id = -1,
@@ -1334,6 +1346,8 @@ test "poison bullets with toxic avenger still applies weak bullet poison only" {
     players[0].perk_counts.set(PerkId.toxic_avenger, 1);
 
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     _ = creatures.spawnInit(.{
         .origin_template_id = -1,
@@ -1371,6 +1385,8 @@ test "barrel greaser doubles pistol projectile movement steps" {
         .{ .index = 0, .pos = .{} },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     var base_pool: ProjectilePool = .{};
     _ = base_pool.spawn(
@@ -1426,6 +1442,8 @@ test "ion gun master increases ion rifle linger radius" {
         .{ .index = 0, .pos = .{} },
     };
     var creatures_without: creatures_mod.CreaturePool = .{};
+    var creatures_without_fx: effects_mod.EffectPool = .{};
+    creatures_without.effects = &creatures_without_fx;
     var bonuses_without: bonus_runtime.BonusPool = .{};
     _ = creatures_without.spawnInit(.{
         .origin_template_id = -1,
@@ -1466,6 +1484,8 @@ test "ion gun master increases ion rifle linger radius" {
     };
     players_with[0].perk_counts.set(PerkId.ion_gun_master, 1);
     var creatures_with: creatures_mod.CreaturePool = .{};
+    var creatures_with_fx: effects_mod.EffectPool = .{};
+    creatures_with.effects = &creatures_with_fx;
     var bonuses_with: bonus_runtime.BonusPool = .{};
     _ = creatures_with.spawnInit(.{
         .origin_template_id = -1,
@@ -1511,6 +1531,8 @@ test "ranged projectile can damage player when no creature is hit" {
         },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     var pool: ProjectilePool = .{};
 
@@ -1545,6 +1567,8 @@ test "ranged projectile can damage creature before player collision" {
         },
     };
     var creatures: creatures_mod.CreaturePool = .{};
+    var creatures_fx: effects_mod.EffectPool = .{};
+    creatures.effects = &creatures_fx;
     var bonuses: bonus_runtime.BonusPool = .{};
     var pool: ProjectilePool = .{};
 

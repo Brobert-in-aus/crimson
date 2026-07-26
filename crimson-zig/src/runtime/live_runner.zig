@@ -381,7 +381,16 @@ pub const LiveRunner = struct {
             ticks_advanced += 1;
         }
 
-        return self.snapshot(ticks_advanced, self.perkPendingCount() > 0, frame_audio, frame_terrain_fx.takeBatch());
+        // paused_for_perk_pick means "the sim did not advance because the perk
+        // menu is open" — the same menu-gated condition as the early return and
+        // the substep gate. Reporting bare pending>0 here mislabelled frames
+        // that ticked normally (pending picks with the menu closed run live).
+        return self.snapshot(
+            ticks_advanced,
+            input.perk_menu_active and self.perkPendingCount() > 0,
+            frame_audio,
+            frame_terrain_fx.takeBatch(),
+        );
     }
 
     pub fn perkPendingCount(self: *const LiveRunner) i32 {
@@ -468,10 +477,12 @@ pub const LiveRunner = struct {
         return self.session.finalize();
     }
 
+    /// The snapshot is inert VALUE data: its interior session pointers still
+    /// alias the live runner and are only rebound by restoreSnapshot. They
+    /// cannot be made self-referential here — every copy (the return itself,
+    /// an ArrayList append, a realloc) would re-dangle them.
     pub fn captureSnapshot(self: *const LiveRunner) LiveRunnerSnapshot {
-        var captured: LiveRunnerSnapshot = .{ .runner = self.* };
-        captured.runner.rebindInternalPointers();
-        return captured;
+        return .{ .runner = self.* };
     }
 
     pub fn restoreSnapshot(self: *LiveRunner, captured: *const LiveRunnerSnapshot) void {
@@ -677,7 +688,10 @@ test "live runner snapshots restore deterministic session state" {
     runner.session.state.rng.state = 0xDEADBEEF;
 
     const snapshot = runner.captureSnapshot();
-    try std.testing.expect(snapshot.runner.session.creatures.effects.? == &snapshot.runner.session.effects);
+    // The snapshot is inert value data (see captureSnapshot): pointer fields
+    // are only rebound on restore, so assert the captured VALUES here.
+    try std.testing.expectEqual(@as(usize, 3), snapshot.runner.session.tick_index);
+    try std.testing.expectEqual(@as(u32, 0xDEADBEEF), snapshot.runner.session.state.rng.state);
 
     runner.player0().?.health = 0.0;
     runner.session.tick_index = 99;
@@ -727,14 +741,24 @@ test "live runner applies local inputs for every active player" {
         },
     };
 
+    // Native movement accelerates from a standstill with a turn-alignment
+    // factor that is zero while facing opposite the move direction, so a
+    // single tick from spawn can displace by exactly nothing — step a half
+    // second of frames so both players turn and get up to speed.
     const update = try runner.stepFrame(runner.session.dt_nominal, .{
         .players = inputs,
         .player_count = 2,
     });
+    try std.testing.expectEqual(@as(usize, 1), update.ticks_advanced);
+    for (0..29) |_| {
+        _ = try runner.stepFrame(runner.session.dt_nominal, .{
+            .players = inputs,
+            .player_count = 2,
+        });
+    }
 
     const after_p0 = runner.session.players()[0].pos;
     const after_p1 = runner.session.players()[1].pos;
-    try std.testing.expectEqual(@as(usize, 1), update.ticks_advanced);
     try std.testing.expect(after_p0.x != before_p0.x or after_p0.y != before_p0.y);
     try std.testing.expect(after_p1.x != before_p1.x or after_p1.y != before_p1.y);
 }
@@ -759,13 +783,20 @@ test "live runner emits shot audio for secondary local player" {
         },
     };
 
-    const update = try runner.stepFrame(runner.session.dt_nominal, .{
-        .players = inputs,
-        .player_count = 2,
-    });
-
-    try std.testing.expectEqual(@as(usize, 1), update.audio.shot_event_count);
-    try std.testing.expectEqual(@as(i32, @intFromEnum(game_ids.WeaponId.pistol)), update.audio.shot_events[0].weapon_id);
+    // Players spawn with a 0.8s shot cooldown (player.zig bootstrap), so hold
+    // the trigger through it and take the first emitted shot event.
+    var shot_weapon_id: ?i32 = null;
+    for (0..120) |_| {
+        const update = try runner.stepFrame(runner.session.dt_nominal, .{
+            .players = inputs,
+            .player_count = 2,
+        });
+        if (update.audio.shot_event_count > 0) {
+            shot_weapon_id = update.audio.shot_events[0].weapon_id;
+            break;
+        }
+    }
+    try std.testing.expectEqual(@as(?i32, @intFromEnum(game_ids.WeaponId.pistol)), shot_weapon_id);
 }
 
 test "live survival runner pauses for pending perk picks" {

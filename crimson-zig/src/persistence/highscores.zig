@@ -526,7 +526,10 @@ fn dateStampUtcFromEpochSeconds(seconds: u64) DateStamp {
 
     return .{
         .year = year_day.year,
-        .month = @intCast(@intFromEnum(month_day.month) + 1),
+        // std.time.epoch.Month is 1-based (jan = 1); day_index is 0-based.
+        // The old `+ 1` on the month shifted every UTC date stamp one month
+        // forward (caught when this suite was first wired into `zig build test`).
+        .month = @intCast(@intFromEnum(month_day.month)),
         .day = @intCast(month_day.day_index + 1),
     };
 }
@@ -602,8 +605,8 @@ test "date fields use native dateWeek byte" {
 }
 
 test "date stamp utc conversion uses calendar day" {
-    try std.testing.expectEqual(.{ .year = 1970, .month = 1, .day = 1 }, dateStampUtcFromEpochSeconds(0));
-    try std.testing.expectEqual(.{ .year = 2026, .month = 3, .day = 3 }, dateStampUtcFromEpochSeconds(1772496000));
+    try std.testing.expectEqual(DateStamp{ .year = 1970, .month = 1, .day = 1 }, dateStampUtcFromEpochSeconds(0));
+    try std.testing.expectEqual(DateStamp{ .year = 2026, .month = 3, .day = 3 }, dateStampUtcFromEpochSeconds(1772496000));
 }
 
 test "date stamp local conversion uses tm calendar fields" {
@@ -620,26 +623,29 @@ test "date stamp local conversion uses tm calendar fields" {
         .tm_gmtoff = 0,
         .tm_zone = null,
     };
-    try std.testing.expectEqual(.{ .year = 2026, .month = 3, .day = 3 }, dateStampFromLocalTm(tm));
+    try std.testing.expectEqual(DateStamp{ .year = 2026, .month = 3, .day = 3 }, dateStampFromLocalTm(tm));
 }
 
 test "scores path builder mirrors Python naming rules" {
     const allocator = std.testing.allocator;
+    // Joined components use the platform separator (the base path is kept
+    // verbatim), matching Python's os.path.join behavior per OS.
+    const s = std.fs.path.sep_str;
 
     const survival = try scoresPathForMode(allocator, "/tmp/runtime", @intFromEnum(game_ids.GameModeId.survival), .{});
     defer allocator.free(survival);
-    try std.testing.expectEqualStrings("/tmp/runtime/scores5/survival.hi", survival);
+    try std.testing.expectEqualStrings("/tmp/runtime" ++ s ++ "scores5" ++ s ++ "survival.hi", survival);
 
     const survival_3 = try scoresPathForMode(allocator, "/tmp/runtime", @intFromEnum(game_ids.GameModeId.survival), .{ .player_count = 3 });
     defer allocator.free(survival_3);
-    try std.testing.expectEqualStrings("/tmp/runtime/scores5/survival_3.hi", survival_3);
+    try std.testing.expectEqualStrings("/tmp/runtime" ++ s ++ "scores5" ++ s ++ "survival_3.hi", survival_3);
 
     const quest = try scoresPathForMode(allocator, "/tmp/runtime", @intFromEnum(game_ids.GameModeId.quests), .{
         .quest_stage_major = 2,
         .quest_stage_minor = 7,
     });
     defer allocator.free(quest);
-    try std.testing.expectEqualStrings("/tmp/runtime/scores5/questhc2_7.hi", quest);
+    try std.testing.expectEqualStrings("/tmp/runtime" ++ s ++ "scores5" ++ s ++ "questhc2_7.hi", quest);
 
     const quest_hardcore_2p = try scoresPathForMode(allocator, "/tmp/runtime", @intFromEnum(game_ids.GameModeId.quests), .{
         .hardcore = true,
@@ -648,11 +654,11 @@ test "scores path builder mirrors Python naming rules" {
         .player_count = 2,
     });
     defer allocator.free(quest_hardcore_2p);
-    try std.testing.expectEqualStrings("/tmp/runtime/scores5/quest2_7_2.hi", quest_hardcore_2p);
+    try std.testing.expectEqualStrings("/tmp/runtime" ++ s ++ "scores5" ++ s ++ "quest2_7_2.hi", quest_hardcore_2p);
 
     const unknown = try scoresPathForMode(allocator, "/tmp/runtime", 99, .{});
     defer allocator.free(unknown);
-    try std.testing.expectEqualStrings("/tmp/runtime/scores5/unknown.hi", unknown);
+    try std.testing.expectEqualStrings("/tmp/runtime" ++ s ++ "scores5" ++ s ++ "unknown.hi", unknown);
 }
 
 test "quest and rush sorting mirror Python leaderboard rules" {
