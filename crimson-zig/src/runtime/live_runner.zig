@@ -302,8 +302,13 @@ pub const LiveRunner = struct {
             _ = try self.pickPerk(choice_index, clamped_dt);
         }
 
+        // NOTE: a dead player does NOT stop the frame. The reference keeps the
+        // whole world simulating through the death animation (gameplay.py
+        // player_update just drains death_timer and returns when health <= 0;
+        // survival_mode waits for death_timer < 0 before the game-over
+        // transition). The frontend decides when to stop ticking.
         const paused_for_perk_pick = input.perk_menu_active and self.perkPendingCount() > 0;
-        if (self.allPlayersDead() or paused_for_perk_pick or !(frame_dt > 0.0)) {
+        if (paused_for_perk_pick or !(frame_dt > 0.0)) {
             return self.snapshot(0, paused_for_perk_pick, .{}, .{});
         }
 
@@ -314,7 +319,6 @@ pub const LiveRunner = struct {
         var frame_terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
         const tick_inputs = tickInputsForFrame(input, self.session.playersConst().len);
         while (ticks_advanced < self.max_substeps_per_frame and
-            !self.allPlayersDead() and
             !(input.perk_menu_active and self.perkPendingCount() > 0) and
             self.accumulator + epsilon_dt >= self.session.dt_nominal)
         {
@@ -788,13 +792,23 @@ test "live survival runner pauses for pending perk picks" {
     try std.testing.expectEqual(@as(i32, 0), runner.perkPendingCount());
 }
 
-test "live survival runner reports dead run state" {
+test "live survival runner keeps simulating through the death animation" {
     var runner = try LiveSurvivalRunner.init(.{});
     runner.session.players()[0].health = 0.0;
 
+    // Reference behavior (gameplay.py player_update / survival_mode): a dead
+    // player drains death_timer while the rest of the world keeps ticking; the
+    // game-over transition waits for the timer, it does not freeze the sim.
     const update = try runner.stepFrame(runner.session.dt_nominal, .{});
     try std.testing.expect(update.all_players_dead);
-    try std.testing.expectEqual(@as(usize, 0), update.ticks_advanced);
+    try std.testing.expectEqual(@as(usize, 1), update.ticks_advanced);
+    try std.testing.expect(runner.session.players()[0].death_timer < 16.0);
+
+    // The corpse ramp completes: ~1s of ticks takes the timer below zero.
+    for (0..70) |_| {
+        _ = try runner.stepFrame(runner.session.dt_nominal, .{});
+    }
+    try std.testing.expect(runner.session.players()[0].death_timer < 0.0);
 }
 
 test "live survival runner perk picks apply immediate creature effects" {
