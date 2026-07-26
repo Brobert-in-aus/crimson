@@ -16,16 +16,23 @@ namespace CrimsonVR;
 public sealed partial class ValidationChecklist : Node3D
 {
     // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-11 (poke spheres + ground
-    // bake both green). New batch: the Databases slice (Statistics ->
-    // Weapons/Perks), plus re-checks for the last round's uncommitted-to-
-    // checklist fixes (HP bar trim/spacing, death with banked level-ups).
+    // validation surface changes. Cleared 2026-07-26 (v18 flicker fix, death
+    // anim round 3, frame drops all validated). New batch: the death-screen
+    // milling + Breathing Room fixes, the ground-RT sleep/resume restore, and
+    // the four-feature round (edge fade / hardcore + end note / bonus HUD +
+    // weapon popup / Controls).
     private static readonly (string Id, string Label)[] Items =
     {
-        ("dbperks", "Perks DB: prereq + wrapped desc"),
-        ("deathanim", "Death: corpse frames play on the arena"),
-        ("deathzoom", "Death: view zooms in, edges stay put"),
-        ("seedvary", "Runs differ (spawns/drops not identical)"),
+        ("millname", "Death: swarm mills during name entry"),
+        ("breathe", "Breathing Room: clears the screen"),
+        ("resumebake", "Ground blood survives sleep + resume"),
+        ("edgefade", "Spawns fade in at the rim, no pop-in"),
+        ("hardcore", "Quest select: hardcore checkbox + run"),
+        ("hcunlock", "Hardcore clear: Splitter progression"),
+        ("endnote", "Quest 5.10: Show End Note panel"),
+        ("bonushud", "Bonus rows: icon + name + timer bar"),
+        ("weaponpopup", "Weapon pickup: name popup flashes"),
+        ("controls", "Options: Controls card reads right"),
     };
 
     private const int PerPage = 4;
