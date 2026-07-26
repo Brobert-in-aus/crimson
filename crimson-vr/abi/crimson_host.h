@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 18u
+#define CRIMSON_HOST_ABI_VERSION 19u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -150,6 +150,11 @@ typedef struct crimson_host_snapshot_header {
     uint32_t sprite_effect_count; /* ABI v13+; sprite-effect pool entries
                                    * (muzzle puffs / rocket exhaust / smoke)
                                    * packed after the glow pool */
+    /* ABI v19 (append-only): the remaining global bonus timers, completing
+     * the bonus-HUD slot set alongside energizer + freeze. */
+    float weapon_power_up_timer;
+    float reflex_boost_timer;
+    float double_experience_timer;
 } crimson_host_snapshot_header;
 
 typedef struct crimson_host_player_snap {
@@ -187,6 +192,12 @@ typedef struct crimson_host_player_snap {
      * * 1.25), 32, 52); the flat game-over transition waits for it to pass
      * 0. Presentation-only. */
     float death_timer;
+    /* ABI v19 (append-only): per-player bonus timers (fire bullets / speed)
+     * and the weapon-pickup aux popup countdown (2 -> 0; the name fades in
+     * over [2,1] and out over [1,0]). */
+    float fire_bullets_timer;
+    float speed_bonus_timer;
+    float aux_timer;
 } crimson_host_player_snap;
 
 typedef struct crimson_host_creature_snap {

@@ -1,3 +1,4 @@
+using System;
 using Godot;
 
 namespace CrimsonVR;
@@ -146,6 +147,271 @@ public sealed partial class Hud : Node3D
         // the top bar. The sim enforces the timeline; this is the readout.
         _questTimer = MakeLabel(256.0f, 74.0f, HorizontalAlignment.Center);
         _questTimer.Visible = false;
+
+        BuildBonusRows();
+        BuildWeaponPopup();
+        LoadWeaponNames();
+    }
+
+    // ---- Bonus-HUD slots (ui/hud.py drawBonusHud; ABI v19 timers) ----
+    // Native: ui_indPanel rows sliding in at the screen's left edge, one per
+    // active bonus — icon + name + a timer bar at 0.05 width-per-second. VR
+    // adaptation: the rows stack UPWARD above the scoreboard's left side
+    // (negative native y) and fade instead of sliding. Slot rows follow the
+    // flat registry semantics: a bonus keeps its row while active, expired
+    // rows fade out, and only the tail compacts (rows never shuffle).
+    private const int BonusRowCap = 8;
+    private const float BonusRowX = -68.0f;
+    private const float BonusRowPitch = 52.0f;
+    private const float BonusRowY0 = -63.0f; // first row's top, above the bar
+
+    private sealed class BonusRow
+    {
+        public MeshInstance3D Panel = null!;
+        public StandardMaterial3D PanelMat = null!;
+        public MeshInstance3D Icon = null!;
+        public StandardMaterial3D IconMat = null!;
+        public Label3D Name = null!;
+        public MeshInstance3D Bar = null!;
+        public int BonusKey = -1; // index into the spec table; -1 = free
+        public float Timer;
+        public float Fade;
+        public int IconShown = -1;
+    }
+
+    private readonly BonusRow[] _bonusRows = new BonusRow[BonusRowCap];
+    private Texture2D? _bonusSheet;
+    private const int BonusGrid = 4; // bonuses.png is 4x4
+
+    // Fixed spec order (collectHudBonusSpecs): key -> (icon id, display name).
+    private static readonly (int Icon, string Name)[] BonusSpecs =
+    {
+        (7, "Weapon Power Up"),
+        (5, "Reflex Boost"),
+        (10, "Energizer"),
+        (4, "Double Experience"),
+        (8, "Freeze"),
+        (11, "Fire Bullets"),
+        (6, "Shield"),
+        (9, "Speed"),
+    };
+
+    private void BuildBonusRows()
+    {
+        _bonusSheet = Load("bonuses");
+        for (int i = 0; i < BonusRowCap; i++)
+        {
+            float y = BonusRowY0 - i * BonusRowPitch; // rows rise above the bar
+            var row = new BonusRow();
+            row.Panel = TexQuad(Load("ui_indPanel"), BonusRowX, y - 11.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.7f), priority: 41, out row.PanelMat);
+            row.Icon = TexQuad(_bonusSheet, BonusRowX + 15.0f - 16.0f, y + 16.0f - 16.0f, 32.0f, 32.0f, Colors.White, priority: 42, out row.IconMat);
+            row.Name = MakeLabel(BonusRowX + 36.0f, y + 9.0f, HorizontalAlignment.Left);
+            row.Bar = ColorQuad(BonusRowX + 36.0f, y + 21.0f, 100.0f, 6.0f, new Color(26 / 255f, 77 / 255f, 153 / 255f, 0.7f), priority: 42);
+            SetRowVisible(row, false);
+            _bonusRows[i] = row;
+        }
+    }
+
+    private static void SetRowVisible(BonusRow row, bool visible)
+    {
+        row.Panel.Visible = visible;
+        row.Icon.Visible = visible;
+        row.Name.Visible = visible;
+        row.Bar.Visible = visible;
+    }
+
+    private void UpdateBonusRows(in Sim.SnapshotHeader header, in Sim.PlayerSnap player)
+    {
+        Span<float> timers = stackalloc float[BonusSpecs.Length];
+        timers[0] = header.WeaponPowerUpTimer;
+        timers[1] = header.ReflexBoostTimer;
+        timers[2] = header.EnergizerTimer;
+        timers[3] = header.DoubleExperienceTimer;
+        timers[4] = header.FreezeTimer;
+        timers[5] = player.FireBulletsTimer;
+        timers[6] = player.ShieldTimer;
+        timers[7] = player.SpeedBonusTimer;
+
+        // Register active bonuses: keep an existing row, else take the first
+        // free one (bonus_hud.register).
+        for (int key = 0; key < timers.Length; key++)
+        {
+            if (timers[key] <= 0.0f)
+            {
+                continue;
+            }
+            int found = -1;
+            int free = -1;
+            for (int i = 0; i < BonusRowCap; i++)
+            {
+                if (_bonusRows[i].BonusKey == key)
+                {
+                    found = i;
+                    break;
+                }
+                if (_bonusRows[i].BonusKey < 0 && free < 0)
+                {
+                    free = i;
+                }
+            }
+            int idx = found >= 0 ? found : free;
+            if (idx < 0)
+            {
+                continue;
+            }
+            _bonusRows[idx].BonusKey = key;
+            _bonusRows[idx].Timer = timers[key];
+        }
+
+        const float dt = 1.0f / 60.0f; // called once per sim tick
+        for (int i = 0; i < BonusRowCap; i++)
+        {
+            BonusRow row = _bonusRows[i];
+            if (row.BonusKey < 0)
+            {
+                SetRowVisible(row, false);
+                continue;
+            }
+            float timer = timers[row.BonusKey];
+            row.Timer = timer;
+            row.Fade = Mathf.MoveToward(row.Fade, timer > 0.0f ? 1.0f : 0.0f, dt * 4.0f);
+            if (row.Fade <= 0.001f && timer <= 0.0f)
+            {
+                // Tail compaction only, like the flat registry: a middle row
+                // stays reserved (invisible) while later rows are active.
+                bool laterActive = false;
+                for (int j = i + 1; j < BonusRowCap; j++)
+                {
+                    if (_bonusRows[j].BonusKey >= 0)
+                    {
+                        laterActive = true;
+                        break;
+                    }
+                }
+                if (!laterActive)
+                {
+                    row.BonusKey = -1;
+                    row.IconShown = -1;
+                }
+                SetRowVisible(row, false);
+                continue;
+            }
+            SetRowVisible(row, true);
+            (int iconId, string name) = BonusSpecs[row.BonusKey];
+            if (row.IconShown != iconId)
+            {
+                row.IconShown = iconId;
+                row.IconMat.Uv1Scale = new Vector3(1.0f / BonusGrid, 1.0f / BonusGrid, 1.0f);
+                row.IconMat.Uv1Offset = new Vector3(iconId % BonusGrid / (float)BonusGrid, iconId / BonusGrid / (float)BonusGrid, 0.0f);
+                row.Name.Text = name;
+            }
+            float a = row.Fade;
+            row.PanelMat.AlbedoColor = new Color(1, 1, 1, 0.7f * a);
+            row.IconMat.AlbedoColor = new Color(1, 1, 1, a);
+            row.Name.Modulate = new Color(0.9f, 0.9f, 0.9f, a);
+            // Native bar: width = 100 * timer * 0.05 (a 20s bonus fills it).
+            float ratio = Mathf.Clamp(row.Timer * 0.05f, 0.0f, 1.0f);
+            row.Bar.Visible = ratio > 0.001f;
+            row.Bar.Scale = new Vector3(Mathf.Max(ratio, 0.001f), 1.0f, 1.0f);
+            float rowY = BonusRowY0 - i * BonusRowPitch;
+            float cx = BonusRowX + 36.0f + 100.0f * 0.5f * ratio;
+            row.Bar.Position = new Vector3(LocalX(cx), LocalY(rowY + 21.0f + 3.0f), row.Bar.Position.Z);
+            if (row.Bar.MaterialOverride is StandardMaterial3D barMat)
+            {
+                barMat.AlbedoColor = new Color(26 / 255f, 77 / 255f, 153 / 255f, 0.7f * a);
+            }
+        }
+    }
+
+    // ---- Weapon-pickup name popup (drawWeaponAuxHud; player.aux_timer) ----
+    // Native: an ind_panel with the weapon icon + name at the bonus stack's
+    // foot, fading in over aux_timer [2,1] and out over [1,0]. VR: a fixed
+    // panel above the scoreboard's right side (the bonus rows own the left).
+    private MeshInstance3D? _auxPanel;
+    private StandardMaterial3D? _auxPanelMat;
+    private MeshInstance3D? _auxIcon;
+    private StandardMaterial3D? _auxIconMat;
+    private Label3D _auxName = null!;
+    private int _auxIconShown = -2;
+    private readonly System.Collections.Generic.Dictionary<int, string> _weaponNames = new();
+
+    private void BuildWeaponPopup()
+    {
+        const float x = 330.0f;
+        const float y = BonusRowY0;
+        _auxPanel = TexQuad(Load("ui_indPanel"), x, y - 11.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.8f), priority: 41, out _auxPanelMat);
+        _auxIcon = TexQuad(_wicons, x + 8.0f, y + 3.0f, 52.0f, 26.0f, Colors.White, priority: 42, out _auxIconMat);
+        _auxName = MakeLabel(x + 66.0f, y + 12.0f, HorizontalAlignment.Left);
+        _auxPanel.Visible = false;
+        _auxIcon.Visible = false;
+        _auxName.Visible = false;
+    }
+
+    private void LoadWeaponNames()
+    {
+        string path = "res://assets/sprites/sprite_manifest.json";
+        if (!Godot.FileAccess.FileExists(path))
+        {
+            return;
+        }
+        using Godot.FileAccess f = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(f.GetAsText());
+            if (doc.RootElement.TryGetProperty("weapons", out System.Text.Json.JsonElement weapons)
+                && weapons.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (System.Text.Json.JsonProperty w in weapons.EnumerateObject())
+                {
+                    if (int.TryParse(w.Name, out int id)
+                        && w.Value.TryGetProperty("name", out System.Text.Json.JsonElement n))
+                    {
+                        _weaponNames[id] = n.GetString() ?? string.Empty;
+                    }
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException e)
+        {
+            GD.PushWarning($"CrimsonVR: bad weapons table in manifest: {e.Message}");
+        }
+    }
+
+    private void UpdateWeaponPopup(in Sim.PlayerSnap player)
+    {
+        if (_auxPanel == null || _auxIcon == null)
+        {
+            return;
+        }
+        // Native fade: aux_timer counts 2 -> 0; alpha ramps in over [2,1] and
+        // out over [1,0] (drawWeaponAuxHud).
+        float aux = player.AuxTimer;
+        float fade = Mathf.Clamp(aux > 1.0f ? 2.0f - aux : aux, 0.0f, 1.0f);
+        bool visible = aux > 0.0f && fade > 0.001f && player.WeaponIconIndex >= 0;
+        _auxPanel.Visible = visible;
+        _auxIcon.Visible = visible;
+        _auxName.Visible = visible;
+        if (!visible)
+        {
+            return;
+        }
+        if (player.WeaponIconIndex != _auxIconShown && _auxIconMat != null)
+        {
+            _auxIconShown = player.WeaponIconIndex;
+            int frame = player.WeaponIconIndex * 2;
+            _auxIconMat.Uv1Scale = new Vector3(2.0f / WeaponGrid, 1.0f / WeaponGrid, 1.0f);
+            _auxIconMat.Uv1Offset = new Vector3(frame % WeaponGrid / (float)WeaponGrid, frame / WeaponGrid / (float)WeaponGrid, 0.0f);
+            _auxName.Text = _weaponNames.TryGetValue(player.WeaponId, out string? name) ? name : $"Weapon {player.WeaponId}";
+        }
+        if (_auxPanelMat != null)
+        {
+            _auxPanelMat.AlbedoColor = new Color(1, 1, 1, 0.8f * fade);
+        }
+        if (_auxIconMat != null)
+        {
+            _auxIconMat.AlbedoColor = new Color(1, 1, 1, fade);
+        }
+        _auxName.Modulate = new Color(0.9f, 0.9f, 0.9f, fade);
     }
 
     private Label3D _questTimer = null!;
@@ -159,8 +425,10 @@ public sealed partial class Hud : Node3D
         _questTimer.Visible = limitMs > 0;
     }
 
-    public void Update(in Sim.TickResult result, in Sim.PlayerSnap player)
+    public void Update(in Sim.TickResult result, in Sim.PlayerSnap player, in Sim.SnapshotHeader header)
     {
+        UpdateBonusRows(header, player);
+        UpdateWeaponPopup(player);
         if (_questLimitMs > 0 && _questTimer.Visible)
         {
             long elapsed = result.ElapsedMsSim;

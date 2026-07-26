@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 18;
+    public const uint ExpectedAbiVersion = 19;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -106,6 +106,9 @@ public static partial class Sim
         public uint MonsterVision;   // ABI v7+: 1 => draw yellow aura on all creatures
         public uint GlowCount;       // ABI v7+: flame/bubblegun particle-pool entries
         public uint SpriteEffectCount; // ABI v13+: sprite-effect pool entries (after glows)
+        public float WeaponPowerUpTimer;    // ABI v19+: global bonus timers
+        public float ReflexBoostTimer;      // ABI v19+
+        public float DoubleExperienceTimer; // ABI v19+
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -135,6 +138,9 @@ public static partial class Sim
         public uint PerkFlags;      // ABI v11+: bit0 Doctor / bit1 Radioactive / bit2 Sharpshooter
         public float MovePhase;     // ABI v15+: walk cycle (leg frame = clamp(int(+0.5),0,14))
         public float DeathTimer;    // ABI v17+: 16 -> <0 at 20/s once dead (corpse frames 32..52)
+        public float FireBulletsTimer; // ABI v19+: bonus-HUD per-player timers
+        public float SpeedBonusTimer;  // ABI v19+
+        public float AuxTimer;         // ABI v19+: weapon-pickup name popup countdown (2 -> 0)
 
         public const uint PerkFlagDoctor = 1u << 0;
         public const uint PerkFlagRadioactive = 1u << 1;

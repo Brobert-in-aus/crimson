@@ -56,8 +56,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v18" {
-    try std.testing.expectEqual(@as(u32, 18), exports.crimson_host_abi_version());
+test "abi version reports v19" {
+    try std.testing.expectEqual(@as(u32, 19), exports.crimson_host_abi_version());
 }
 
 test "abi player snapshot carries the death timer" {
@@ -78,6 +78,13 @@ test "abi player snapshot carries the death timer" {
         buf[@sizeOf(exports.SnapshotHeader)..][0..@sizeOf(exports.PlayerSnap)],
     );
     try std.testing.expectEqual(@as(f32, 16.0), player.death_timer);
+    // ABI v19 bonus-HUD fields: all timers idle at spawn.
+    try std.testing.expectEqual(@as(f32, 0.0), player.fire_bullets_timer);
+    try std.testing.expectEqual(@as(f32, 0.0), player.speed_bonus_timer);
+    try std.testing.expectEqual(@as(f32, 0.0), player.aux_timer);
+    try std.testing.expectEqual(@as(f32, 0.0), header.weapon_power_up_timer);
+    try std.testing.expectEqual(@as(f32, 0.0), header.reflex_boost_timer);
+    try std.testing.expectEqual(@as(f32, 0.0), header.double_experience_timer);
 }
 
 test "dead run keeps simulating and drains the death timer" {

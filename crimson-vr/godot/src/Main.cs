@@ -1278,7 +1278,7 @@ public partial class Main : Node3D
         {
             Sim.PlayerSnap p = snap.Players[0];
             _playerGame = new Vector2(p.X, p.Y);
-            _hud.Update(result, p);
+            _hud.Update(result, p, snap.Header);
             _lastPlayer = p;
             _hasPlayerSnap = true;
             health = p.Health;

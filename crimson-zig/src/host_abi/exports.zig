@@ -19,7 +19,7 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 
-pub const abi_version: u32 = 18;
+pub const abi_version: u32 = 19;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -126,6 +126,11 @@ pub const SnapshotHeader = extern struct {
     // atlas cell (full cell, NO 2px clamp), plain alpha blend, gated on
     // fx_detail >= 2. Append-only (ABI v13).
     sprite_effect_count: u32,
+    // ABI v19 (append-only): the remaining global bonus timers, completing the
+    // bonus-HUD slot set (collectHudBonusSpecs) alongside energizer + freeze.
+    weapon_power_up_timer: f32,
+    reflex_boost_timer: f32,
+    double_experience_timer: f32,
 };
 
 pub const PlayerSnap = extern struct {
@@ -171,6 +176,12 @@ pub const PlayerSnap = extern struct {
     // death_timer) * 1.25), 32, 52)); the flat game-over transition waits for
     // it to pass 0. Presentation-only.
     death_timer: f32,
+    // ABI v19 (append-only): per-player bonus timers for the HUD slot set
+    // (fire bullets / speed) and the weapon-pickup aux popup countdown
+    // (aux_timer 2 -> 0; the name fades in over [2,1] and out over [1,0]).
+    fire_bullets_timer: f32,
+    speed_bonus_timer: f32,
+    aux_timer: f32,
 };
 
 pub const player_perk_flag_doctor: u32 = 1 << 0;
@@ -768,6 +779,9 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .monster_vision = 0,
         .glow_count = 0,
         .sprite_effect_count = 0,
+        .weapon_power_up_timer = box.runner.session.state.bonuses.weapon_power_up,
+        .reflex_boost_timer = box.runner.session.state.bonuses.reflex_boost,
+        .double_experience_timer = box.runner.session.state.bonuses.double_experience,
     };
 
     // Monster Vision is a per-player perk that draws a yellow aura over every
@@ -870,6 +884,9 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
                 (if (crimson_zig.perks.perkActive(&player, crimson_zig.perks.PerkId.ion_gun_master)) player_perk_flag_ion_gun_master else 0),
             .move_phase = player.move_phase,
             .death_timer = player.death_timer,
+            .fire_bullets_timer = player.fire_bullets_timer,
+            .speed_bonus_timer = player.speed_bonus_timer,
+            .aux_timer = player.aux_timer,
         });
     }
     for (box.runner.session.creatures.entries, 0..) |entry, creature_slot| {
