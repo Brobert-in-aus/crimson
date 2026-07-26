@@ -64,4 +64,13 @@ pub const version = "0.1.0-dev";
 test {
     _ = net;
     _ = quest_level;
+    // KNOWN GAP: the runtime-module inline tests (creatures, live_runner,
+    // weapons, ...) are NOT collected here — dependency-module references like
+    // test_root's `cz.creatures` analyze the files but do not collect their
+    // tests, so those suites have silently never run and have bit-rotted
+    // (adding `_ = creatures;` surfaces ~13 failures/crashes plus transitive
+    // bonuses/projectiles suites, and wiring live_runner drags session ->
+    // replay_codec fixture @embedFile paths that escape this module root).
+    // Restore them in a dedicated pass; until then critical runtime behavior
+    // is pinned in host_abi/tests.zig, which does run.
 }

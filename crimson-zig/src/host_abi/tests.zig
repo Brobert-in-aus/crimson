@@ -80,6 +80,63 @@ test "abi player snapshot carries the death timer" {
     try std.testing.expectEqual(@as(f32, 16.0), player.death_timer);
 }
 
+test "dead run keeps simulating and drains the death timer" {
+    // Reference behavior (gameplay.py player_update / survival_mode): a dead
+    // player only drains death_timer while the rest of the world keeps
+    // ticking; the game-over transition waits for the timer. The runner used
+    // to freeze the whole frame on allPlayersDead, stalling the VR death
+    // cinematic on its first corpse frame. Pinned here because the
+    // live_runner.zig inline tests are not yet collected by `zig build test`.
+    var runner = try crimson_zig.live_runner.LiveRunner.init(.{});
+    runner.session.players()[0].health = 0.0;
+
+    const update = try runner.stepFrame(runner.session.dt_nominal, .{});
+    try std.testing.expect(update.all_players_dead);
+    try std.testing.expectEqual(@as(usize, 1), update.ticks_advanced);
+    try std.testing.expect(runner.session.players()[0].death_timer < 16.0);
+
+    // The corpse ramp completes: ~1s of ticks takes the timer below zero.
+    for (0..70) |_| {
+        _ = try runner.stepFrame(runner.session.dt_nominal, .{});
+    }
+    try std.testing.expect(runner.session.players()[0].death_timer < 0.0);
+}
+
+test "lifecycle-killed creatures die through the ramp with hp remaining" {
+    // Breathing Room kills every creature by nudging lifecycle_stage below the
+    // alive sentinel while hp stays untouched. The creature update loop must
+    // route stage != alive into the dead path like the reference
+    // (creature_update_all: not alive OR hp <= 0) — it used to gate on hp
+    // only, leaving Breathing-Room'd creatures alive forever in a sub-alive
+    // stage (rendered flat on the ground in VR, still milling). Pinned here
+    // because the creatures.zig inline tests are not yet collected by
+    // `zig build test`.
+    var runner = try crimson_zig.live_runner.LiveRunner.init(.{});
+    const creature = &runner.session.creatures.entries[0];
+    creature.* = .{
+        .active = true,
+        .presentation_generation = 1,
+        .type_id = 0,
+        .pos = .{ .x = 200.0, .y = 200.0 },
+        .size = 44.0,
+        .hp = 40.0,
+        .max_hp = 40.0,
+        .lifecycle_stage = 15.98,
+    };
+
+    _ = try runner.stepFrame(runner.session.dt_nominal, .{});
+    // Dead path ran this tick: the ramp drains at 28/s; an alive creature's
+    // stage would not have moved at all.
+    try std.testing.expect(runner.session.creatures.entries[0].lifecycle_stage < 15.98 - 0.2);
+    try std.testing.expect(runner.session.creatures.entries[0].hp > 0.0);
+
+    // The ramp completes into the corpse fade within ~1.5s of ticks.
+    for (0..90) |_| {
+        _ = try runner.stepFrame(runner.session.dt_nominal, .{});
+    }
+    try std.testing.expect(runner.session.creatures.entries[0].lifecycle_stage < 0.0);
+}
+
 test "abi weapon usage counts: seeded via config, queryable" {
     // Seed shotgun (id 3) with 7 prior uses. Spawn does NOT increment usage
     // (resetPlayers hands out the 10-round pistol without going through

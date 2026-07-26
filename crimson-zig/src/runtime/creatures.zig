@@ -1988,7 +1988,12 @@ pub const CreaturePool = struct {
                 creature.hit_flash_timer = narrowF32(creature.hit_flash_timer - dt_f32);
             }
             if (state.bonuses.freeze > 0.0) continue;
-            if (!(creature.hp > 0.0)) {
+            // Reference (creature_update_all / runtime.py): the dead path is
+            // entered when the creature is not lifecycle-alive OR out of hp.
+            // Some effects kill by lifecycle alone â€” Breathing Room nudges
+            // lifecycle_stage below the alive sentinel with hp untouched â€”
+            // so gating on hp only left those creatures alive forever.
+            if (!creature_lifecycle.isAlive(creature.lifecycle_stage) or !(creature.hp > 0.0)) {
                 applySelfDamageTickToDead(creature, dt_f32);
                 tickAi7LinkTimer(creature, dt_ms, &state.rng);
                 if (creature_lifecycle.isAlive(creature.lifecycle_stage)) {
@@ -5184,6 +5189,9 @@ test "template spawn supports quest spawner templates and slot ticks" {
         var pool: CreaturePool = .{};
         var state = state_mod.GameplayState.init(1);
         var bonuses: bonus_runtime.BonusPool = .{};
+        var effects: effects_mod.EffectPool = .{};
+        var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+        pool.effects = &effects;
         var players = [_]state_mod.PlayerState{
             .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
         };
@@ -5197,7 +5205,7 @@ test "template spawn supports quest spawner templates and slot ticks" {
         );
         try std.testing.expectEqual(@as(usize, 1), pool.activeCount());
 
-        try pool.update(&state, players[0..], 1.1, 1024.0, &bonuses);
+        try pool.update(&state, players[0..], 1.1, 1024.0, &bonuses, &terrain_fx);
 
         try std.testing.expectEqual(@as(usize, 2), pool.activeCount());
         try std.testing.expectEqual(@as(i32, 1), pool.spawn_slots[0].count);
@@ -5246,6 +5254,9 @@ test "creature update fails on invalid spawn slot child template" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
     };
@@ -5267,7 +5278,7 @@ test "creature update fails on invalid spawn slot child template" {
 
     try std.testing.expectError(
         error.InvalidSpawnTemplate,
-        pool.update(&state, players[0..], 0.1, 1024.0, &bonuses),
+        pool.update(&state, players[0..], 0.1, 1024.0, &bonuses, &terrain_fx),
     );
 }
 
@@ -5331,6 +5342,9 @@ test "creature update applies contact damage and movement" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5352,16 +5366,67 @@ test "creature update applies contact damage and movement" {
         .contact_damage = 7.0,
     });
 
-    try pool.update(&state, players[0..], 1.0 / 60.0, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 1.0 / 60.0, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect(players[0].health < 100.0);
     try std.testing.expect(state.survival_reward_damage_seen);
     try expectFloatClose(1.0, pool.entries[0].attack_cooldown);
+}
+
+test "lifecycle-killed creature enters the death ramp with hp remaining" {
+    // Breathing Room kills every creature by nudging lifecycle_stage below the
+    // alive sentinel while hp stays untouched (perk impl parity); the update
+    // loop must route stage != alive into the dead path like the reference
+    // (creature_update_all: `not alive OR hp <= 0`), else the creature stays
+    // alive forever in a sub-alive stage.
+    var pool: CreaturePool = .{};
+    var state = state_mod.GameplayState.init(1);
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    pool.effects = &effects;
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{ .x = 100.0, .y = 100.0 },
+            .health = 100.0,
+        },
+    };
+    _ = pool.spawnInit(.{
+        .origin_template_id = -1,
+        .pos = .{ .x = 300.0, .y = 100.0 },
+        .heading = 0.0,
+        .phase_seed = 0.0,
+        .type_id = .alien,
+        .size = 44.0,
+        .move_speed = 1.0,
+        .health = 40.0,
+        .max_health = 40.0,
+        .reward_value = 60.0,
+        .contact_damage = 7.0,
+    });
+    const dt: f32 = 1.0 / 60.0;
+    pool.entries[0].lifecycle_stage = creature_lifecycle.alive - 0.02;
+
+    try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
+    // Dead path ran: the death ramp drains at 28/s (an alive creature's stage
+    // would not have moved at all).
+    try std.testing.expect(pool.entries[0].lifecycle_stage < creature_lifecycle.alive - 0.02 - dt * 20.0);
+    try std.testing.expect(pool.entries[0].hp > 0.0);
+
+    // The ramp completes into the corpse fade within a second of ticks.
+    for (0..90) |_| {
+        try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
+    }
+    try std.testing.expect(pool.entries[0].lifecycle_stage < 0.0);
 }
 
 test "veins of poison sets self-damage flag on contact hit" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5387,7 +5452,7 @@ test "veins of poison sets self-damage flag on contact hit" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect((pool.entries[0].flags & spawn_mod.CreatureFlags.self_damage_tick) != 0);
 }
 
@@ -5395,6 +5460,9 @@ test "veins of poison skips self-damage flag when shielded" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5421,7 +5489,7 @@ test "veins of poison skips self-damage flag when shielded" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect((pool.entries[0].flags & spawn_mod.CreatureFlags.self_damage_tick) == 0);
 }
 
@@ -5429,6 +5497,9 @@ test "toxic avenger sets strong self-damage flags on contact hit" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5454,7 +5525,7 @@ test "toxic avenger sets strong self-damage flags on contact hit" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect((pool.entries[0].flags & spawn_mod.CreatureFlags.self_damage_tick) != 0);
     try std.testing.expect((pool.entries[0].flags & spawn_mod.CreatureFlags.self_damage_tick_strong) != 0);
 }
@@ -5463,6 +5534,9 @@ test "toxic avenger strong self-damage tick overrides weak tick" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5488,7 +5562,7 @@ test "toxic avenger strong self-damage tick overrides weak tick" {
         .contact_damage = 10.0,
     });
 
-    try pool.update(&state, players[0..], 0.1, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.1, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(82.0, pool.entries[0].hp);
 }
 
@@ -5496,6 +5570,9 @@ test "toxic avenger skips strong self-damage flag when shielded" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5522,7 +5599,7 @@ test "toxic avenger skips strong self-damage flag when shielded" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect((pool.entries[0].flags & spawn_mod.CreatureFlags.self_damage_tick_strong) == 0);
 }
 
@@ -5531,6 +5608,9 @@ test "radioactive tick deals damage and wraps collision timer" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5556,7 +5636,7 @@ test "radioactive tick deals damage and wraps collision timer" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], dt, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
 
     const dist_after_move = state_mod.Vec2.sub(pool.entries[0].pos, players[0].pos).length();
     const expected_damage = narrowF32(narrowF32(100.0 - dist_after_move) * 0.3);
@@ -5570,6 +5650,9 @@ test "radioactive kill awards base xp without death multipliers" {
     var state = state_mod.GameplayState.init(1);
     state.bonuses.double_experience = 5.0;
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5597,7 +5680,7 @@ test "radioactive kill awards base xp without death multipliers" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], dt, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
 
     try std.testing.expectEqual(@as(i32, 112), players[0].experience);
     try std.testing.expect(pool.entries[0].hp < 0.0);
@@ -5609,6 +5692,9 @@ test "radioactive sets hp to one for lizard type creatures" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5635,7 +5721,7 @@ test "radioactive sets hp to one for lizard type creatures" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], dt, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
 
     try std.testing.expectEqual(@as(i32, 100), players[0].experience);
     try expectFloatClose(1.0, pool.entries[0].hp);
@@ -5647,6 +5733,9 @@ test "mr melee damages attacking creature on contact tick" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5671,7 +5760,7 @@ test "mr melee damages attacking creature on contact tick" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(75.0, pool.entries[0].hp);
 }
 
@@ -5679,6 +5768,9 @@ test "mr melee does not prevent player damage when attacker dies" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5703,7 +5795,7 @@ test "mr melee does not prevent player damage when attacker dies" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(90.0, players[0].health);
 }
 
@@ -5711,6 +5803,9 @@ test "mr melee is inert when perk is not active" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5734,7 +5829,7 @@ test "mr melee is inert when perk is not active" {
     });
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(100.0, pool.entries[0].hp);
 }
 
@@ -5742,6 +5837,9 @@ test "evil eyes freezes targeted creature movement" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5768,7 +5866,7 @@ test "evil eyes freezes targeted creature movement" {
 
     const before_x = pool.entries[0].pos.x;
     const before_y = pool.entries[0].pos.y;
-    try pool.update(&state, players[0..], 0.5, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.5, 1024.0, &bonuses, &terrain_fx);
 
     try expectFloatClose(before_x, pool.entries[0].pos.x);
     try expectFloatClose(before_y, pool.entries[0].pos.y);
@@ -5778,6 +5876,9 @@ test "ai7 link timer consumes rng when timer crosses zero" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(99);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5805,7 +5906,7 @@ test "ai7 link timer consumes rng when timer crosses zero" {
     var expected_rng = state.rng;
     _ = expected_rng.rand();
 
-    try pool.update(&state, players[0..], 0.017, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.017, 1024.0, &bonuses, &terrain_fx);
 
     try std.testing.expectEqual(expected_rng.state, state.rng.state);
     try std.testing.expectEqual(spawn_mod.CreatureAiMode.hold_timer, pool.entries[0].ai_mode);
@@ -5917,6 +6018,7 @@ test "doctor increases projectile damage by 20 percent" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{} },
     };
@@ -5940,6 +6042,7 @@ test "doctor increases projectile damage by 20 percent" {
         &state,
         players[0..],
         &bonuses,
+        &terrain_fx,
         0,
         10.0,
         .{},
@@ -5954,6 +6057,7 @@ test "pyromaniac increases fire damage and consumes rng" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -5981,6 +6085,7 @@ test "pyromaniac increases fire damage and consumes rng" {
         &state,
         players[0..],
         &bonuses,
+        &terrain_fx,
         0,
         10.0,
         .{},
@@ -5997,6 +6102,7 @@ test "fire damage without pyromaniac keeps base damage and rng state" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6023,6 +6129,7 @@ test "fire damage without pyromaniac keeps base damage and rng state" {
         &state,
         players[0..],
         &bonuses,
+        &terrain_fx,
         0,
         10.0,
         .{},
@@ -6039,6 +6146,7 @@ test "living fortress scales projectile damage by alive player timers" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{} },
         .{ .index = 1, .pos = .{} },
@@ -6065,6 +6173,7 @@ test "living fortress scales projectile damage by alive player timers" {
         &state,
         players[0..],
         &bonuses,
+        &terrain_fx,
         0,
         10.0,
         .{},
@@ -6290,6 +6399,9 @@ test "ranged shock creature queues projectile along heading not direct aim" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6314,7 +6426,7 @@ test "ranged shock creature queues projectile along heading not direct aim" {
         .contact_damage = 0.0,
     });
 
-    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses, &terrain_fx);
 
     try std.testing.expectEqual(@as(i32, 1), state.pending_creature_projectile_count);
     try std.testing.expectEqual(@intFromEnum(game_ids.ProjectileTypeId.plasma_rifle), state.pending_creature_projectiles[0].type_id);
@@ -6332,6 +6444,9 @@ test "ranged shock creature does not fire when too close" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6356,7 +6471,7 @@ test "ranged shock creature does not fire when too close" {
         .contact_damage = 0.0,
     });
 
-    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expectEqual(@as(i32, 0), state.pending_creature_projectile_count);
 }
 
@@ -6364,6 +6479,9 @@ test "ranged variant uses explicit projectile type and random cooldown" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(3);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6390,7 +6508,7 @@ test "ranged variant uses explicit projectile type and random cooldown" {
     pool.entries[0].ranged_projectile_type = @intFromEnum(game_ids.ProjectileTypeId.spider_plasma);
     pool.entries[0].orbit_angle = 0.4;
 
-    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.001, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expectEqual(@as(i32, 1), state.pending_creature_projectile_count);
     try std.testing.expectEqual(@as(i32, 26), state.pending_creature_projectiles[0].type_id);
     try expectFloatClose(0.4, pool.entries[0].attack_cooldown);
@@ -6400,6 +6518,9 @@ test "freeze stops creature movement" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6422,13 +6543,13 @@ test "freeze stops creature movement" {
         .contact_damage = 4.0,
     });
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     const moved_x = pool.entries[0].pos.x;
     const moved_y = pool.entries[0].pos.y;
     try std.testing.expect(!(moved_x == 100.0 and moved_y == 200.0));
 
     state.bonuses.freeze = 5.0;
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(moved_x, pool.entries[0].pos.x);
     try expectFloatClose(moved_y, pool.entries[0].pos.y);
 }
@@ -6437,6 +6558,9 @@ test "plaguebearer infects weak creatures near player" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6460,7 +6584,7 @@ test "plaguebearer infects weak creatures near player" {
         .contact_damage = 4.0,
     });
 
-    try pool.update(&state, players[0..], 0.016, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.016, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect(pool.entries[0].plague_infected);
 }
 
@@ -6468,6 +6592,9 @@ test "plaguebearer infection timer wrap applies damage" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6492,7 +6619,7 @@ test "plaguebearer infection timer wrap applies damage" {
     pool.entries[0].plague_infected = true;
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(0.4, pool.entries[0].collision_timer);
     try expectFloatClose(85.0, pool.entries[0].hp);
 }
@@ -6501,6 +6628,9 @@ test "plaguebearer spreads between nearby creatures" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6539,7 +6669,7 @@ test "plaguebearer spreads between nearby creatures" {
     });
     pool.entries[0].plague_infected = true;
 
-    try pool.update(&state, players[0..], 0.016, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.016, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expect(pool.entries[1].plague_infected);
 }
 
@@ -6548,6 +6678,9 @@ test "plaguebearer infection kill increments global count" {
     var state = state_mod.GameplayState.init(1);
     state.bonus_spawn_guard = true;
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6572,7 +6705,7 @@ test "plaguebearer infection kill increments global count" {
     pool.entries[0].plague_infected = true;
     pool.entries[0].collision_timer = 0.1;
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
     try std.testing.expectEqual(@as(i32, 1), state.plaguebearer_infection_count);
     try std.testing.expect(players[0].experience > 0);
 }
@@ -6582,6 +6715,9 @@ test "plague timer kill preserves split-on-death child spawn behavior" {
     var state = state_mod.GameplayState.init(1);
     state.bonus_spawn_guard = true;
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6607,7 +6743,7 @@ test "plague timer kill preserves split-on-death child spawn behavior" {
     pool.entries[0].collision_timer = 0.01;
     pool.entries[0].last_hit_owner = owner_ref.OwnerRef.fromPlayer(0);
 
-    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 0.2, 1024.0, &bonuses, &terrain_fx);
 
     try std.testing.expectEqual(@as(i32, 1), state.plaguebearer_infection_count);
     var active_count: usize = 0;
@@ -6633,6 +6769,9 @@ test "plaguebearer infection kill does not apply immediate dead decay" {
     var state = state_mod.GameplayState.init(1);
     state.bonus_spawn_guard = true;
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6658,7 +6797,7 @@ test "plaguebearer infection kill does not apply immediate dead decay" {
     pool.entries[0].collision_timer = 0.01;
 
     const dt = 0.063;
-    try pool.update(&state, players[0..], dt, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], dt, 1024.0, &bonuses, &terrain_fx);
     try expectFloatClose(creature_lifecycle.alive - dt, pool.entries[0].lifecycle_stage);
 }
 
@@ -6666,6 +6805,9 @@ test "single-player dead player uses dead-target AI position" {
     var pool: CreaturePool = .{};
     var state = state_mod.GameplayState.init(1);
     var bonuses: bonus_runtime.BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var effects: effects_mod.EffectPool = .{};
+    pool.effects = &effects;
     var players = [_]state_mod.PlayerState{
         .{
             .index = 0,
@@ -6690,7 +6832,7 @@ test "single-player dead player uses dead-target AI position" {
     });
 
     const start_pos = pool.entries[0].pos;
-    try pool.update(&state, players[0..], 1.0 / 60.0, 1024.0, &bonuses);
+    try pool.update(&state, players[0..], 1.0 / 60.0, 1024.0, &bonuses, &terrain_fx);
 
     const expected_dead_target: state_mod.Vec2 = .{
         .x = 1024.0 * (27.0 / 64.0),
@@ -6703,3 +6845,4 @@ test "single-player dead player uses dead-target AI position" {
     try std.testing.expect(creature.pos.y < start_pos.y);
     try expectFloatClose(0.0, players[0].health);
 }
+
