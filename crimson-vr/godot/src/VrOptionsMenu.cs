@@ -23,11 +23,13 @@ public sealed partial class VrOptionsMenu : Node3D
     private VrSegmentedSlider _music = null!;
     private VrSegmentedSlider _detail = null!;
     private VrCheckbox _infoTexts = null!;
+    private VrButton _controls = null!;
     private VrButton _vrSettings = null!;
     private VrButton _back = null!;
 
     public event Action? OnBack;
     public event Action? OnVrSettings;
+    public event Action? OnControls;
     public event Action<int>? OnSfxChanged;
     public event Action<int>? OnMusicChanged;
     public event Action<int>? OnDetailChanged;
@@ -78,18 +80,27 @@ public sealed partial class VrOptionsMenu : Node3D
         _infoTexts.OnToggled += b => OnInfoTextsChanged?.Invoke(b);
         y -= s * 0.12f;
 
-        float bw = s * 0.26f;
+        // Bottom row, three across: Controls (the base Options screen's
+        // Controls button, as a VR reference card) / VR Settings / Back.
+        float bw = s * 0.24f;
         float bh = s * 0.075f;
+        float bPitch = bw + s * 0.03f;
+        _controls = new VrButton();
+        AddChild(_controls);
+        _controls.Build(bw, bh, "Controls", new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _controls.Position = new Vector3(-bPitch, y, 0.0f);
+        _controls.OnPress += () => OnControls?.Invoke();
+
         _vrSettings = new VrButton();
         AddChild(_vrSettings);
         _vrSettings.Build(bw, bh, "VR Settings", new Color(0.5f, 0.6f, 0.85f), plate: true);
-        _vrSettings.Position = new Vector3(-(bw * 0.5f + s * 0.02f), y, 0.0f);
+        _vrSettings.Position = new Vector3(0.0f, y, 0.0f);
         _vrSettings.OnPress += () => OnVrSettings?.Invoke();
 
         _back = new VrButton();
         AddChild(_back);
         _back.Build(bw, bh, "Back", new Color(0.6f, 0.6f, 0.66f), plate: true);
-        _back.Position = new Vector3(bw * 0.5f + s * 0.02f, y, 0.0f);
+        _back.Position = new Vector3(bPitch, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
         Visible = false;
@@ -147,6 +158,7 @@ public sealed partial class VrOptionsMenu : Node3D
         Visible = visible;
         // Re-arm + start the settle window on show AND hide, so a finger where a
         // control appears can't instant-fire (e.g. VR Settings Back reopens this).
+        _controls.ResetPress();
         _vrSettings.ResetPress();
         _back.ResetPress();
         _infoTexts.ResetPress();
@@ -165,6 +177,7 @@ public sealed partial class VrOptionsMenu : Node3D
         _music.PollPoke(probes);
         _detail.PollPoke(probes);
         _infoTexts.PollPoke(probes);
+        _controls.PollPoke(probes);
         _vrSettings.PollPoke(probes);
         _back.PollPoke(probes);
     }

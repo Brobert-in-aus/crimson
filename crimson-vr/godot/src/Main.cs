@@ -102,9 +102,11 @@ public partial class Main : Node3D
     private PauseMenu _pauseMenu = null!;
     // Options screen (mirrors the base game) + the VR Settings submenu it opens.
     private VrOptionsMenu _optionsMenu = null!;
+    private ControlsScreen _controlsScreen = null!;
     private SettingsMenu _settingsMenu = null!; // VR Settings submenu (hand/dead-zone/debug)
     private bool _optionsOpen;
     private bool _vrSettingsOpen;
+    private bool _controlsOpen;
     private bool _optionsFromMenu; // options opened from the main menu (vs the pause menu)
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
@@ -143,7 +145,7 @@ public partial class Main : Node3D
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
         || _statsMenu.IsOpen || _databaseMenu.IsOpen
-        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen));
+        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -276,6 +278,7 @@ public partial class Main : Node3D
             LoadReticleTex("ui_checkOn.png"), LoadReticleTex("ui_checkOff.png"));
         _optionsMenu.OnBack += CloseOptions;
         _optionsMenu.OnVrSettings += OpenVrSettings;
+        _optionsMenu.OnControls += OpenControls;
         _optionsMenu.OnSfxChanged += v => { _settings.SfxVolume = v; _audio.SetSfxVolume(v); _settings.Save(); };
         _optionsMenu.OnMusicChanged += v => { _settings.MusicVolume = v; _audio.SetMusicVolume(v); _settings.Save(); };
         _optionsMenu.OnDetailChanged += v => { _settings.GraphicsDetail = v; _diorama.SetGraphicsDetail(v); _settings.Save(); };
@@ -288,11 +291,24 @@ public partial class Main : Node3D
             _settings.RenderScale, _settings.Msaa,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
-        _settingsMenu.OnHandSwapChanged += v => { _handSwap = v; _settings.HandSwap = v; _settings.Save(); };
+        _settingsMenu.OnHandSwapChanged += v =>
+        {
+            _handSwap = v;
+            _settings.HandSwap = v;
+            _settings.Save();
+            _controlsScreen.SetHandSwap(v);
+        };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
         _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
         _settingsMenu.OnMsaaChanged += v => { _settings.Msaa = v; ApplyRenderQuality(); _settings.Save(); };
+
+        // Controls reference card (the base Options screen's Controls button):
+        // read-only VR mapping, honouring hand-swap.
+        _controlsScreen = new ControlsScreen();
+        _arenaRoot.AddChild(_controlsScreen);
+        _controlsScreen.Build(ArenaSideMeters, _handSwap);
+        _controlsScreen.OnBack += CloseControls;
 
         // Validation checklist: a standing panel 90 deg to the RIGHT of the arena,
         // always visible so it can be ticked off in any game state, results persisted.
@@ -628,6 +644,22 @@ public partial class Main : Node3D
         _vrSettingsOpen = true;
         _optionsMenu.SetShown(false);
         _settingsMenu.SetShown(true);
+    }
+
+    private void OpenControls()
+    {
+        _optionsOpen = false;
+        _controlsOpen = true;
+        _optionsMenu.SetShown(false);
+        _controlsScreen.SetShown(true);
+    }
+
+    private void CloseControls()
+    {
+        _controlsOpen = false;
+        _controlsScreen.SetShown(false);
+        _optionsOpen = true;
+        _optionsMenu.SetShown(true);
     }
 
     private void CloseVrSettings()
@@ -1466,13 +1498,17 @@ public partial class Main : Node3D
             _databaseMenu.PollPoke(p);
             return;
         }
-        // Options / VR Settings opened from the main menu (sim gated by
-        // MenuOwnsScreen): poke whichever is showing.
-        if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen))
+        // Options / VR Settings / Controls opened from the main menu (sim gated
+        // by MenuOwnsScreen): poke whichever is showing.
+        if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen))
         {
             if (_vrSettingsOpen)
             {
                 _settingsMenu.PollPoke(p);
+            }
+            else if (_controlsOpen)
+            {
+                _controlsScreen.PollPoke(p);
             }
             else
             {
@@ -1517,6 +1553,10 @@ public partial class Main : Node3D
         {
             _settingsMenu.PollPoke(p);
         }
+        if (_pauseMenu.IsPaused && _controlsOpen)
+        {
+            _controlsScreen.PollPoke(p);
+        }
         // Perk cards only while a pick is pending AND the pause menu isn't up (they
         // share the space; the pause panel takes precedence). While paused the sim
         // is frozen so Update won't run — hide the cards explicitly.
@@ -1541,10 +1581,12 @@ public partial class Main : Node3D
         // the paused state.
         if (!_pauseMenu.IsPaused && !_optionsFromMenu)
         {
-            if (_optionsOpen || _vrSettingsOpen)
+            if (_optionsOpen || _vrSettingsOpen || _controlsOpen)
             {
                 _vrSettingsOpen = false;
                 _settingsMenu.SetShown(false);
+                _controlsOpen = false;
+                _controlsScreen.SetShown(false);
                 CloseOptions();
             }
         }
