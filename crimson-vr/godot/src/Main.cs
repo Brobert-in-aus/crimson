@@ -51,6 +51,7 @@ public partial class Main : Node3D
         $"{{\"seed\":{_runSeed}"
         + $",\"game_mode\":{_gameMode}"
         + (_gameMode == GameModeQuests ? $",\"quest_level_key\":{_questKey}" : string.Empty)
+        + (_gameMode == GameModeQuests && _hardcore ? ",\"hardcore\":true" : string.Empty)
         + ",\"player_count\":1,\"world_size\":1024.0,\"tick_rate\":60"
         // The persisted quest-unlock progression also gates the survival/rush
         // weapon-drop pool, like the base game's status blob. The FULL index
@@ -69,6 +70,7 @@ public partial class Main : Node3D
     private int _questKey = 101;      // quest_level_key = stage*100 + index
     private string _questTitle = string.Empty;
     private bool _questEndShown;      // quest end panel shown for this run
+    private bool _hardcore;           // quest-select checkbox (quests only)
 
     private XROrigin3D _origin = null!;
     private XRCamera3D _camera = null!;
@@ -132,6 +134,7 @@ public partial class Main : Node3D
     private PlayGameMenu _playGameMenu = null!;
     private QuestSelectMenu _questSelect = null!;
     private QuestResultPanel _questPanel = null!;
+    private EndNotePanel _endNote = null!;
     private StatsMenu _statsMenu = null!;
     private DatabaseMenu _databaseMenu = null!;
 
@@ -396,7 +399,12 @@ public partial class Main : Node3D
         _questSelect = new QuestSelectMenu();
         _arenaRoot.AddChild(_questSelect);
         _questSelect.Build(ArenaSideMeters);
-        _questSelect.OnStart += (key, title) => { _questTitle = title; StartRun(GameModeQuests, key); };
+        _questSelect.OnStart += (key, title) =>
+        {
+            _questTitle = title;
+            _hardcore = _questSelect.Hardcore;
+            StartRun(GameModeQuests, key);
+        };
         _questSelect.OnBack += () => { _questSelect.Close(); _playGameMenu.Open(); };
 
         // Quest end panel: completed (Next Quest) or failed (Retry).
@@ -413,6 +421,20 @@ public partial class Main : Node3D
             _questSelect.Open(_settings.QuestUnlockIndex);
         };
         _questPanel.OnMainMenu += () => { _questPanel.Dismiss(); ReturnToMenu(); };
+
+        // Quest 5.10 finale: Show End Note -> the victory text + mode shortcuts.
+        _endNote = new EndNotePanel();
+        _arenaRoot.AddChild(_endNote);
+        _endNote.Build(ArenaSideMeters);
+        _questPanel.OnEndNote += () =>
+        {
+            _questPanel.Dismiss();
+            _audio.PlayUi(AudioBank.UiPanel);
+            _endNote.Show(_hardcore);
+        };
+        _endNote.OnSurvival += () => { _endNote.Dismiss(); StartRun(GameModeSurvival); };
+        _endNote.OnRush += () => { _endNote.Dismiss(); StartRun(GameModeRush); };
+        _endNote.OnMainMenu += () => { _endNote.Dismiss(); ReturnToMenu(); };
 
         try
         {
@@ -776,6 +798,7 @@ public partial class Main : Node3D
             || _perkMenu.Active
             || _startPrompt.Pending
             || _questPanel.Active
+            || _endNote.Active
             || (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active));
         if (_handMarkers[0] != null)
         {
@@ -910,7 +933,8 @@ public partial class Main : Node3D
     private void UpdateAimOverlays()
     {
         bool inPlay = !MenuOwnsScreen && _sim != null && _hasPlayerSnap
-            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active && !_questPanel.Active;
+            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active
+            && !_questPanel.Active && !_endNote.Active;
         XRController3D aimHand = _handSwap ? _leftHand : _rightHand;
         if (!inPlay || !aimHand.GetHasTrackingData() || _lastPlayer.Health <= 0.0f)
         {
@@ -1057,9 +1081,9 @@ public partial class Main : Node3D
             return;
         }
 
-        // Quest end panel up (completed or failed): hold the sim until a button
-        // routes somewhere.
-        if (_questPanel.Active)
+        // Quest end panel (completed or failed) or the 5.10 end note up: hold
+        // the sim until a button routes somewhere.
+        if (_questPanel.Active || _endNote.Active)
         {
             return;
         }
@@ -1174,14 +1198,31 @@ public partial class Main : Node3D
                 _questEndShown = true;
                 RecordRunStats();
                 int gi = QuestGlobalIndex(_questKey);
-                if (gi == _settings.QuestUnlockIndex)
+                // advance_quest_unlocks (quests/results.py): completion always
+                // raises the casual unlock; a HARDCORE completion additionally
+                // raises the full index (which gates the Splitter Gun drop).
+                int nextUnlock = gi + 1;
+                bool changed = false;
+                if (nextUnlock > _settings.QuestUnlockIndex)
                 {
-                    _settings.QuestUnlockIndex = gi + 1;
+                    _settings.QuestUnlockIndex = nextUnlock;
+                    changed = true;
+                }
+                if (_hardcore && nextUnlock > _settings.QuestUnlockIndexFull)
+                {
+                    _settings.QuestUnlockIndexFull = nextUnlock;
+                    changed = true;
+                }
+                if (changed)
+                {
                     _settings.Save();
                 }
                 _audio.PlayUi(AudioBank.UiPanel);
+                // Quest 5.10 (global index 49) swaps "Next Quest" for the
+                // native "Show End Note" finale flow.
                 _questPanel.Show(completed: true, _questTitle, _sim.LastResult.ElapsedMsSim,
-                    hasNext: gi + 1 <= _settings.QuestUnlockIndex && gi < 49);
+                    hasNext: gi + 1 <= _settings.QuestUnlockIndex && gi < 49,
+                    showEndNote: gi == 49);
             }
             return;
         }
@@ -1340,7 +1381,8 @@ public partial class Main : Node3D
 
         // Ease the whole HUD out over the perk pick and on death instead of
         // hard-toggling (survival_mode.py hud_alpha, 400 ms transition).
-        float hudTarget = (_perkMenu.Active || _questPanel.Active || (_sim != null && _sim.GameOver)) ? 0.0f : 1.0f;
+        float hudTarget = (_perkMenu.Active || _questPanel.Active || _endNote.Active
+            || (_sim != null && _sim.GameOver)) ? 0.0f : 1.0f;
         _hudFade = Mathf.MoveToward(_hudFade, hudTarget, (float)delta / 0.4f);
         _hud.SetFade(_hudFade);
 
@@ -1448,6 +1490,11 @@ public partial class Main : Node3D
         if (_questPanel.Active)
         {
             _questPanel.PollPoke(p);
+            return;
+        }
+        if (_endNote.Active)
+        {
+            _endNote.PollPoke(p);
             return;
         }
         // Death screen: keyboard (name-entry phase) and panel can be up together.

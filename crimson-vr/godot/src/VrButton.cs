@@ -307,6 +307,16 @@ public sealed partial class VrButton : Node3D
         _face.AddChild(_label);
     }
 
+    /// <summary>Swap the face texture of a BuildIcon button (e.g. the hardcore
+    /// checkbox flipping between ui_checkOn/ui_checkOff).</summary>
+    public void SetIconTexture(Texture2D icon)
+    {
+        if (_mat != null)
+        {
+            _mat.AlbedoTexture = icon;
+        }
+    }
+
     public void SetText(string text)
     {
         if (_smallLabel != null)

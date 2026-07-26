@@ -26,6 +26,7 @@ public sealed partial class QuestResultPanel : Node3D
     private VrButton _questMenu = null!;
     private VrButton _mainMenu = null!;
     private bool _completed;
+    private bool _showEndNote;
 
     public bool Active { get; private set; }
 
@@ -33,6 +34,9 @@ public sealed partial class QuestResultPanel : Node3D
     public event Action? OnNext;
     /// <summary>Retry the same quest (failed).</summary>
     public event Action? OnRetry;
+    /// <summary>Quest 5.10 finale: the primary button reads "Show End Note"
+    /// (quest_results_screen_update swaps it for "Play Next" on 5.10).</summary>
+    public event Action? OnEndNote;
     public event Action? OnQuestMenu;
     public event Action? OnMainMenu;
 
@@ -72,7 +76,21 @@ public sealed partial class QuestResultPanel : Node3D
         float h = s * 0.13f;
         float pitch = h + s * 0.035f;
         float y0 = s * 0.0f;
-        _primary = MakeButton(w, h, y0, () => { if (_completed) { OnNext?.Invoke(); } else { OnRetry?.Invoke(); } });
+        _primary = MakeButton(w, h, y0, () =>
+        {
+            if (_showEndNote)
+            {
+                OnEndNote?.Invoke();
+            }
+            else if (_completed)
+            {
+                OnNext?.Invoke();
+            }
+            else
+            {
+                OnRetry?.Invoke();
+            }
+        });
         _questMenu = MakeButton(w, h, y0 - pitch, () => OnQuestMenu?.Invoke());
         _mainMenu = MakeButton(w, h, y0 - pitch * 2.0f, () => OnMainMenu?.Invoke(), new Color(0.5f, 0.55f, 0.66f));
         _questMenu.SetText("Quest Menu");
@@ -111,9 +129,10 @@ public sealed partial class QuestResultPanel : Node3D
 
     /// <summary>Show the panel. elapsedMs = sim time at quest end; hasNext =
     /// a next quest exists (completed panels without one hide the button).</summary>
-    public void Show(bool completed, string questTitle, long elapsedMs, bool hasNext)
+    public void Show(bool completed, string questTitle, long elapsedMs, bool hasNext, bool showEndNote = false)
     {
         _completed = completed;
+        _showEndNote = completed && showEndNote;
         Active = true;
         Visible = true;
         _banner.Text = completed ? "Quest Completed!" : "Quest Failed";
@@ -129,8 +148,8 @@ public sealed partial class QuestResultPanel : Node3D
         _timeLabel.Text = time;
         _titleSmall?.SetText(questTitle);
         _timeSmall?.SetText(time);
-        _primary.SetText(completed ? "Next Quest" : "Retry");
-        _primary.Visible = !completed || hasNext;
+        _primary.SetText(_showEndNote ? "Show End Note" : (completed ? "Next Quest" : "Retry"));
+        _primary.Visible = !completed || hasNext || _showEndNote;
         _primary.ResetPress();
         _questMenu.ResetPress();
         _mainMenu.ResetPress();

@@ -21,11 +21,20 @@ public sealed partial class QuestSelectMenu : Node3D
     private readonly VrButton[] _rows = new VrButton[10];
     private readonly bool[] _rowLocked = new bool[10];
     private VrButton _back = null!;
+    private VrButton? _hardcoreToggle;
+    private SmallFontLabel? _hardcoreLabel;
+    private Texture2D? _checkOn;
+    private Texture2D? _checkOff;
     private int _stage = 1;
     private int _unlockIndex;
     private float _side;
 
     public bool IsOpen { get; private set; }
+
+    /// <summary>Hardcore run requested (native quest_views/shared checkbox,
+    /// shown once quest_unlock_index reaches 40). Session-scoped like the base
+    /// game — it resets to off each time the menu is built.</summary>
+    public bool Hardcore { get; private set; }
 
     /// <summary>Poked a playable quest: (quest_level_key, title).</summary>
     public event Action<int, string>? OnStart;
@@ -95,7 +104,39 @@ public sealed partial class QuestSelectMenu : Node3D
         _back.Position = new Vector3(0.0f, topY - 5.0f * rowPitch - s * 0.02f, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
+        // Hardcore checkbox (native quest_views/shared: appears at unlock >= 40,
+        // ui_checkOn/ui_checkOff art). Sits beside Back; visibility per Open().
+        string onPath = "res://assets/sprites/ui_checkOn.png";
+        string offPath = "res://assets/sprites/ui_checkOff.png";
+        if (ResourceLoader.Exists(onPath) && ResourceLoader.Exists(offPath))
+        {
+            _checkOn = ResourceLoader.Load<Texture2D>(onPath);
+            _checkOff = ResourceLoader.Load<Texture2D>(offPath);
+            _hardcoreToggle = new VrButton();
+            AddChild(_hardcoreToggle);
+            _hardcoreToggle.BuildIcon(s * 0.075f, _checkOff!);
+            _hardcoreToggle.Position = new Vector3(-colX, topY - 5.0f * rowPitch - s * 0.02f, 0.0f);
+            _hardcoreToggle.OnPress += ToggleHardcore;
+            if (SmallFont.Shared() is { } font)
+            {
+                _hardcoreLabel = new SmallFontLabel();
+                _hardcoreLabel.Build(font, s / 560.0f, new Color(1.0f, 1.0f, 1.0f, 0.8f));
+                _hardcoreLabel.Position = _hardcoreToggle.Position + new Vector3(s * 0.06f, -s * 0.012f, 0.0f);
+                AddChild(_hardcoreLabel);
+                _hardcoreLabel.SetText("Hardcore");
+            }
+        }
+
         Visible = false;
+    }
+
+    private void ToggleHardcore()
+    {
+        Hardcore = !Hardcore;
+        if (_hardcoreToggle != null && _checkOn != null && _checkOff != null)
+        {
+            _hardcoreToggle.SetIconTexture(Hardcore ? _checkOn : _checkOff);
+        }
     }
 
     public void Open(int unlockIndex)
@@ -103,6 +144,18 @@ public sealed partial class QuestSelectMenu : Node3D
         _unlockIndex = unlockIndex;
         IsOpen = true;
         Visible = true;
+        // Native gate: the hardcore checkbox only shows once every quest is
+        // cleared at least casually (unlock index 40 = stage 5 reached... the
+        // native constant is 0x28).
+        bool hardcoreVisible = unlockIndex >= 40;
+        if (_hardcoreToggle != null)
+        {
+            _hardcoreToggle.Visible = hardcoreVisible;
+        }
+        if (_hardcoreLabel != null)
+        {
+            _hardcoreLabel.Visible = hardcoreVisible;
+        }
         // Open on the stage containing the first locked quest (the frontier),
         // like returning players expect; clamp when everything is unlocked.
         int frontier = Mathf.Clamp(unlockIndex, 0, 49);
@@ -140,6 +193,10 @@ public sealed partial class QuestSelectMenu : Node3D
             b.PollPoke(probes);
         }
         _back.PollPoke(probes);
+        if (_hardcoreToggle is { Visible: true })
+        {
+            _hardcoreToggle.PollPoke(probes);
+        }
     }
 
     private void SelectStage(int stage)
