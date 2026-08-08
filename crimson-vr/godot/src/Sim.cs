@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 21;
+    public const uint ExpectedAbiVersion = 22;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -409,16 +409,38 @@ public static partial class Sim
     [LibraryImport(LibName, EntryPoint = "crimson_host_audio_events")]
     public static partial int AudioEvents(ulong handle, Span<byte> buf, ref uint len);
 
-    /// <summary>Start (or restart) replay capture (ABI v21).</summary>
+    /// <summary>Start (or restart) replay capture (ABI v22).</summary>
     [LibraryImport(LibName, EntryPoint = "crimson_host_replay_begin")]
     public static partial int ReplayBegin(ulong handle);
 
     /// <summary>Encode the captured run as .crd bytes; same buffer protocol as
     /// Snapshot. Proportional to run length (one encoded row per tick), so call
     /// it once when a session ends, never per frame. A reported size of 0 with
-    /// Ok means the session recorded nothing, which is not a failure.</summary>
+    /// Ok means the session recorded nothing, which is not a failure.
+    ///
+    /// Prefer ReplayDetach + RecordingEncode: this one does the encode inline,
+    /// so the caller wears a stall that grows with the match.</summary>
     [LibraryImport(LibName, EntryPoint = "crimson_host_replay_finish")]
     public static partial int ReplayFinish(ulong handle, Span<byte> buf, ref uint len);
+
+    /// <summary>Lift the capture out of the session — O(1), so it costs the same
+    /// whatever the match length. Yields 0 when nothing was recorded. The
+    /// session can be restarted or destroyed straight afterwards; the recording
+    /// owns everything it needs.</summary>
+    [LibraryImport(LibName, EntryPoint = "crimson_host_replay_detach")]
+    public static partial int ReplayDetach(ulong handle, out ulong recording);
+
+    /// <summary>Encode a detached recording. SAFE OFF THE MAIN THREAD — this is
+    /// the expensive half, and the whole point of detaching is to run it there.
+    /// Same size-then-fill protocol as ReplayFinish.</summary>
+    [LibraryImport(LibName, EntryPoint = "crimson_host_recording_encode")]
+    public static partial int RecordingEncode(ulong recording, Span<byte> buf, ref uint len);
+
+    /// <summary>Release a detached recording. Every handle must reach this,
+    /// including after a failed encode — the captured rows are the largest
+    /// allocation the native side holds.</summary>
+    [LibraryImport(LibName, EntryPoint = "crimson_host_recording_destroy")]
+    public static partial int RecordingDestroy(ulong recording);
 
     [LibraryImport(LibName, EntryPoint = "crimson_host_terrain_info")]
     public static partial int TerrainInfoNative(ulong handle, out TerrainInfo info);

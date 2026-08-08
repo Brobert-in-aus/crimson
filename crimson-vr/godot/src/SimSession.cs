@@ -325,6 +325,51 @@ public sealed class SimSession : IDisposable
         return rc == counts.Length ? counts : null;
     }
 
+    /// <summary>Lift the finished run's capture out of the session so it can be
+    /// encoded elsewhere. O(1) whatever the match length — that is the point.
+    /// Returns 0 when the session recorded nothing (a run that never ticked),
+    /// which is normal rather than a failure.
+    ///
+    /// The caller now OWNS the returned handle and must pass it to
+    /// <see cref="RecordingDestroy"/>, including if the encode fails.</summary>
+    public ulong ReplayDetach()
+    {
+        int rc = Sim.ReplayDetach(Handle, out ulong recording);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException($"replay detach failed ({rc}): {Sim.LastError()}");
+        }
+        return recording;
+    }
+
+    /// <summary>Encode a detached recording to .crd bytes. Deliberately static
+    /// and handle-based: it is safe to call from a background thread and must
+    /// not depend on this session, which may already have been restarted.</summary>
+    public static byte[] RecordingEncode(ulong recording)
+    {
+        uint len = 0;
+        int rc = Sim.RecordingEncode(recording, Span<byte>.Empty, ref len);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException(
+                $"recording encode (size query) failed ({rc}): {Sim.LastError()}");
+        }
+        if (len == 0)
+        {
+            return System.Array.Empty<byte>();
+        }
+
+        var buf = new byte[len];
+        rc = Sim.RecordingEncode(recording, buf, ref len);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException($"recording encode failed ({rc}): {Sim.LastError()}");
+        }
+        return len == buf.Length ? buf : buf.AsSpan(0, (int)len).ToArray();
+    }
+
+    public static void RecordingDestroy(ulong recording) => Sim.RecordingDestroy(recording);
+
     /// <summary>Tear down and recreate the session with the same config.</summary>
     public void Restart() => Restart(_configJson);
 

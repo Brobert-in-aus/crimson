@@ -56,8 +56,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v21" {
-    try std.testing.expectEqual(@as(u32, 21), exports.crimson_host_abi_version());
+test "abi version reports v22" {
+    try std.testing.expectEqual(@as(u32, 22), exports.crimson_host_abi_version());
 }
 
 test "recorded replay verifies through the ABI" {
@@ -275,6 +275,132 @@ test "recorded replay verifies with weapon usage history" {
     try std.testing.expectEqual(@as(u32, 1234), replay.header.seed);
     try std.testing.expectEqual(@as(i32, 5), replay.header.detail_preset);
     try std.testing.expectEqual(@as(f32, 1024.0), replay.header.world_size);
+}
+
+test "a detached recording outlives its session and still verifies" {
+    // The point of detaching: the frame cost of ending a run stops growing with
+    // the run. Encoding is one msgpack row per tick, so inline it stalls by an
+    // amount proportional to match length -- and making it merely faster only
+    // moves the cliff. Detach is O(1), and the encode then happens off the main
+    // thread while the session is already gone.
+    //
+    // So this destroys the session FIRST and encodes afterwards. If the
+    // recording ever went back to borrowing anything the session owns -- its
+    // config, most likely, which is where the weapon-usage header comes from --
+    // this reads freed memory instead of failing politely.
+    const handle = try createTestSession();
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(handle));
+    for (0..600) |tick| {
+        var inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(
+            exports.ok,
+            exports.crimson_host_session_tick(handle, &inputs, 1, null),
+        );
+    }
+
+    var recording: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_detach(handle, &recording));
+    try std.testing.expect(recording != 0);
+
+    exports.crimson_host_session_destroy(handle);
+
+    var size: u32 = 0;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_recording_encode(recording, null, &size),
+    );
+    try std.testing.expect(size > 0);
+    const bytes = try std.testing.allocator.alloc(u8, size);
+    defer std.testing.allocator.free(bytes);
+    var len: u32 = size;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_recording_encode(recording, bytes.ptr, &len),
+    );
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_recording_destroy(recording));
+    // The handle is dead now, and using it again must not touch freed memory.
+    try std.testing.expect(exports.crimson_host_recording_destroy(recording) != exports.ok);
+
+    var json_len: u32 = 0;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, null, &json_len),
+    );
+    const json = try std.testing.allocator.alloc(u8, json_len);
+    defer std.testing.allocator.free(json);
+    var json_out: u32 = json_len;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, json.ptr, &json_out),
+    );
+
+    const Verdict = struct {
+        header_claim: struct { match: bool = false } = .{},
+    };
+    const parsed = try std.json.parseFromSlice(
+        Verdict,
+        std.testing.allocator,
+        json[0..json_out],
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    if (!parsed.value.header_claim.match) {
+        std.debug.print("detached recording rejected:\n{s}\n", .{json[0..json_out]});
+    }
+    try std.testing.expect(parsed.value.header_claim.match);
+}
+
+test "detach hands the rows over and leaves the session holding none" {
+    // Detach moves the ArrayLists by value. If it forgot to reset the session's
+    // own, the session would still point at rows now owned by a recording being
+    // encoded on another thread -- a double free at best.
+    //
+    // Modelled on the real sequence, which is detach-then-restart: the frontend
+    // recreates the session per run (SimSession.Restart), so a fresh capture
+    // always begins at tick 0. Calling begin again mid-run instead is what the
+    // short-recording guard exists to refuse, since the claimed stats would
+    // cover ticks the rows do not.
+    const first_handle = try createTestSession();
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(first_handle));
+    for (0..30) |tick| {
+        var inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(
+            exports.ok,
+            exports.crimson_host_session_tick(first_handle, &inputs, 1, null),
+        );
+    }
+    var first: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_detach(first_handle, &first));
+    try std.testing.expect(first != 0);
+
+    // Detach stops recording, so a second one must refuse rather than hand back
+    // the empty tail of a run already given away.
+    var again: u64 = 123;
+    try std.testing.expect(exports.crimson_host_replay_detach(first_handle, &again) != exports.ok);
+    exports.crimson_host_session_destroy(first_handle);
+
+    // The next run, on its own session, gets its own recording.
+    const second_handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(second_handle);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(second_handle));
+    for (0..30) |tick| {
+        var inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(
+            exports.ok,
+            exports.crimson_host_session_tick(second_handle, &inputs, 1, null),
+        );
+    }
+    var second: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_detach(second_handle, &second));
+    try std.testing.expect(second != first);
+
+    // Both still encode: neither was invalidated by the other's session going.
+    for ([_]u64{ first, second }) |rec| {
+        var size: u32 = 0;
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_recording_encode(rec, null, &size));
+        try std.testing.expect(size > 0);
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_recording_destroy(rec));
+    }
 }
 
 test "replay finish refuses a session that was never recording" {

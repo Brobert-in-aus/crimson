@@ -25,7 +25,10 @@ const replay_codec = crimson_zig.replay_codec;
 // slice of dead stack) that desyncs re-simulation part-way through a run. The
 // bump exists for the second reason: a stale v20 .so paired with this frontend
 // would pass preflight and keep writing replays that cannot verify.
-pub const abi_version: u32 = 21;
+// v22: replay_detach / recording_encode / recording_destroy — lift a capture
+// out of its session in O(1) so the encode, whose cost grows with match length,
+// can run off the main thread. last_error is thread-local to suit.
+pub const abi_version: u32 = 22;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -482,14 +485,67 @@ const RecordedTick = struct {
     dt: f32,
 };
 
+/// A recording lifted out of its session, so the session can be restarted (or
+/// destroyed) while the bytes are still being produced.
+///
+/// Encoding is proportional to MATCH LENGTH — one msgpack row per tick — so
+/// doing it inline stalls the frame by an amount that grows with the run. Making
+/// it faster only moves the cliff: halve the constant and a match twice as long
+/// is back where it started. Detaching is O(1) (two ArrayLists move by value),
+/// which is what actually takes the cost off the main thread's clock.
+///
+/// Owns its config outright rather than borrowing the session's — the session
+/// may be gone by the time this encodes.
+const RecordingBox = struct {
+    generation: u32 = 0,
+    config: HostSessionConfig = .{},
+    ticks: std.ArrayList(RecordedTick) = .empty,
+    events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
+    stats: RecordedStats = .{},
+
+    fn deinit(self: *RecordingBox) void {
+        self.ticks.deinit(gpa);
+        self.events.deinit(gpa);
+    }
+};
+
 const max_sessions = 8;
+/// One in flight is the normal case (the run that just ended). The spare covers
+/// a player who dies, restarts and dies again before the first encode lands.
+const max_recordings = 4;
 const gpa = std.heap.page_allocator;
 
 var session_slots: [max_sessions]?*SessionBox = [_]?*SessionBox{null} ** max_sessions;
 var next_generation: u32 = 1;
+var recording_slots: [max_recordings]?*RecordingBox = [_]?*RecordingBox{null} ** max_recordings;
+var next_recording_generation: u32 = 1;
+// The recording table is the ONE structure two threads touch: the host detaches
+// on its main thread and destroys from the worker that encoded. The boxes
+// themselves need no lock — a handle has exactly one owner at a time — but the
+// slot array and generation counter are shared, so every read and write of them
+// goes through this.
+//
+// A spin is right here rather than a blocking lock: the critical sections are a
+// short scan of a 4-entry array, contention needs two deaths inside one encode,
+// and spinning keeps this free of any dependency on the host's threading.
+var recording_lock: std.atomic.Mutex = .unlocked;
 
-var last_error: [1024]u8 = undefined;
-var last_error_len: usize = 0;
+fn lockRecordings() void {
+    while (!recording_lock.tryLock()) std.atomic.spinLoopHint();
+}
+
+fn unlockRecordings() void {
+    recording_lock.unlock();
+}
+
+// THREAD-LOCAL, because encoding a detached recording is meant to run on a
+// background thread while the main thread keeps calling in. A shared buffer
+// would let the two overwrite each other's messages, and the host reads the
+// error straight after its own failing call. Safe with runOnBigStack: none of
+// the closures it runs set an error — they return one, and the caller formats
+// it back on its own thread.
+threadlocal var last_error: [1024]u8 = undefined;
+threadlocal var last_error_len: usize = 0;
 
 fn setError(message: []const u8) void {
     const len = @min(message.len, last_error.len);
@@ -542,6 +598,65 @@ fn boxForHandle(handle: u64) ?*SessionBox {
     const box = session_slots[index] orelse return null;
     if (box.generation != generation) return null;
     return box;
+}
+
+fn recordingForHandle(handle: u64) ?*RecordingBox {
+    const index: usize = @intCast(handle & 0xFFFF_FFFF);
+    const generation: u32 = @intCast(handle >> 32);
+    if (index >= max_recordings) return null;
+    lockRecordings();
+    defer unlockRecordings();
+    const rec = recording_slots[index] orelse return null;
+    if (rec.generation != generation) return null;
+    return rec;
+}
+
+/// Why a recording cannot be handed over yet, or `.ok`/`.empty` when it can.
+/// Shared by finish and detach so the two cannot drift on what counts as a
+/// usable capture.
+const RecordingState = enum { ok, empty, not_started, overflow, short };
+
+fn recordingState(box: *SessionBox) RecordingState {
+    if (box.record_overflow) return .overflow;
+    // Never started is a caller bug; started-but-empty is a session that ended
+    // before it ticked, which the frontend hits on every trip through the menu.
+    if (!box.recording) return .not_started;
+    if (box.record_ticks.items.len == 0) return .empty;
+    // FAIL CLOSED on a short recording. The claimed stats cover every tick the
+    // SESSION ran; the replay only replays the rows captured. If the session
+    // advanced ticks that were not recorded, the stats describe a longer run
+    // than the replay contains and every cumulative field reads high while the
+    // tick count still looks right (it is taken from the row count).
+    if (box.record_ticks.items.len != box.runner.session.tick_index) return .short;
+    return .ok;
+}
+
+fn setRecordingStateError(box: *SessionBox, state: RecordingState) void {
+    switch (state) {
+        .overflow => setError("replay recording ran out of memory; capture is incomplete"),
+        .not_started => setError("replay recording was never started (call crimson_host_replay_begin)"),
+        .short => setErrorFmt(
+            "recording covers {d} ticks but the session ran {d}; stats would not match the replay",
+            .{ box.record_ticks.items.len, box.runner.session.tick_index },
+        ),
+        .ok, .empty => {},
+    }
+}
+
+/// Move the capture out of the session. O(1): the ArrayLists move by value and
+/// the session is left with fresh empty ones, so it can be restarted or
+/// destroyed immediately without waiting on the encode.
+fn takeRecording(box: *SessionBox) RecordingBox {
+    const rec: RecordingBox = .{
+        .config = box.config,
+        .ticks = box.record_ticks,
+        .events = box.record_events,
+        .stats = box.record_stats,
+    };
+    box.record_ticks = .empty;
+    box.record_events = .empty;
+    box.recording = false;
+    return rec;
 }
 
 pub export fn crimson_host_abi_version() u32 {
@@ -1408,40 +1523,21 @@ pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i
         setError("len is null");
         return err_invalid_input;
     };
-    if (box.record_overflow) {
-        setError("replay recording ran out of memory; capture is incomplete");
-        return err_generic;
-    }
-    // Never started is a caller bug and stays an error: emitting an empty replay
-    // would produce a file that fails verification far from the missing call.
-    if (!box.recording) {
-        setError("replay recording was never started (call crimson_host_replay_begin)");
-        return err_generic;
-    }
-    // Recording on but nothing captured is NOT a failure — it is a session that
-    // ended before it ticked, which the frontend hits every time a run is
-    // started from the menu (the outgoing session is finished on the way out).
-    // Reporting it as an error only produced a log line per menu visit.
-    if (box.record_ticks.items.len == 0) {
-        len_ptr.* = 0;
-        return ok;
-    }
-
-    // FAIL CLOSED on a short recording. The claimed stats come from the live
-    // counters, which cover every tick the SESSION ran; the replay only replays
-    // the rows captured. If the session advanced ticks that were not recorded --
-    // begin called late, ticks taken while recording was off -- the stats
-    // describe a longer run than the replay contains, and every cumulative
-    // field reads high while the tick count still looks right (it is taken from
-    // the row count). That is exactly the shape of a real VR session that failed
-    // verification while scripted runs of the same length passed, so refuse and
-    // name both numbers rather than emit a file that cannot verify.
-    if (box.record_ticks.items.len != box.runner.session.tick_index) {
-        setErrorFmt(
-            "recording covers {d} ticks but the session ran {d}; stats would not match the replay",
-            .{ box.record_ticks.items.len, box.runner.session.tick_index },
-        );
-        return err_generic;
+    const state = recordingState(box);
+    switch (state) {
+        // Recording on but nothing captured is NOT a failure — it is a session
+        // that ended before it ticked, which the frontend hits every time a run
+        // is started from the menu (the outgoing session is finished on the way
+        // out). Reporting it as an error only produced a log line per visit.
+        .empty => {
+            len_ptr.* = 0;
+            return ok;
+        },
+        .ok => {},
+        else => {
+            setRecordingStateError(box, state);
+            return err_generic;
+        },
     }
 
     var bytes_slot: ?[]u8 = null;
@@ -1482,33 +1578,186 @@ pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i
 /// Still on the big-stack thread: the encode allocates and the msgpack writer
 /// is not something to run on a 1 MiB host stack.
 fn encodeSessionReplay(box: *SessionBox, out: *?[]u8) !void {
-    const tick_count = box.record_ticks.items.len;
+    return encodeCapture(
+        &box.config,
+        box.record_ticks.items,
+        box.record_events.items,
+        box.record_stats,
+        out,
+    );
+}
 
-    const rows = try gpa.alloc([]const replay_codec.ReplayPlayerInput, tick_count);
+fn encodeDetachedRecording(rec: *RecordingBox, out: *?[]u8) !void {
+    return encodeCapture(&rec.config, rec.ticks.items, rec.events.items, rec.stats, out);
+}
+
+/// The one place a capture becomes bytes, so the inline and detached paths
+/// cannot drift on what they write.
+fn encodeCapture(
+    cfg: *const HostSessionConfig,
+    ticks: []const RecordedTick,
+    events: []const replay_codec.ReplayEvent,
+    stats: RecordedStats,
+    out: *?[]u8,
+) !void {
+    const rows = try gpa.alloc([]const replay_codec.ReplayPlayerInput, ticks.len);
     defer gpa.free(rows);
-    const dts = try gpa.alloc(f32, tick_count);
+    const dts = try gpa.alloc(f32, ticks.len);
     defer gpa.free(dts);
-    for (box.record_ticks.items, 0..) |*row, idx| {
+    for (ticks, 0..) |*row, idx| {
         rows[idx] = row.players[0..row.player_count];
         dts[idx] = row.dt;
     }
 
     var quest_buf: [16]u8 = undefined;
-    const header = recordingHeaderFor(box, &quest_buf);
-    const stats = box.record_stats;
+    const header = recordingHeaderFor(cfg, &quest_buf);
 
     out.* = try replay_codec.encodeRecording(gpa, header, rows, dts, .{
         .complete = true,
         // The recording's own row count IS the tick count -- rows are appended
         // per tick advanced, so this cannot drift from what a replay will run.
-        .ticks = @intCast(tick_count),
+        .ticks = @intCast(ticks.len),
         .elapsed_ms = stats.elapsed_ms_sim,
         .score_xp = stats.player_experience,
         .kills = stats.creature_kill_count,
         .most_used_weapon_id = stats.most_used_weapon_id,
         .shots_fired = stats.shots_fired,
         .shots_hit = stats.shots_hit,
-    }, box.record_events.items);
+    }, events);
+}
+
+/// Lift the capture out of the session so the session can be restarted or
+/// destroyed immediately, and hand back a handle to encode later — off the main
+/// thread, where a cost proportional to match length belongs.
+///
+/// Writes 0 to `out_recording` when the session recorded nothing, which is the
+/// same non-failure as finish reporting size 0.
+pub export fn crimson_host_replay_detach(handle: u64, out_recording: ?*u64) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    const out = out_recording orelse {
+        setError("out_recording is null");
+        return err_invalid_input;
+    };
+    const state = recordingState(box);
+    switch (state) {
+        .empty => {
+            box.recording = false;
+            out.* = 0;
+            return ok;
+        },
+        .ok => {},
+        else => {
+            setRecordingStateError(box, state);
+            return err_generic;
+        },
+    }
+
+    const rec = gpa.create(RecordingBox) catch {
+        setError("recording allocation failed");
+        return err_generic;
+    };
+
+    lockRecordings();
+    defer unlockRecordings();
+    var slot: ?usize = null;
+    for (recording_slots, 0..) |entry, idx| {
+        if (entry == null) {
+            slot = idx;
+            break;
+        }
+    }
+    const index = slot orelse {
+        gpa.destroy(rec);
+        setError("too many recordings in flight; encode or destroy one first");
+        return err_out_of_sessions;
+    };
+
+    // Only NOW is the capture taken out of the session — after the slot is
+    // secured, so a failure above cannot leave the rows owned by nobody.
+    rec.* = takeRecording(box);
+    rec.generation = next_recording_generation;
+    next_recording_generation +%= 1;
+    if (next_recording_generation == 0) next_recording_generation = 1;
+    recording_slots[index] = rec;
+    out.* = handleFor(index, rec.generation);
+    return ok;
+}
+
+/// Encode a detached recording. Same size-then-fill protocol as finish.
+///
+/// SAFE TO CALL OFF THE MAIN THREAD: it touches only the recording, which owns
+/// everything it needs, and the error buffer it writes is thread-local. The
+/// session it came from may already have been restarted or destroyed.
+pub export fn crimson_host_recording_encode(recording: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const rec = recordingForHandle(recording) orelse {
+        setError("invalid recording handle");
+        return err_invalid_handle;
+    };
+    const len_ptr = len orelse {
+        setError("len is null");
+        return err_invalid_input;
+    };
+
+    var bytes_slot: ?[]u8 = null;
+    runOnBigStack(encodeDetachedRecording, .{ rec, &bytes_slot }) catch |err| {
+        setErrorFmt("replay encode failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    const bytes = bytes_slot orelse {
+        setError("replay encode produced no output");
+        return err_generic;
+    };
+    defer gpa.free(bytes);
+
+    const out_ptr = buf orelse {
+        len_ptr.* = @intCast(bytes.len);
+        return ok;
+    };
+    if (len_ptr.* < bytes.len) {
+        len_ptr.* = @intCast(bytes.len);
+        setError("replay buffer too small");
+        return err_buffer_too_small;
+    }
+    @memcpy(out_ptr[0..bytes.len], bytes);
+    len_ptr.* = @intCast(bytes.len);
+    return ok;
+}
+
+/// Release a detached recording. Every handle from replay_detach must reach
+/// this, including after a failed encode — the rows are the largest allocation
+/// the host holds.
+pub export fn crimson_host_recording_destroy(recording: u64) i32 {
+    last_error_len = 0;
+    const index: usize = @intCast(recording & 0xFFFF_FFFF);
+    const generation: u32 = @intCast(recording >> 32);
+    if (index >= max_recordings) {
+        setError("invalid recording handle");
+        return err_invalid_handle;
+    }
+    // Clear the slot under the lock and free outside it: the lookup and the
+    // clear have to be one atomic step or two threads can both take the same
+    // box and double-free it.
+    lockRecordings();
+    const taken = blk: {
+        const rec = recording_slots[index] orelse break :blk null;
+        if (rec.generation != generation) break :blk null;
+        recording_slots[index] = null;
+        break :blk rec;
+    };
+    unlockRecordings();
+
+    const rec = taken orelse {
+        setError("invalid recording handle");
+        return err_invalid_handle;
+    };
+    rec.deinit();
+    gpa.destroy(rec);
+    return ok;
 }
 
 /// The ruleset version recordings are stamped with. Must keep a prefix in
@@ -1528,8 +1777,7 @@ const recording_game_version: []const u8 = "0.9.0";
 /// stream than the run and desynced part-way through: the 4000-tick gate's
 /// off-by-one shots_hit, with short runs passing because 600 ticks end before a
 /// reroll changes anything.
-fn recordingHeaderFor(box: *SessionBox, quest_buf: []u8) replay_codec.RecordingHeader {
-    const cfg = &box.config;
+fn recordingHeaderFor(cfg: *const HostSessionConfig, quest_buf: []u8) replay_codec.RecordingHeader {
     // The config carries the level as major*100 + minor (101 = "1.1"); the wire
     // wants the dotted string. Only quests mode has one — every other mode
     // records the empty string, as the fixtures do.

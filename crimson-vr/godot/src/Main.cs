@@ -326,6 +326,7 @@ public partial class Main : Node3D
         // platform lifecycle teardown also reach here. Persist the live status
         // before releasing the native session.
         CaptureWeaponUsage();
+        WaitForReplayEncode();
         _sim?.Dispose();
         _sim = null;
         VrButton.OnAnyPress = null;
@@ -786,19 +787,21 @@ public partial class Main : Node3D
         }
         try
         {
-            // Proportional to run LENGTH (one encoded row per tick), not to a
-            // frame. It runs at the death -> restart hand-off where a pause is
-            // least jarring, and is timed because a long survival run is the
-            // case most likely to read as a hang.
-            ulong startMs = Time.GetTicksMsec();
-            byte[] bytes = _sim.ReplayFinish();
-            // Empty means the session never ticked — every trip through the main
+            // DETACH on the main thread, ENCODE off it. Encoding is one msgpack
+            // row per tick, so inline it stalls the frame by an amount that
+            // grows with the match — and making it faster only moves the cliff:
+            // halve the constant and a match twice as long is back where it
+            // started. Detaching is a pointer move, so this call costs the same
+            // for a 30-second run and a 30-minute one.
+            ulong recording = _sim.ReplayDetach();
+            // 0 means the session never ticked — every trip through the main
             // menu finishes the outgoing session. Nothing to write, nothing to
             // report.
-            if (bytes.Length == 0)
+            if (recording == 0)
             {
                 return;
             }
+            _replayRecording = false;
 
             if (!DirAccess.DirExistsAbsolute(ReplayDir))
             {
@@ -806,6 +809,7 @@ public partial class Main : Node3D
                 if (mk != Error.Ok)
                 {
                     GD.PrintErr($"CrimsonVR: could not create {ReplayDir} ({mk}); replay dropped");
+                    SimSession.RecordingDestroy(recording);
                     return;
                 }
             }
@@ -816,27 +820,106 @@ public partial class Main : Node3D
             string stamp = Time.GetDatetimeStringFromSystem(false, true)
                 .Replace(":", "").Replace("-", "").Replace("T", "-").Replace(" ", "-");
             string path = $"{ReplayDir}/{stamp}.crd";
-            using FileAccess? file = FileAccess.Open(path, FileAccess.ModeFlags.Write);
-            if (file == null)
-            {
-                GD.PrintErr($"CrimsonVR: could not open {path} ({FileAccess.GetOpenError()}); replay dropped");
-                return;
-            }
-            file.StoreBuffer(bytes);
-            // Live-side stats logged alongside, so a verification mismatch can be
-            // read against what the run actually finished on without guessing
-            // which side drifted. Worth keeping: every recorder bug found so far
-            // showed up first as a real replay disagreeing on one field, and this
-            // line is what makes that readable without a second run.
-            GD.Print($"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
-                     $"{Time.GetTicksMsec() - startMs} ms to encode) " +
-                     $"live: xp={_lastPlayer.Experience} level={_lastPlayer.Level} " +
-                     $"kills={_sim.LastResult.CreatureKillCount} shots={_sim.LastResult.ShotsFired}");
+            // Resolved HERE, on the main thread: ProjectSettings is a Godot
+            // singleton, and the worker below deliberately touches no engine API
+            // at all. It writes through System.IO for the same reason.
+            string osPath = ProjectSettings.GlobalizePath(path);
+
+            // Live-side stats captured now, while the session is still the one
+            // that produced them — the worker cannot read _sim, which is about
+            // to be restarted out from under it.
+            string liveStats = $"live: xp={_lastPlayer.Experience} level={_lastPlayer.Level} " +
+                               $"kills={_sim.LastResult.CreatureKillCount} shots={_sim.LastResult.ShotsFired}";
+            StartReplayEncode(recording, path, osPath, liveStats);
         }
         catch (System.Exception e)
         {
             GD.PrintErr($"CrimsonVR: replay save failed: {e.Message}");
         }
+    }
+
+    // The encode in flight, if any. Kept so shutdown can wait for it: the worker
+    // holds a native allocation and is writing a file, and tearing the process
+    // down mid-write leaves a truncated .crd that fails verification for a
+    // reason nobody could diagnose from the file.
+    private System.Threading.Tasks.Task? _replayEncode;
+
+    /// <summary>Encode and write a detached recording on a worker thread.
+    ///
+    /// The worker touches NO Godot API — path already globalized, stats already
+    /// read, file written through System.IO — because engine singletons are not
+    /// safe to poke from an arbitrary thread. Its only outward effect is the log
+    /// line, which is marshalled back to the main thread.
+    ///
+    /// Native-side safety: the recording owns its rows, events, config and
+    /// stats outright, so the session can be (and immediately is) restarted
+    /// underneath it, and the ABI's error buffer is thread-local.</summary>
+    private void StartReplayEncode(ulong recording, string path, string osPath, string liveStats)
+    {
+        System.Threading.Tasks.Task? previous = _replayEncode;
+        _replayEncode = System.Threading.Tasks.Task.Run(() =>
+        {
+            // Serialise against any still-running encode. Two at once is only
+            // possible if the player dies twice within one encode, but the
+            // native recording table is small and this keeps the peak at one.
+            try
+            {
+                previous?.Wait();
+            }
+            catch (System.Exception)
+            {
+                // A previous failure is already reported; it must not stop this one.
+            }
+
+            string message;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                byte[] bytes = SimSession.RecordingEncode(recording);
+                if (bytes.Length == 0)
+                {
+                    message = "CrimsonVR: replay encode produced no bytes; dropped";
+                }
+                else
+                {
+                    System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(osPath)!);
+                    System.IO.File.WriteAllBytes(osPath, bytes);
+                    message = $"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
+                              $"{sw.ElapsedMilliseconds} ms to encode, off-thread) {liveStats}";
+                }
+            }
+            catch (System.Exception e)
+            {
+                message = $"CrimsonVR: replay save failed: {e.Message}";
+            }
+            finally
+            {
+                SimSession.RecordingDestroy(recording);
+            }
+            // Logging is an engine call, so it goes back to the main thread.
+            CallDeferred(nameof(LogReplayResult), message);
+        });
+    }
+
+    private void LogReplayResult(string message) => GD.Print(message);
+
+    /// <summary>Give a running replay encode a bounded chance to finish.
+    ///
+    /// Bounded because a hung worker must not stop the app closing: a lost
+    /// replay is a nicety, a wedged quit is not. It runs BEFORE the session is
+    /// released so no worker is inside native code during teardown — the
+    /// recording is independent of the session, but the library is not.</summary>
+    private void WaitForReplayEncode()
+    {
+        try
+        {
+            _replayEncode?.Wait(System.TimeSpan.FromSeconds(5));
+        }
+        catch (System.Exception)
+        {
+            // Already reported by the worker.
+        }
+        _replayEncode = null;
     }
 
     /// <summary>Quest results "Next Quest": advance to the next global index.</summary>
