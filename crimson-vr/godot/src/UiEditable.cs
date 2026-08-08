@@ -237,13 +237,6 @@ public sealed partial class UiEditable : Node3D
     /// wrap traps of pulling an angle out of a quaternion.</summary>
     private float AverageTwist(Vector3 axis)
     {
-        Vector3 perp = axis.Cross(Vector3.Up);
-        if (perp.LengthSquared() < 1e-6f)
-        {
-            perp = axis.Cross(Vector3.Right);
-        }
-        perp = perp.Normalized();
-
         float total = 0.0f;
         int n = 0;
         for (int i = 0; i < 2; i++)
@@ -252,15 +245,7 @@ public sealed partial class UiEditable : Node3D
             {
                 continue;
             }
-            Basis delta = _handRot[i] * _grabRot[i].Inverse();
-            Vector3 rotated = delta * perp;
-            rotated -= axis * rotated.Dot(axis);
-            if (rotated.LengthSquared() < 1e-8f)
-            {
-                continue;
-            }
-            rotated = rotated.Normalized();
-            total += Mathf.Atan2(axis.Dot(perp.Cross(rotated)), perp.Dot(rotated));
+            total += HandGeometry.TwistAngle(_handRot[i] * _grabRot[i].Inverse(), axis);
             n++;
         }
         return n > 0 ? total / n : 0.0f;

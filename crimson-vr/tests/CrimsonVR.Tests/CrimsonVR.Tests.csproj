@@ -22,6 +22,7 @@
        these pure-math tests. -->
   <ItemGroup>
     <Compile Include="..\..\godot\src\Mapper.cs" />
+    <Compile Include="..\..\godot\src\HandGeometry.cs" />
     <Compile Include="..\..\godot\src\VrInput.cs" />
     <Compile Include="..\..\godot\src\Sim.cs" />
     <Compile Include="..\..\godot\src\SimSession.cs" />
