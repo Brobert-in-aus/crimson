@@ -2448,6 +2448,7 @@ public partial class Main : Node3D
     /// almost overhead, where the one-panel layout already works.</summary>
     private void ApplyHudLayout(ControlMode mode)
     {
+        _hud.SetCabinetLayout(mode == ControlMode.Cabinet);
         Node3D health = _hud.HealthRoot;
         Node3D host = mode == ControlMode.Cabinet ? _playfieldRoot : (Node3D)_hud;
         if (health.GetParent() != host)

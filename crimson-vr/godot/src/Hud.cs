@@ -50,6 +50,7 @@ public sealed partial class Hud : Node3D
     private const float XpPanelW = 240.0f;
     private const float AmmoRowTop = 49.0f;
     private const float AmmoBaseY = AmmoRowTop + 15.0f; // centres 34 in the 64-tall bar
+    private const float AmmoExtraMaxX = 440.0f; // "+ N" start, kept on the backing
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
 
     // Health bar stretched much taller than the native 9px sliver so it reads in
@@ -89,6 +90,18 @@ public sealed partial class Hud : Node3D
     /// pivot that keeps the panel standing upright. Quads inside keep the panel's
     /// native coordinates, so the fill logic is unaffected by the move.</summary>
     public Node3D HealthRoot => _healthRoot;
+
+    /// <summary>Tell the HUD which layout it is in. Only the heart cares: it is
+    /// turned upright to compensate for the health group being laid into the
+    /// board plane, so applying that spin unconditionally would leave it lying
+    /// on its side in Tabletop, where the group is never rotated at all.</summary>
+    public void SetCabinetLayout(bool cabinet)
+    {
+        if (_heart != null)
+        {
+            _heart.RotationDegrees = new Vector3(0.0f, 0.0f, cabinet ? HeartSpinDegrees : 0.0f);
+        }
+    }
 
     private MeshInstance3D? _heart;
     private StandardMaterial3D? _healthFillMat;
@@ -172,7 +185,6 @@ public sealed partial class Hud : Node3D
         // one element here that has an obvious right way up. Rotating the quad
         // rather than the group leaves the bar's orientation alone.
         _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43, out _, _healthRoot);
-        _heart.RotationDegrees = new Vector3(0.0f, 0.0f, HeartSpinDegrees);
 
         // ROW 1 — full-width health bar. VR glanceability: a near-opaque
         // DARKENED track under an overbright fill, so the missing section
@@ -200,7 +212,9 @@ public sealed partial class Hud : Node3D
         // clear of the value now: at the native spacing a five-figure XP ran
         // straight into it.
         _xpValue = MakeLabel(26.0f, XpRowTop + 14.0f, HorizontalAlignment.Left);
-        _lvlValue = MakeLabel(150.0f, XpRowTop + 19.0f, HorizontalAlignment.Left);
+        // x138, not further: the panel's right edge is at -68 + 240 = 172, and a
+        // two-digit level left-aligned much past this starts to overhang it.
+        _lvlValue = MakeLabel(138.0f, XpRowTop + 19.0f, HorizontalAlignment.Left);
         MakeStaticLabel(4.0f, XpRowTop + 18.0f, "Xp");
 
         // Quest timer (quest mode only): elapsed / time limit. Sits on the upper
@@ -575,7 +589,12 @@ public sealed partial class Hud : Node3D
         if (overflow)
         {
             _ammoExtra.Text = $"+ {loaded - bars}";
-            _ammoExtra.Position = new Vector3(LocalX(AmmoBaseX + bars * AmmoBarStep + 8.0f), LocalY(AmmoBaseY + 10.0f), 0.001f);
+            // Clamped inside the bar's backing. The label trails the last drawn
+            // bar, so widening the bar pitch pushes it right: at 30 bars and the
+            // current step it starts near x494 and the text itself would then
+            // run off the 512-wide backing into open space.
+            float extraX = Mathf.Min(AmmoBaseX + bars * AmmoBarStep + 8.0f, AmmoExtraMaxX);
+            _ammoExtra.Position = new Vector3(LocalX(extraX), LocalY(AmmoBaseY + 10.0f), 0.001f);
         }
 
         // XP panel text + intra-level progress bar. Displayed XP rolls toward
