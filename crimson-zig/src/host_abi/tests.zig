@@ -56,8 +56,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v20" {
-    try std.testing.expectEqual(@as(u32, 20), exports.crimson_host_abi_version());
+test "abi version reports v21" {
+    try std.testing.expectEqual(@as(u32, 21), exports.crimson_host_abi_version());
 }
 
 test "recorded replay verifies through the ABI" {
@@ -129,11 +129,17 @@ test "recorded replay verifies through the ABI" {
 }
 
 test "recorded replay verifies over a realistic run length" {
-    // The 600-tick gate above passes and a real 3493-tick VR session did not,
-    // so run length (or something that only happens later in a run — a level-up,
-    // a death, a weapon change) is implicated. 4000 ticks is longer than the
-    // session that failed, so if the recorder is length-sensitive this catches
-    // it here instead of in a player's replay directory.
+    // Length is the point. This gate failed on shots_hit by exactly one while
+    // the 600-tick gate passed, and the cause was not length-sensitive code but
+    // a corrupt header that needs time to matter: recordingHeaderFor sliced a
+    // by-value copy of the config, so every recording carried a weapon-usage
+    // array made of dead stack. Usage counts reroll weapon drops, so the replay
+    // eventually took a different weapon than the run and desynced — at tick
+    // 1021 here, well past where a short gate stops looking.
+    //
+    // Keep it long. A recorder can be perfectly faithful about inputs (this one
+    // is, bit for bit) and still produce replays that diverge, and the gap only
+    // opens once the run is long enough for one rerolled decision to land.
     const handle = try createTestSession();
     defer exports.crimson_host_session_destroy(handle);
 
@@ -250,6 +256,25 @@ test "recorded replay verifies with weapon usage history" {
         std.debug.print("usage-history recording rejected:\n{s}\n", .{json[0..json_out]});
     }
     try std.testing.expect(parsed.value.header_claim.match);
+
+    // Read the header back and check it against what the session was configured
+    // with. Verifying is NOT enough on its own: the header is what the replay is
+    // re-simulated FROM, so a corrupt value is applied to both sides of the
+    // comparison and a short run still matches. This is the assertion that
+    // caught the encoder being handed a slice of dead stack — a usage array made
+    // of the encoder's own locals, which rerolled weapon drops and desynced
+    // longer runs while every short gate stayed green.
+    const replay = try crimson_zig.replay_codec.parseReplay(std.testing.allocator, bytes[0..len]);
+    defer replay.deinit(std.testing.allocator);
+    const expected_usage = [_]u32{
+        0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 2, 1, 0, 1, 0, 0, 2, 0, 0,
+        0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    try std.testing.expectEqualSlices(u32, &expected_usage, &replay.header.status.weapon_usage_counts);
+    try std.testing.expectEqual(@as(u32, 1234), replay.header.seed);
+    try std.testing.expectEqual(@as(i32, 5), replay.header.detail_preset);
+    try std.testing.expectEqual(@as(f32, 1024.0), replay.header.world_size);
 }
 
 test "replay finish refuses a session that was never recording" {
@@ -266,6 +291,21 @@ test "replay finish refuses a session that was never recording" {
     // later, for a reason far removed from the missing begin call.
     var size: u32 = 0;
     try std.testing.expect(exports.crimson_host_replay_finish(handle, null, &size) != exports.ok);
+}
+
+test "replay finish reports an empty recording as size zero, not an error" {
+    // The other half of the rule above: recording ON but nothing captured is a
+    // session that ended before it ticked. The frontend hits this every time a
+    // run is started from the menu, because it finishes the outgoing session on
+    // the way out — and while that was an error it logged one line per visit.
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(handle));
+
+    var size: u32 = 123; // must be overwritten, not left as the caller set it
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_finish(handle, null, &size));
+    try std.testing.expectEqual(@as(u32, 0), size);
 }
 
 test "abi player snapshot carries the death timer" {

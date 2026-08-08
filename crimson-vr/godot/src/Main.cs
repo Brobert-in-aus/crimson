@@ -774,13 +774,15 @@ public partial class Main : Node3D
         }
         try
         {
-            // The native side re-simulates the whole run to fill claimed stats,
-            // so this is proportional to run LENGTH, not to a frame. It runs at
-            // the death -> restart hand-off where a pause is least jarring, and
-            // is timed because a long survival run is the case most likely to
-            // read as a hang.
+            // Proportional to run LENGTH (one encoded row per tick), not to a
+            // frame. It runs at the death -> restart hand-off where a pause is
+            // least jarring, and is timed because a long survival run is the
+            // case most likely to read as a hang.
             ulong startMs = Time.GetTicksMsec();
             byte[] bytes = _sim.ReplayFinish();
+            // Empty means the session never ticked — every trip through the main
+            // menu finishes the outgoing session. Nothing to write, nothing to
+            // report.
             if (bytes.Length == 0)
             {
                 return;
@@ -811,10 +813,9 @@ public partial class Main : Node3D
             file.StoreBuffer(bytes);
             // Live-side stats logged alongside, so a verification mismatch can be
             // read against what the run actually finished on without guessing
-            // which side drifted. A real replay currently matches on every field
-            // except score_xp (claimed 6582 vs re-simulated 3078) while kills,
-            // shots and hits are identical — so the sim agrees and the xp FIGURE
-            // does not, which this line is here to pin down.
+            // which side drifted. Worth keeping: every recorder bug found so far
+            // showed up first as a real replay disagreeing on one field, and this
+            // line is what makes that readable without a second run.
             GD.Print($"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
                      $"{Time.GetTicksMsec() - startMs} ms to encode) " +
                      $"live: xp={_lastPlayer.Experience} level={_lastPlayer.Level} " +

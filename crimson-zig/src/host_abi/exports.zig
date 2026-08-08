@@ -20,7 +20,12 @@ const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 const replay_codec = crimson_zig.replay_codec;
 
-pub const abi_version: u32 = 20;
+// v21: replay_finish reports an empty recording as ok/size-0 instead of an
+// error, AND recordings before this carry a corrupt weapon-usage header (a
+// slice of dead stack) that desyncs re-simulation part-way through a run. The
+// bump exists for the second reason: a stale v20 .so paired with this frontend
+// would pass preflight and keep writing replays that cannot verify.
+pub const abi_version: u32 = 21;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -1388,13 +1393,11 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
 /// buffer-size protocol as `crimson_host_snapshot`: call with a null buffer to
 /// learn the size, then again with one that large.
 ///
-/// Stats are NOT sourced from the live run. The bytes are encoded once with
-/// empty claims, decoded, and re-simulated through the very function the
-/// verifier uses; the resulting figures are then written back and the bytes
-/// re-encoded. Because the recorded inputs and seed replay deterministically,
-/// the claims match the re-simulation BY CONSTRUCTION rather than by agreement
-/// between two separate accounting paths — which is what makes a recording
-/// that verifies the default rather than the lucky case.
+/// A size of 0 with `ok` means the session recorded nothing — see the zero-tick
+/// case below. Callers should treat that as "no replay for this run", not as a
+/// failure. Claimed stats come from the live counters; `encodeSessionReplay`
+/// explains why, and what stands in for the determinism that re-simulating used
+/// to guarantee.
 pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     last_error_len = 0;
     const box = boxForHandle(handle) orelse {
@@ -1409,9 +1412,19 @@ pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i
         setError("replay recording ran out of memory; capture is incomplete");
         return err_generic;
     }
-    if (box.record_ticks.items.len == 0) {
-        setError("no recorded ticks (was crimson_host_replay_begin called?)");
+    // Never started is a caller bug and stays an error: emitting an empty replay
+    // would produce a file that fails verification far from the missing call.
+    if (!box.recording) {
+        setError("replay recording was never started (call crimson_host_replay_begin)");
         return err_generic;
+    }
+    // Recording on but nothing captured is NOT a failure — it is a session that
+    // ended before it ticked, which the frontend hits every time a run is
+    // started from the menu (the outgoing session is finished on the way out).
+    // Reporting it as an error only produced a log line per menu visit.
+    if (box.record_ticks.items.len == 0) {
+        len_ptr.* = 0;
+        return ok;
     }
 
     // FAIL CLOSED on a short recording. The claimed stats come from the live
@@ -1505,8 +1518,18 @@ const recording_game_version: []const u8 = "0.9.0";
 
 /// `quest_buf` backs the formatted quest-level string and must outlive the
 /// encode that consumes the returned header.
+///
+/// `cfg` MUST be a pointer into the box, never a by-value copy. The returned
+/// header borrows `status_weapon_usage_counts` as a slice; slicing a local copy
+/// hands the encoder a pointer to this frame's stack, which is dead — and
+/// promptly reused by the encode's own locals, so recordings shipped a usage
+/// array made of elapsed_ms, score_xp, tick count and world_size bits. Usage
+/// counts reroll weapon drops, so the replay then took a different weapon
+/// stream than the run and desynced part-way through: the 4000-tick gate's
+/// off-by-one shots_hit, with short runs passing because 600 ticks end before a
+/// reroll changes anything.
 fn recordingHeaderFor(box: *SessionBox, quest_buf: []u8) replay_codec.RecordingHeader {
-    const cfg = box.config;
+    const cfg = &box.config;
     // The config carries the level as major*100 + minor (101 = "1.1"); the wire
     // wants the dotted string. Only quests mode has one — every other mode
     // records the empty string, as the fixtures do.

@@ -263,15 +263,20 @@ public sealed class SimSession : IDisposable
         }
     }
 
-    /// <summary>Encode the captured run as standard .crd bytes, or null if the
-    /// session has nothing recorded (no begin, or capture overflowed).
+    /// <summary>Encode the captured run as standard .crd bytes.
     ///
-    /// EXPENSIVE: the native side re-simulates the entire run to fill the
-    /// claimed stats, so this blocks for roughly the length of the run's
-    /// simulation. Call it once when a session ends — never per frame.
+    /// Returns an EMPTY array when the session recorded nothing — a run that
+    /// ended before it ticked, which happens on every trip through the main
+    /// menu. That is a normal outcome, not a failure, and callers should just
+    /// skip writing a file.
     ///
-    /// Throws on failure, like the other capture calls here. This class stays
-    /// free of engine types (the test project compiles it without a Godot
+    /// Proportional to run LENGTH (one encoded row per tick), so call it once
+    /// when a session ends, never per frame. It no longer re-simulates the run
+    /// to source claimed stats; that cost 5.7s of frozen headset on leaving the
+    /// score screen.
+    ///
+    /// Throws on genuine failure, like the other capture calls here. This class
+    /// stays free of engine types (the test project compiles it without a Godot
     /// runtime), so reporting is the caller's job — Main swallows it to a log
     /// line, because a run ending without a replay is a missing nicety and not
     /// a reason to take down the session the player is still looking at.</summary>
@@ -279,10 +284,14 @@ public sealed class SimSession : IDisposable
     {
         uint len = 0;
         int rc = Sim.ReplayFinish(Handle, Span<byte>.Empty, ref len);
-        if (rc != Sim.Ok || len == 0)
+        if (rc != Sim.Ok)
         {
             throw new InvalidOperationException(
                 $"replay finish (size query) failed ({rc}): {Sim.LastError()}");
+        }
+        if (len == 0)
+        {
+            return System.Array.Empty<byte>();
         }
 
         var buf = new byte[len];

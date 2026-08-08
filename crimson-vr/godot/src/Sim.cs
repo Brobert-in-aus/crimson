@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 20;
+    public const uint ExpectedAbiVersion = 21;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -409,13 +409,14 @@ public static partial class Sim
     [LibraryImport(LibName, EntryPoint = "crimson_host_audio_events")]
     public static partial int AudioEvents(ulong handle, Span<byte> buf, ref uint len);
 
-    /// <summary>Start (or restart) replay capture (ABI v20).</summary>
+    /// <summary>Start (or restart) replay capture (ABI v21).</summary>
     [LibraryImport(LibName, EntryPoint = "crimson_host_replay_begin")]
     public static partial int ReplayBegin(ulong handle);
 
     /// <summary>Encode the captured run as .crd bytes; same buffer protocol as
-    /// Snapshot. Expensive — it re-simulates the whole run to fill the claimed
-    /// stats — so call it once when a session ends, never per frame.</summary>
+    /// Snapshot. Proportional to run length (one encoded row per tick), so call
+    /// it once when a session ends, never per frame. A reported size of 0 with
+    /// Ok means the session recorded nothing, which is not a failure.</summary>
     [LibraryImport(LibName, EntryPoint = "crimson_host_replay_finish")]
     public static partial int ReplayFinish(ulong handle, Span<byte> buf, ref uint len);
 
