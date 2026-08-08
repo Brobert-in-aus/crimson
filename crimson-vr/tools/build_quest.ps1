@@ -17,7 +17,8 @@
 #   pwsh -File crimson-vr/tools/build_quest.ps1 [-Install] [-Device <ip:port>]
 #     -Install        adb install -r the signed APK to -Device afterward
 #     -InstallOnly    skip the build; install the existing signed APK
-#     -Device         wireless adb target (default 192.168.8.100:5555)
+#     -Device         PREFERRED wireless adb target (default 192.168.8.100:5555);
+#                     a USB-attached Quest is used automatically if it is unreachable
 #     -ExportTimeoutSec  hard cap on the export wait (default 600)
 #     -WaitDeviceSec  how long to wait for a sleeping/powered-off Quest before
 #                     skipping the install (default 300; the APK is kept either way)
@@ -28,7 +29,7 @@ param(
     [string]$Device = '192.168.8.100:5555',
     [int]$ExportTimeoutSec = 600,
     [int]$WaitDeviceSec = 300,
-    [string]$Godot = 'D:\Projects\CrimsonVR\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
+    [string]$Godot = 'D:\Projects\games-xr\_tools\godot\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,18 +42,39 @@ $inject = Join-Path $PSScriptRoot 'inject_native_and_sign.ps1'
 if (-not (Test-Path $Godot)) { throw "Godot not found: $Godot" }
 if (-not (Test-Path $inject)) { throw "inject script not found: $inject" }
 
+function Get-UsbSerial {
+    # First adb device in 'device' state whose serial is NOT a tcp target
+    # (tcp serials contain a colon). Lines in other states -- 'unauthorized',
+    # 'offline', 'no permissions' -- deliberately do not match, so a half-
+    # connected headset is never mistaken for an installable one.
+    param([string]$DeviceList)
+    foreach ($line in ($DeviceList -split "`r?`n")) {
+        if ($line -match '^(\S+)\s+device\b' -and $matches[1] -notmatch ':') {
+            return $matches[1]
+        }
+    }
+    return $null
+}
+
 function Install-QuestApk {
     # Installs the signed APK, treating an unreachable Quest as a normal state
-    # rather than a build failure: wireless-adb targets are connect'ed first,
-    # then polled up to $WaitDeviceSec (a sleeping headset joins the network a
-    # few seconds after waking). Returns $true only when the install succeeded;
-    # on timeout the APK stays on disk and the caller prints the follow-up.
+    # rather than a build failure. Wireless is PREFERRED (no cable, and it is
+    # the default workflow), but a USB-attached headset is accepted on every
+    # attempt as a fallback rather than only after the wireless wait expires.
+    #
+    # That fallback exists because of a real 300s stall: Quest drops adb tcpip
+    # mode on reboot, so port 5555 goes dead while the headset is awake, on the
+    # network and pingable -- and a perfectly good USB cable sat attached for
+    # the whole wait. Reachability of the IP says nothing about the port.
+    #
+    # Returns $true only when the install succeeded; on timeout the APK stays on
+    # disk and the caller prints the follow-up.
     param([string]$Apk)
     $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
     if (-not $adb) { $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
     if (-not (Test-Path $adb)) { throw "adb not found (install to $Device manually)" }
 
-    Write-Host "==> Installing to $Device..." -ForegroundColor Cyan
+    Write-Host "==> Installing (wireless $Device, falling back to USB)..." -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($WaitDeviceSec)
     $announced = $false
     while ($true) {
@@ -62,20 +84,36 @@ function Install-QuestApk {
         # line (e.g. adb's "device not found") into a terminating error.
         if ($Device -match ':') { cmd /c "`"$adb`" connect $Device >nul 2>nul" | Out-Null }
         $list = (cmd /c "`"$adb`" devices 2>nul" | Out-String)
+
+        $target = $null
         if ($list -match ([regex]::Escape($Device) + "\s+device")) {
-            & $adb -s $Device install -r $Apk
+            $target = $Device
+            Write-Host "    wireless target up: $Device" -ForegroundColor DarkGray
+        }
+        else {
+            $usb = Get-UsbSerial $list
+            if ($usb) {
+                $target = $usb
+                Write-Host ("    {0} unreachable; using USB device {1}" -f $Device, $usb) -ForegroundColor Yellow
+            }
+        }
+
+        if ($target) {
+            & $adb -s $target install -r $Apk
             if ($LASTEXITCODE -ne 0) { throw "adb install failed ($LASTEXITCODE)" }
             return $true
         }
+
         if ((Get-Date) -gt $deadline) { break }
         if (-not $announced) {
-            Write-Host ("    Quest not reachable (powered off / asleep?). Waiting up to {0}s -- wake it to install; Ctrl+C is safe, the APK is already built." -f $WaitDeviceSec) -ForegroundColor Yellow
+            Write-Host ("    No Quest on wireless or USB (powered off / asleep?). Waiting up to {0}s -- wake it or plug it in; Ctrl+C is safe, the APK is already built." -f $WaitDeviceSec) -ForegroundColor Yellow
             $announced = $true
         }
         Start-Sleep -Seconds 5
     }
-    Write-Warning ("Quest not reachable at {0} after {1}s -- install skipped, the signed APK is kept." -f $Device, $WaitDeviceSec)
+    Write-Warning ("No Quest reachable on {0} or USB after {1}s -- install skipped, the signed APK is kept." -f $Device, $WaitDeviceSec)
     Write-Host "    Install once it's awake with: build_quest.ps1 -InstallOnly" -ForegroundColor DarkGray
+    Write-Host "    (If it is awake and pingable, wireless adb is probably unarmed: adb tcpip 5555 over USB.)" -ForegroundColor DarkGray
     return $false
 }
 
