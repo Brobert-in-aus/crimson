@@ -46,7 +46,7 @@ public sealed partial class SettingsMenu : Node3D
     public event Action<bool>? OnDebugChanged;
     public event Action<bool>? OnPokeMarkersChanged;
     public event Action<ControlMode>? OnControlModeChanged;
-    public event Action<bool>? OnUiEditChanged;
+    public event Action? OnArenaLayout;
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
 
@@ -95,15 +95,15 @@ public sealed partial class SettingsMenu : Node3D
         _controlMode.OnPress += ToggleControlMode;
         y -= pitch;
 
-        // UI edit mode: grab the corner handles that appear on the action
-        // buttons and the control rectangle to reposition them. Session-scoped
-        // (never persisted on) so a player cannot strand themselves in an edit
-        // mode where the pause button no longer responds to a poke.
+        // Arena & Layout: its own screen, holding the board placement sliders
+        // and putting the widgets into edit mode while it is open. Reset lives
+        // there too, next to the thing it undoes. Two rows of this panel became
+        // one, which also stops it growing further.
         _uiEdit = new VrButton();
         AddChild(_uiEdit);
-        _uiEdit.Build(bw, bh, UiEditText(), new Color(0.9f, 0.7f, 0.3f), plate: true);
+        _uiEdit.Build(bw, bh, "Arena & Layout", new Color(0.9f, 0.7f, 0.3f), plate: true);
         _uiEdit.Position = new Vector3(0.0f, y, 0.0f);
-        _uiEdit.OnPress += ToggleUiEdit;
+        _uiEdit.OnPress += () => OnArenaLayout?.Invoke();
         y -= pitch;
 
         // Hand-swap toggle.
@@ -259,17 +259,6 @@ public sealed partial class SettingsMenu : Node3D
         _debugState = !_debugState;
         _debug.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
-    }
-
-    private bool _uiEditState;
-
-    private string UiEditText() => _uiEditState ? "UI edit: ON (grab corners)" : "UI edit mode";
-
-    private void ToggleUiEdit()
-    {
-        _uiEditState = !_uiEditState;
-        _uiEdit.SetText(UiEditText());
-        OnUiEditChanged?.Invoke(_uiEditState);
     }
 
     private string ControlModeText() =>

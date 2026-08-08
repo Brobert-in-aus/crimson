@@ -38,8 +38,14 @@ public sealed partial class PauseMenu : Node3D
     /// EdgeRoot is reparented it no longer inherits this node's visibility.</summary>
     public void SetMenuVisible(bool visible)
     {
+        // Remembered so leaving edit mode can restore it; edit mode forces the
+        // edge buttons on regardless of what the game wants.
+        _menuVisible = visible;
         Visible = visible;
-        _edgeRoot.Visible = visible;
+        if (!_editMode)
+        {
+            _edgeRoot.Visible = visible;
+        }
     }
     private Node3D _panel = null!;
     private VrButton _resume = null!;
@@ -147,6 +153,36 @@ public sealed partial class PauseMenu : Node3D
         return b;
     }
 
+    private bool _editMode;
+    private bool _levelUpPending;
+    private bool _menuVisible;
+
+    /// <summary>Enter/leave UI edit mode. Both action buttons are forced VISIBLE
+    /// so they can be positioned — otherwise the level-up button (shown only
+    /// while a perk pick is pending) and the whole edge group outside a match
+    /// would be invisible and unplaceable — and inert while it lasts, so
+    /// handling one cannot trigger it. Leaving restores the real states.</summary>
+    public void SetEditMode(bool on)
+    {
+        _editMode = on;
+        if (on)
+        {
+            _edgeRoot.Visible = true;
+            _toggle.Visible = true;
+            _levelUp.Visible = true;
+        }
+        else
+        {
+            // Restore BOTH forced states, not just the level-up button. The edge
+            // group's visibility is owned by SetMenuVisible, so leaving it forced
+            // on left the pause button hanging in the main menu.
+            _edgeRoot.Visible = _menuVisible;
+            _levelUp.Visible = _levelUpPending;
+            _toggle.ResetPress();
+            _levelUp.ResetPress();
+        }
+    }
+
     /// <summary>Force the unpaused state (e.g. when quitting to the main menu).</summary>
     public void ForceResume() => SetPaused(false);
 
@@ -169,6 +205,13 @@ public sealed partial class PauseMenu : Node3D
     /// settings overlay hides it).</summary>
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
+        // In UI edit mode both action buttons are shown for placement but must
+        // not FIRE: they are being handled, and pausing (or worse, opening the
+        // perk pick) while outside a match has no sensible meaning.
+        if (_editMode)
+        {
+            return;
+        }
         _toggle.PollPoke(probes);
         if (_levelUp.Visible)
         {
@@ -186,7 +229,10 @@ public sealed partial class PauseMenu : Node3D
     /// and its accumulated-count badge ("xN" for more than one pending pick).</summary>
     public void SetLevelUp(bool visible, int count)
     {
-        if (_levelUp.Visible != visible)
+        // Tracked even while editing, so leaving edit mode restores the state
+        // the game actually wants rather than whatever it was forced to.
+        _levelUpPending = visible;
+        if (!_editMode && _levelUp.Visible != visible)
         {
             _levelUp.Visible = visible;
             _levelUp.ResetPress();

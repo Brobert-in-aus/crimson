@@ -39,7 +39,10 @@ public sealed partial class Hud : Node3D
     private const float AmmoBarW = 10.0f;
     private const float AmmoBarH = 26.0f;
     private const float AmmoBaseX = 96.0f;
-    private const float AmmoBaseY = 34.0f;
+    // Sits on the panel's BOTTOM row now — nearest the board's far edge — since
+    // health vacated the top row for the left edge. Ammo is the reading a player
+    // glances at mid-fight, so it belongs closest to the play surface.
+    private const float AmmoBaseY = 76.0f;
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
 
     // Health bar stretched much taller than the native 9px sliver so it reads in
@@ -53,12 +56,28 @@ public sealed partial class Hud : Node3D
     // the panel's BOTTOM edge on the arena plane.
     private const float NativeBottomY = 113.0f;
 
+    /// <summary>Panel origin height as a multiple of the content height. 1.0
+    /// sits the bottom edge exactly on the plane; above that is clearance.
+    /// Interim: parked flat on the arena's far edge so the panel stops
+    /// obstructing the features being tested, pending the proper cabinet
+    /// re-layout (health vertical on the left edge, ammo along the top).</summary>
+    private const float HudFloatFactor = 1.0f;
+
     private float _u;      // metres per native HUD unit
     private float _side;
 
     private Texture2D? _wicons;
     private Texture2D? _indLife;
     private Texture2D?[] _ammoTex = System.Array.Empty<Texture2D?>();
+
+    private Node3D _healthRoot = null!;
+
+    /// <summary>The health readout (track, fill, heart) in its own node so Main
+    /// can detach it: in Cabinet mode it lies FLAT in the board plane along the
+    /// left edge, which the rest of the HUD cannot do because it hangs off the
+    /// pivot that keeps the panel standing upright. Quads inside keep the panel's
+    /// native coordinates, so the fill logic is unaffected by the move.</summary>
+    public Node3D HealthRoot => _healthRoot;
 
     private MeshInstance3D? _heart;
     private StandardMaterial3D? _healthFillMat;
@@ -104,7 +123,13 @@ public sealed partial class Hud : Node3D
         // that anchor and counter-rotates the playfield tilt so this panel stays
         // world-vertical instead of leaning back with the floor. Only the float
         // above the plane is positioned here.
-        Position = new Vector3(0.0f, 2.0f * NativeBottomY * _u, 0.0f);
+        // Content hangs DOWN from the origin by NativeBottomY, so the origin
+        // height IS the float: at the old 2.0 the panel's bottom edge sat a
+        // whole panel-height clear of the plane, which the 3x cabinet board
+        // multiplied into roughly a third of a metre of empty air — the panel
+        // read as unmoored from the arena rather than standing on its far edge.
+        // 1.12 leaves a slim visible gap instead of a gulf.
+        Position = new Vector3(0.0f, HudFloatFactor * NativeBottomY * _u, 0.0f);
         RotationDegrees = new Vector3(0.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
@@ -117,17 +142,23 @@ public sealed partial class Hud : Node3D
         // Survival XP panel (ind_panel), behind its text.
         TexQuad(Load("ui_indPanel"), -68.0f, 60.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
 
+        // Health group. Kept in its own node so Cabinet mode can lift it out of
+        // this panel and lay it flat along the board's left edge while the rest
+        // of the HUD stays standing at the far edge (see HealthRoot).
+        _healthRoot = new Node3D { Name = "HudHealth" };
+        AddChild(_healthRoot);
+
         // Pulsing heart (updated each frame), on the HP row's left edge.
-        _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43);
+        _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43, out _, _healthRoot);
 
         // ROW 1 — full-width health bar. VR glanceability: a near-opaque
         // DARKENED track under an overbright fill, so the missing section
         // reads at a glance (the flat game's subtle dim didn't survive VR).
-        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42);
-        _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1.35f, 1.35f, 1.35f, 1.0f), priority: 43, out _healthFillMat);
+        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42, out _, _healthRoot);
+        _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1.35f, 1.35f, 1.35f, 1.0f), priority: 43, out _healthFillMat, _healthRoot);
 
-        // ROW 2 — weapon icon at the left, ammo bars across the rest.
-        _weaponIcon = TexQuad(_wicons, 36.0f, 34.0f, 52.0f, 26.0f, new Color(1, 1, 1, 0.9f), priority: 43, out _weaponMat);
+        // Weapon icon at the left of the ammo row, tracking it down the panel.
+        _weaponIcon = TexQuad(_wicons, 36.0f, AmmoBaseY, 52.0f, 26.0f, new Color(1, 1, 1, 0.9f), priority: 43, out _weaponMat);
 
         // Ammo bars (per-shot, enlarged), textured by ammo class in Update.
         for (int i = 0; i < AmmoBarLimit; i++)
@@ -577,12 +608,28 @@ public sealed partial class Hud : Node3D
         }
         _fade = fade;
         _fadeApplied = true;
-        foreach (Node child in GetChildren())
+        // RECURSIVE, and applied to the health group explicitly: this used to
+        // walk only direct children, which silently stopped covering the health
+        // readout the moment it was grouped into its own node — and covers it
+        // not at all once Cabinet mode reparents that node onto the board. A
+        // health bar that stayed opaque through the perk-menu fade would be the
+        // only thing left lit on the table.
+        ApplyFade(this, 1.0f - fade);
+        if (_healthRoot.GetParent() != this)
+        {
+            ApplyFade(_healthRoot, 1.0f - fade);
+        }
+    }
+
+    private static void ApplyFade(Node root, float transparency)
+    {
+        foreach (Node child in root.GetChildren())
         {
             if (child is GeometryInstance3D g)
             {
-                g.Transparency = 1.0f - fade;
+                g.Transparency = transparency;
             }
+            ApplyFade(child, transparency);
         }
     }
 
@@ -612,6 +659,14 @@ public sealed partial class Hud : Node3D
         => TexQuad(tex, x, y, w, h, tint, priority, out _);
 
     private MeshInstance3D TexQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat)
+        => TexQuad(tex, x, y, w, h, tint, priority, out mat, null);
+
+    /// <param name="host">Group to add the quad to; null means the panel itself.
+    /// Groups keep the SAME native-coordinate maths, so a quad reads identically
+    /// whether it sits in the panel or in a group that has been detached and
+    /// re-placed — which is what lets the health bar move into the board plane
+    /// without touching the fill logic.</param>
+    private MeshInstance3D TexQuad(Texture2D? tex, float x, float y, float w, float h, Color tint, int priority, out StandardMaterial3D mat, Node3D? host)
     {
         mat = new StandardMaterial3D
         {
@@ -635,7 +690,7 @@ public sealed partial class Hud : Node3D
             Position = new Vector3(LocalX(x + w * 0.5f), LocalY(y + h * 0.5f), 0.0f),
             MaterialOverride = mat,
         };
-        AddChild(node);
+        (host ?? this).AddChild(node);
         return node;
     }
 

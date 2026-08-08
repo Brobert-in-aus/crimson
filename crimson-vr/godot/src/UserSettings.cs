@@ -52,6 +52,19 @@ public sealed class UserSettings
     /// scale and tilt were designed around.</summary>
     public int ControlMode = (int)CrimsonVR.ControlMode.Cabinet;
 
+    /// <summary>Arena placement. Persisted now that it is a player setting
+    /// rather than a dev slider: where the board sits and how steeply it leans
+    /// depends on the player's room, chair and reach, and having to redial it
+    /// every launch would make it useless. NaN means "not set" — the control
+    /// mode's own default then applies, so a player who never opens the screen
+    /// still tracks any future change to those defaults.</summary>
+    public float ArenaScale = float.NaN;
+    public float ArenaPitch = float.NaN;
+    public float ArenaDistance = float.NaN;
+    public float ArenaDrop = float.NaN;
+
+    public bool HasArenaPlacement => !float.IsNaN(ArenaScale);
+
     /// <summary>Player-authored widget placements from UI edit mode, keyed by
     /// widget id. Absent means "use the built-in placement", which is why this
     /// is a dictionary of overrides rather than fields with defaults: a widget
@@ -61,6 +74,13 @@ public sealed class UserSettings
     /// The control rectangle stores scale and pitch here too — under Cabinet its
     /// size IS the hand-travel range, so it is a control setting, not decoration.</summary>
     public readonly Dictionary<string, Transform3D> UiLayout = new();
+
+    /// <summary>Bump whenever the MEANING of a stored UiLayout transform changes
+    /// (frame of reference, what the origin represents, which node it is
+    /// relative to). Old entries are then discarded instead of misread.
+    /// v2: control-rect origin became an offset and its basis recenter-local.</summary>
+    private const int UiLayoutVersion = 2;
+    private const string UiLayoutVersionKey = "version";
 
     // Original Options settings (mirrors the base game). Volumes 0-10, graphics
     // detail 1-5, info-texts toggle — same scales as the desktop Options screen.
@@ -122,6 +142,10 @@ public sealed class UserSettings
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
         PokeMarkers = cf.GetValue("input", "poke_markers", PokeMarkers).AsBool();
         ControlMode = cf.GetValue("input", "control_mode", ControlMode).AsInt32();
+        ArenaScale = cf.GetValue("arena", "scale", ArenaScale).AsSingle();
+        ArenaPitch = cf.GetValue("arena", "pitch", ArenaPitch).AsSingle();
+        ArenaDistance = cf.GetValue("arena", "distance", ArenaDistance).AsSingle();
+        ArenaDrop = cf.GetValue("arena", "drop", ArenaDrop).AsSingle();
         RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
@@ -174,11 +198,25 @@ public sealed class UserSettings
 
         // Transform3D round-trips through ConfigFile as a native Variant, so the
         // keys are stored individually under one section rather than serialised.
+        //
+        // VERSIONED, because what these transforms MEAN has already changed once
+        // and silently reinterpreting old data is worse than losing it: the
+        // control rectangle's origin went from an absolute world position to an
+        // offset from the recenter placement, and its basis from world space to
+        // recenter-local. Read with the new rules, the old entries put the
+        // rectangle roughly a metre away with a doubled yaw, and every widget
+        // parented to it followed. On a version mismatch the whole section is
+        // dropped and the built-in placements apply.
         UiLayout.Clear();
-        if (cf.HasSection("ui_layout"))
+        if (cf.HasSection("ui_layout")
+            && cf.GetValue("ui_layout", UiLayoutVersionKey, 0).AsInt32() == UiLayoutVersion)
         {
             foreach (string key in cf.GetSectionKeys("ui_layout"))
             {
+                if (key == UiLayoutVersionKey)
+                {
+                    continue;
+                }
                 Variant v = cf.GetValue("ui_layout", key);
                 if (v.VariantType == Variant.Type.Transform3D)
                 {
@@ -215,6 +253,14 @@ public sealed class UserSettings
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("input", "poke_markers", PokeMarkers);
         cf.SetValue("input", "control_mode", ControlMode);
+        if (HasArenaPlacement)
+        {
+            cf.SetValue("arena", "scale", ArenaScale);
+            cf.SetValue("arena", "pitch", ArenaPitch);
+            cf.SetValue("arena", "distance", ArenaDistance);
+            cf.SetValue("arena", "drop", ArenaDrop);
+        }
+        cf.SetValue("ui_layout", UiLayoutVersionKey, UiLayoutVersion);
         foreach (KeyValuePair<string, Transform3D> kv in UiLayout)
         {
             cf.SetValue("ui_layout", kv.Key, kv.Value);

@@ -195,6 +195,8 @@ public partial class Main : Node3D
     private bool _optionsOpen;
     private bool _vrSettingsOpen;
     private bool _controlsOpen;
+    private bool _arenaLayoutOpen;
+    private ArenaLayoutMenu _arenaLayout = null!;
     private bool _optionsFromMenu; // options opened from the main menu (vs the pause menu)
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
@@ -233,7 +235,7 @@ public partial class Main : Node3D
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
         || _statsMenu.IsOpen || _databaseMenu.IsOpen
-        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen));
+        || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -412,7 +414,7 @@ public partial class Main : Node3D
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
         _settingsMenu.OnControlModeChanged += m => SetControlMode(m);
-        _settingsMenu.OnUiEditChanged += SetUiEditMode;
+        _settingsMenu.OnArenaLayout += OpenArenaLayout;
         _settingsMenu.OnPokeMarkersChanged += v =>
         {
             _settings.PokeMarkers = v;
@@ -460,18 +462,41 @@ public partial class Main : Node3D
             ArenaSideMeters,
             _spriteHeightScale, v => { _spriteHeightScale = v; _diorama.SetHeightScale(v); },
             _aimLineFraction, v => _aimLineFraction = v,
-            _playfieldScale, v => { _playfieldScale = v; ApplyPlayfieldPlacement(); },
-            _playfieldPitch, v => { _playfieldPitch = v; ApplyPlayfieldPlacement(); },
-            _playfieldNearEdge, v => { _playfieldNearEdge = v; ApplyPlayfieldPlacement(); },
-            _playfieldNearDrop, v => { _playfieldNearDrop = v; ApplyPlayfieldPlacement(); },
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
+        _layoutMenu.OnLogPressed += LogArenaPlacement;
         _layoutMenu.SetShown(_settings.Debug);
 
         // Apply the saved control mode now that the layout panel and the pause
         // buttons both exist: it mounts EdgeRoot, sets the board placement for
         // the mode, and shows or hides the control rectangle.
-        SetControlMode((ControlMode)_settings.ControlMode);
+        // Player-facing arena/layout screen, opened from VR Settings.
+        _arenaLayout = new ArenaLayoutMenu();
+        _arenaRoot.AddChild(_arenaLayout);
+        _arenaLayout.Build(
+            ArenaSideMeters,
+            _playfieldScale, v => { _playfieldScale = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            _playfieldPitch, v => { _playfieldPitch = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            _playfieldNearEdge, v => { _playfieldNearEdge = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            _playfieldNearDrop, v => { _playfieldNearDrop = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
+        _arenaLayout.OnBack += CloseArenaLayout;
+        _arenaLayout.OnReset += ResetUiLayout;
+
+        // A saved placement wins over the mode default: the player put the board
+        // where they wanted it, and a mode they never switched should not undo
+        // that on every launch.
+        SetControlMode((ControlMode)_settings.ControlMode, loadDefaults: !_settings.HasArenaPlacement);
+        if (_settings.HasArenaPlacement)
+        {
+            _playfieldScale = _settings.ArenaScale;
+            _playfieldPitch = _settings.ArenaPitch;
+            _playfieldNearEdge = _settings.ArenaDistance;
+            _playfieldNearDrop = _settings.ArenaDrop;
+            _arenaLayout.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+            ApplyPlayfieldPlacement();
+        }
         BuildUiEditables();
+        SetLogButtonsVisible(_settings.Debug);
 
         // Debug poke-tip markers (world-space); shown only in debug mode.
         for (int i = 0; i < _pokeMarkers.Length; i++)
@@ -794,6 +819,36 @@ public partial class Main : Node3D
         _settingsMenu.SetShown(true);
     }
 
+    /// <summary>Open the Arena &amp; Layout screen. Edit mode runs for exactly as
+    /// long as this screen is open, which is what keeps it from ever leaking
+    /// into gameplay: the only way out is the same action that ends it.</summary>
+    private void OpenArenaLayout()
+    {
+        _vrSettingsOpen = false;
+        _settingsMenu.SetShown(false);
+        _arenaLayoutOpen = true;
+        _arenaLayout.SetShown(true);
+        SetUiEditMode(true);
+    }
+
+    private void CloseArenaLayout()
+    {
+        _arenaLayoutOpen = false;
+        SetUiEditMode(false);
+        _arenaLayout.SetShown(false);
+        _vrSettingsOpen = true;
+        _settingsMenu.SetShown(true);
+    }
+
+    private void SaveArenaPlacement()
+    {
+        _settings.ArenaScale = _playfieldScale;
+        _settings.ArenaPitch = _playfieldPitch;
+        _settings.ArenaDistance = _playfieldNearEdge;
+        _settings.ArenaDrop = _playfieldNearDrop;
+        _settings.Save();
+    }
+
     private void OpenControls()
     {
         _optionsOpen = false;
@@ -813,6 +868,10 @@ public partial class Main : Node3D
     private void CloseVrSettings()
     {
         _vrSettingsOpen = false;
+        // Belt and braces: edit mode is owned by the Arena & Layout screen and
+        // ended by CloseArenaLayout, but leaving VR Settings must never drop the
+        // player into a match with the action buttons inert.
+        SetUiEditMode(false);
         _settingsMenu.SetShown(false);
         _optionsOpen = true;
         _optionsMenu.SetShown(true);
@@ -1038,6 +1097,11 @@ public partial class Main : Node3D
         _controlRect = new Node3D { Name = "ControlRect" };
         AddChild(_controlRect);
 
+        // Sibling, not child: the action buttons follow the control surface's
+        // placement but must not inherit the size or tilt the player gives it.
+        _uiAnchor = new Node3D { Name = "UiAnchor" };
+        AddChild(_uiAnchor);
+
         float s = ControlRectSideMeters;
         _controlRect.AddChild(new MeshInstance3D
         {
@@ -1145,7 +1209,9 @@ public partial class Main : Node3D
     /// arena-side fraction; the mesh is unit-height so scale.Y IS the length.</summary>
     private static Node3D MakeAimPillar(Color color)
     {
-        var pivot = new Node3D();
+        // Hidden until gameplay actually starts: the first frames are the main
+        // menu, and a pillar defaulting to visible stands on the board there.
+        var pivot = new Node3D { Visible = false };
         pivot.AddChild(new MeshInstance3D
         {
             Mesh = new CylinderMesh { TopRadius = 0.0015f, BottomRadius = 0.0015f, Height = 1.0f },
@@ -1204,9 +1270,7 @@ public partial class Main : Node3D
     /// progress) and the spread ring sized by the live spread_heat (ABI v11).</summary>
     private void UpdateAimOverlays()
     {
-        bool inPlay = !MenuOwnsScreen && _sim != null && _hasPlayerSnap
-            && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active
-            && !_questPanel.Active && !_endNote.Active;
+        bool inPlay = InPlay;
         XRController3D aimHand = _handSwap ? _leftHand : _rightHand;
         if (!inPlay || !aimHand.GetHasTrackingData() || _lastPlayer.Health <= 0.0f)
         {
@@ -1652,6 +1716,8 @@ public partial class Main : Node3D
             UpdateHandVisual(_rightHand, _rightReticle, _rightGuide, isMoveHand: _handSwap);
         }
         UpdateAimOverlays();
+        UpdateAimPillars();
+        UpdateControlRectVisibility();
 
         // Ease the whole HUD out over the perk pick and on death instead of
         // hard-toggling (survival_mode.py hud_alpha, 400 ms transition).
@@ -1730,6 +1796,7 @@ public partial class Main : Node3D
         {
             return;
         }
+        PollLogButtons(p);
 
         // The validation checklist stands off to the right of the arena and is always
         // pokeable, in any game state (menu, gameplay, paused) — poll it first.
@@ -1766,9 +1833,13 @@ public partial class Main : Node3D
         }
         // Options / VR Settings / Controls opened from the main menu (sim gated
         // by MenuOwnsScreen): poke whichever is showing.
-        if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen))
+        if (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen))
         {
-            if (_vrSettingsOpen)
+            if (_arenaLayoutOpen)
+            {
+                _arenaLayout.PollPoke(p);
+            }
+            else if (_vrSettingsOpen)
             {
                 _settingsMenu.PollPoke(p);
             }
@@ -1823,6 +1894,10 @@ public partial class Main : Node3D
         {
             _controlsScreen.PollPoke(p);
         }
+        if (_pauseMenu.IsPaused && _arenaLayoutOpen)
+        {
+            _arenaLayout.PollPoke(p);
+        }
         // Perk cards only while a pick is pending AND the pause menu isn't up (they
         // share the space; the pause panel takes precedence). While paused the sim
         // is frozen so Update won't run — hide the cards explicitly.
@@ -1847,9 +1922,14 @@ public partial class Main : Node3D
         // the paused state.
         if (!_pauseMenu.IsPaused && !_optionsFromMenu)
         {
-            if (_optionsOpen || _vrSettingsOpen || _controlsOpen)
+            if (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen)
             {
                 _vrSettingsOpen = false;
+                // Resuming out of the pause stack closes these panels wholesale,
+                // so it is the other way edit mode can be left behind.
+                _arenaLayoutOpen = false;
+                SetUiEditMode(false);
+                _arenaLayout.SetShown(false);
                 _settingsMenu.SetShown(false);
                 _controlsOpen = false;
                 _controlsScreen.SetShown(false);
@@ -1860,7 +1940,8 @@ public partial class Main : Node3D
 
     private HandProbe MakeProbe(XRController3D hand)
         => hand.GetHasTrackingData()
-            ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold)
+            ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold,
+                hand.GlobalBasis)
             : default;
 
     private void SetDebug(bool on)
@@ -1874,6 +1955,7 @@ public partial class Main : Node3D
         // sim FAILURE even with debug off (see _Ready).
         _checklist.SetShown(on);
         _layoutMenu.SetShown(on);
+        SetLogButtonsVisible(on);
         _status.Visible = _sim == null || on;
         // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
         // per-creature facing needle, a one-off sprite-calibration tool. The
@@ -1986,7 +2068,6 @@ public partial class Main : Node3D
         }
 
         ComputeReticle(hand, out bool over, out Vector3 clampedLocal);
-        UpdateAimPillar(isMoveHand ? _leftAimPillar : _rightAimPillar, clampedLocal, tracking);
         if (isMoveHand)
         {
             // Playfield-local: the reticle is a child of PlayfieldRoot, so this
@@ -2016,6 +2097,48 @@ public partial class Main : Node3D
         ((MeshInstance3D)guide).Scale = new Vector3(1, guideHeight, 1);
     }
 
+    /// <summary>The control rectangle is a gameplay surface, so it goes away
+    /// while a menu owns the screen — there the hands are poking items, not
+    /// steering, and a lit rectangle under a menu just reads as clutter.
+    ///
+    /// UI EDIT MODE is the exception, and has to be: edit mode is entered from
+    /// the settings panel, so hiding the rectangle whenever a menu is up would
+    /// hide the very thing being edited (its corner handles are its children).
+    /// Tabletop hides it always — there the board is the control surface.</summary>
+    private void UpdateControlRectVisibility()
+        => _controlRect.Visible =
+            _controlMode == ControlMode.Cabinet && (!MenuOwnsScreen || _uiEditMode);
+
+    /// <summary>True only during actual play. Menus, pause, the perk pick, the
+    /// quest/end panels and game-over all count as out.</summary>
+    private bool InPlay => !MenuOwnsScreen && _sim != null && _hasPlayerSnap
+        && !_sim.GameOver && !_pauseMenu.IsPaused && !_perkMenu.Active
+        && !_questPanel.Active && !_endNote.Active;
+
+    /// <summary>Drive both cursor pillars. Called unconditionally rather than from
+    /// UpdateHandVisual, which the MenuOwnsScreen branch skips — that skip is why
+    /// the pillars were left standing on the board at the main menu.
+    ///
+    /// Pillars follow the PHYSICAL hand (left blue, right red) so they keep
+    /// matching the guide lines when the move/aim roles are swapped.</summary>
+    private void UpdateAimPillars()
+    {
+        bool inPlay = InPlay;
+        Drive(_leftHand, _leftAimPillar);
+        Drive(_rightHand, _rightAimPillar);
+
+        void Drive(XRController3D hand, Node3D pillar)
+        {
+            if (!inPlay || !hand.GetHasTrackingData())
+            {
+                pillar.Visible = false;
+                return;
+            }
+            ComputeReticle(hand, out _, out Vector3 local);
+            UpdateAimPillar(pillar, local, true);
+        }
+    }
+
     /// <summary>Stand a cursor pillar on the board at a playfield-local point.
     /// The pivot cancels the board's pitch so the cylinder is world-vertical, and
     /// the half-length offset is applied along that upright axis so the pillar
@@ -2029,7 +2152,11 @@ public partial class Main : Node3D
             return;
         }
         pivot.Position = boardLocal;
-        pivot.RotationDegrees = new Vector3(_playfieldPitch, 0.0f, 0.0f);
+        // Normal to the BOARD, not world-vertical. I originally counter-rotated
+        // these upright on the theory that an upright pillar reads as a marker;
+        // in the headset the opposite is true — a pillar leaning out of the
+        // playing surface reads as detached from the point it marks.
+        pivot.RotationDegrees = Vector3.Zero;
         var bar = (MeshInstance3D)pivot.GetChild(0);
         bar.Scale = new Vector3(1.0f, length, 1.0f);
         bar.Position = new Vector3(0.0f, length * 0.5f, 0.0f);
@@ -2047,45 +2174,80 @@ public partial class Main : Node3D
         if (loadDefaults)
         {
             // Tabletop has to stay reachable, so it takes the old table's
-            // placement at 1x; Cabinet takes the large, distant, tilted board.
-            // Tilt is left alone in both — it is the one value worth carrying
-            // across a mode switch, since a tilted tabletop is a thing the
-            // player may well have dialled in deliberately.
+            // placement at 1x and FLAT; Cabinet takes the large, distant, tilted
+            // board. Tilt is reset per mode rather than carried across: the two
+            // placements sit at very different distances, and a tilt that reads
+            // fine on a board 0.6 m away rears up through the menus on one 0.1 m
+            // from the player's face. (Carrying it was the original choice and
+            // it did exactly that on the first mode switch.) The full 0-90 range
+            // stays available in both — dial it from the slider, where the board
+            // moves under your eye instead of jumping there.
             if (mode == ControlMode.Tabletop)
             {
                 _playfieldScale = 1.0f;
+                _playfieldPitch = 0.0f;
                 _playfieldNearEdge = ArenaNearEdgeMeters;
                 _playfieldNearDrop = VerticalDropMeters;
             }
             else
             {
                 _playfieldScale = PlayfieldScale;
+                _playfieldPitch = PlayfieldPitchDegrees;
                 _playfieldNearEdge = PlayfieldNearEdgeMeters;
                 _playfieldNearDrop = PlayfieldNearDropMeters;
             }
-            _layoutMenu.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+            _arenaLayout?.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+            SaveArenaPlacement();
         }
 
         // The rectangle is meaningless in Tabletop — the board is the control
         // surface — and leaving it drawn would read as a second, dead playfield.
         _controlRect.Visible = mode == ControlMode.Cabinet;
+        ApplyHudLayout(mode);
 
-        // Poke buttons belong on whatever the hands can actually reach.
-        Node3D host = ControlSurface;
+        // Poke buttons hang off the anchor, which tracks whichever surface is in
+        // reach but carries none of its scale or tilt (see UpdateUiAnchor).
         Node3D edge = _pauseMenu.EdgeRoot;
-        if (edge.GetParent() != host)
+        if (edge.GetParent() != _uiAnchor)
         {
             edge.GetParent()?.RemoveChild(edge);
-            host.AddChild(edge);
+            _uiAnchor.AddChild(edge);
         }
 
         ApplyPlayfieldPlacement();
+        UpdateUiAnchor();
     }
 
     // ---- UI edit mode ----
 
     private readonly System.Collections.Generic.List<UiEditable> _editables = new();
+    private readonly System.Collections.Generic.Dictionary<string, Transform3D> _uiDefaults = new();
+    private readonly System.Collections.Generic.Dictionary<string, Node3D> _uiEditTargets = new();
     private bool _uiEditMode;
+
+    /// <summary>Put every editable widget back to its built-in placement and
+    /// forget the saved overrides.</summary>
+    private void ResetUiLayout()
+    {
+        foreach (System.Collections.Generic.KeyValuePair<string, Transform3D> kv in _uiDefaults)
+        {
+            if (_uiEditTargets.TryGetValue(kv.Key, out Node3D? target))
+            {
+                target.Transform = kv.Value;
+            }
+        }
+        // The control rectangle is not restored by its transform: the recenter
+        // placement owns it, so clearing the edit and re-applying is what
+        // actually returns it (and re-parents everything hanging off it).
+        _controlRectEdited = false;
+        _controlRectOffset = Vector3.Zero;
+        ApplyControlRectPlacement();
+
+        _settings.UiLayout.Clear();
+        _settings.Save();
+        _uiLayoutDirty = false;
+        GD.Print("[layout] reset to built-in placements");
+    }
 
     /// <summary>Hang grab handles on the repositionable widgets and restore any
     /// placement the player authored previously. The control rectangle is
@@ -2102,31 +2264,137 @@ public partial class Main : Node3D
 
         void Add(string id, Node3D target, UiEditable.Mode mode, float w, float h, bool cornersInXZ)
         {
+            bool isControlRect = mode == UiEditable.Mode.ScaleTilt;
+            // Capture the built-in placement BEFORE any saved override lands on
+            // it — that is the only moment it exists, and Reset needs it.
+            _uiDefaults[id] = target.Transform;
+            _uiEditTargets[id] = target;
             if (_settings.UiLayout.TryGetValue(id, out Transform3D saved))
             {
-                target.Transform = saved;
+                if (isControlRect)
+                {
+                    // For the control rectangle the stored ORIGIN is an offset
+                    // from the recenter placement, not a world position — an
+                    // absolute one would be wrong the moment the player recenters
+                    // somewhere else. Basis carries its tilt and size.
+                    _controlRectOffset = saved.Origin;
+                    _controlRectEditedBasis = saved.Basis;
+                    _controlRectEdited = true;
+                }
+                else
+                {
+                    target.Transform = saved;
+                }
             }
             var editable = new UiEditable();
             AddChild(editable);
             editable.Build(target, mode, w, h, cornersInXZ);
-            editable.OnTransformChanged += t =>
+            editable.OnTransformChanged += _ =>
             {
-                _settings.UiLayout[id] = t;
+                if (isControlRect)
+                {
+                    CaptureControlRectEdit();
+                    _settings.UiLayout[id] = new Transform3D(_controlRectEditedBasis, _controlRectOffset);
+                }
+                else
+                {
+                    _settings.UiLayout[id] = target.Transform;
+                }
                 _uiLayoutDirty = true;
             };
+
+            // Log button parked clear of the corner handles: below the face for
+            // the upright button plates, and out past the near edge for the
+            // control rectangle (which is grabbed from above, so anything inside
+            // its footprint would sit under the player's hands).
+            Vector3 logOffset = cornersInXZ
+                ? new Vector3(0.0f, 0.0f, -h * 0.85f)
+                : new Vector3(0.0f, -h * 2.5f, 0.0f);
+            editable.BuildLogButton(logOffset, w * 0.7f, h * 0.6f);
+            editable.OnLogPressed += () => LogWidgetPlacement(id, target, mode);
             _editables.Add(editable);
         }
     }
 
+    /// <summary>Print a widget's placement in the form the constants are written
+    /// in, so a position dialled in by hand can be read off and baked. Positions
+    /// come out in metres AND in multiples of the arena reference side, because
+    /// the layout code expresses them as `s * k`. Read with:
+    ///     adb logcat -s godot:* | findstr layout
+    /// </summary>
+    private void LogWidgetPlacement(string id, Node3D target, UiEditable.Mode mode)
+    {
+        Transform3D t = target.Transform;
+        Vector3 euler = t.Basis.GetEuler();
+        Vector3 scale = t.Basis.Scale;
+        float s = ArenaSideMeters;
+
+        if (mode == UiEditable.Mode.ScaleTilt)
+        {
+            // Read the control rectangle in its RECENTER-LOCAL frame: its live
+            // basis carries the recenter yaw, so euler.X off that would drift
+            // with whichever way the player happened to be facing. The numbers
+            // that matter are the ones that change the FEEL — pitch, the
+            // effective side (the hand-travel range mapping onto the arena), and
+            // the height offset from the default drop.
+            Basis local = _controlRectEdited
+                ? _controlRectEditedBasis
+                : Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0.0f, 0.0f));
+            Vector3 le = local.GetEuler();
+            float lScale = local.Scale.X;
+            GD.Print($"[layout] {id}  pitch={-Mathf.RadToDeg(le.X):0.0} deg" +
+                     $"  scale={lScale:0.000}x" +
+                     $"  effective side={ControlRectSideMeters * lScale:0.000} m" +
+                     $"  offset=({_controlRectOffset.X:0.000}, {_controlRectOffset.Y:0.000}, {_controlRectOffset.Z:0.000}) m" +
+                     $"  -> drop={ControlRectDropMeters - _controlRectOffset.Y:0.000} m" +
+                     $"  near edge={ControlRectNearEdgeMeters + _controlRectOffset.Z:0.000} m");
+            return;
+        }
+
+        GD.Print($"[layout] {id}  pos=({t.Origin.X:0.000}, {t.Origin.Y:0.000}, {t.Origin.Z:0.000}) m" +
+                 $"  = s*({t.Origin.X / s:0.000}, {t.Origin.Y / s:0.000}, {t.Origin.Z / s:0.000})" +
+                 $"  rot=({Mathf.RadToDeg(euler.X):0.0}, {Mathf.RadToDeg(euler.Y):0.0}, {Mathf.RadToDeg(euler.Z):0.0}) deg" +
+                 $"  scale={scale.X:0.000}x");
+    }
+
+    /// <summary>Print the board and presentation values driven by the Layout
+    /// sliders — the other half of the picture, since these live on sliders
+    /// rather than on a grabbable widget.</summary>
+    private void LogArenaPlacement()
+    {
+        GD.Print($"[layout] arena  scale={_playfieldScale:0.00}x" +
+                 $"  tilt={_playfieldPitch:0.0} deg" +
+                 $"  distance={_playfieldNearEdge:0.000} m" +
+                 $"  drop={_playfieldNearDrop:0.000} m" +
+                 $"  -> side={PlayfieldSideMeters:0.000} m");
+        GD.Print($"[layout] presentation  sprite height={_spriteHeightScale:0.00}x" +
+                 $"  aim line={_aimLineFraction * 100.0f:0}% ({_aimLineFraction * ArenaSideMeters:0.000} m)" +
+                 $"  mode={_controlMode}");
+    }
+
     private bool _uiLayoutDirty;
+
+    private void SetLogButtonsVisible(bool visible)
+    {
+        foreach (UiEditable e in _editables)
+        {
+            e.SetLogVisible(visible);
+        }
+    }
 
     private void SetUiEditMode(bool on)
     {
+        if (_uiEditMode == on)
+        {
+            return;
+        }
         _uiEditMode = on;
         foreach (UiEditable e in _editables)
         {
             e.SetEditing(on);
         }
+        // Show the action buttons for placement and make them inert while held.
+        _pauseMenu.SetEditMode(on);
         if (!on && _uiLayoutDirty)
         {
             // Save on EXIT rather than per-frame: a drag fires every frame and
@@ -2151,6 +2419,60 @@ public partial class Main : Node3D
             grabbing |= e.PollGrab(probes);
         }
         return grabbing;
+    }
+
+    /// <summary>Log buttons are polled separately from edit mode: they are shown
+    /// with DEBUG and are pokeable whenever visible, including mid-game.</summary>
+    private void PollLogButtons(ReadOnlySpan<HandProbe> probes)
+    {
+        if (!_settings.Debug)
+        {
+            return;
+        }
+        foreach (UiEditable e in _editables)
+        {
+            e.PollLogPoke(probes);
+        }
+    }
+
+    /// <summary>Place the health readout for the control mode.
+    ///
+    /// CABINET lays it FLAT in the board plane along the left edge, running near
+    /// to far and filling toward the far edge. On a large tilted board a single
+    /// standing panel puts every reading in one place at the top; splitting the
+    /// health out to the edge means it sits beside the action rather than above
+    /// it, and lying in-plane keeps it from occluding the left of the playfield
+    /// at the shallow angles a tilted board is viewed from.
+    ///
+    /// TABLETOP leaves it in the panel: that board is small and viewed from
+    /// almost overhead, where the one-panel layout already works.</summary>
+    private void ApplyHudLayout(ControlMode mode)
+    {
+        Node3D health = _hud.HealthRoot;
+        Node3D host = mode == ControlMode.Cabinet ? _playfieldRoot : (Node3D)_hud;
+        if (health.GetParent() != host)
+        {
+            health.GetParent()?.RemoveChild(health);
+            host.AddChild(health);
+        }
+
+        if (mode != ControlMode.Cabinet)
+        {
+            health.Transform = Transform3D.Identity;
+            return;
+        }
+
+        // Lay the group's XY page into the board's XZ plane, turned so the bar's
+        // length (group +x) runs along the board's +z, near to far. Columns are
+        // the images of the group's x/y/z axes.
+        var basis = new Basis(
+            new Vector3(0.0f, 0.0f, 1.0f),   // bar length -> board far
+            new Vector3(1.0f, 0.0f, 0.0f),   // bar height -> across the edge
+            new Vector3(0.0f, 1.0f, 0.0f));  // page normal -> board up
+        // Just outside the playable square, on the visible floor margin, lifted
+        // clear of the terrain decals so it never z-fights them.
+        float x = -ArenaSideMeters * 0.5f * (1.0f + (Diorama.FloorMarginScale - 1.0f) * 0.5f);
+        health.Transform = new Transform3D(basis, new Vector3(x, 0.004f, 0.0f));
     }
 
     private void HandleRecenter()
@@ -2204,11 +2526,11 @@ public partial class Main : Node3D
         // The control rectangle takes over the old table's placement: same near
         // edge and drop, so the hands keep the hover geometry every previous
         // headset pass was tuned against. Only its size changed.
-        Vector3 controlPos = headPos + forward * (ControlRectNearEdgeMeters + ControlRectSideMeters * 0.5f);
-        controlPos.Y = Mathf.Max(headPos.Y - ControlRectDropMeters, 0.05f);
-        _controlRect.GlobalTransform = new Transform3D(
-            yawBasis * Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0, 0)),
-            controlPos);
+        Vector3 controlBase = headPos + forward * (ControlRectNearEdgeMeters + ControlRectSideMeters * 0.5f);
+        controlBase.Y = Mathf.Max(headPos.Y - ControlRectDropMeters, 0.05f);
+        _controlRectBasePos = controlBase;
+        _controlRectYaw = yawBasis;
+        ApplyControlRectPlacement();
 
         // Remember the pose so the Layout sliders can re-place the board later
         // without a fresh recenter (and without chasing the player's head).
@@ -2216,6 +2538,71 @@ public partial class Main : Node3D
         _recenterForward = forward;
         _hasRecentered = true;
         ApplyPlayfieldPlacement();
+    }
+
+    // The control rectangle's placement is (recenter base) + (player edit). The
+    // base follows the head on every recenter; the edit is held in the RECENTER-
+    // LOCAL frame so it survives the player turning around or standing up, and
+    // is what makes a hand-authored height stick instead of being undone by the
+    // next recenter.
+    private Vector3 _controlRectBasePos;
+    private Basis _controlRectYaw = Basis.Identity;
+    private Vector3 _controlRectOffset;
+    private Basis _controlRectEditedBasis;
+    private bool _controlRectEdited;
+
+    private void ApplyControlRectPlacement()
+    {
+        Basis local = _controlRectEdited
+            ? _controlRectEditedBasis
+            : Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0.0f, 0.0f));
+        Vector3 pos = _controlRectBasePos + _controlRectYaw * _controlRectOffset;
+        pos.Y = Mathf.Max(pos.Y, 0.05f);
+        _controlRect.GlobalTransform = new Transform3D(_controlRectYaw * local, pos);
+        UpdateUiAnchor();
+    }
+
+    /// <summary>Keep the action-button anchor on the active control surface's
+    /// position and facing, WITHOUT its scale or tilt.
+    ///
+    /// The buttons used to hang off the surface node itself, so resizing the
+    /// control rectangle resized them and tilting it tilted them. They should
+    /// travel with the surface but stay their own size and stay upright — they
+    /// are physical poke targets sized for a fingertip, not part of the
+    /// playfield. Position and yaw only, therefore; never scale or pitch.</summary>
+    private void UpdateUiAnchor()
+    {
+        if (_uiAnchor == null)
+        {
+            return;
+        }
+        if (_controlMode == ControlMode.Cabinet)
+        {
+            Vector3 pos = _controlRectBasePos + _controlRectYaw * _controlRectOffset;
+            pos.Y = Mathf.Max(pos.Y, 0.05f);
+            _uiAnchor.GlobalTransform = new Transform3D(_controlRectYaw, pos);
+        }
+        else
+        {
+            // Tabletop: the board is the control surface, so the buttons ride
+            // its placement — but again not its scale, or growing the arena
+            // would inflate them out of reach.
+            float yaw = Mathf.Atan2(_recenterForward.X, _recenterForward.Z);
+            _uiAnchor.GlobalTransform = new Transform3D(
+                Basis.FromEuler(new Vector3(0, yaw, 0)), _playfieldRoot.GlobalPosition);
+        }
+    }
+
+    private Node3D _uiAnchor = null!;
+
+    /// <summary>Fold a hand-authored control-rect transform back into the
+    /// base+offset form, so the next recenter keeps it.</summary>
+    private void CaptureControlRectEdit()
+    {
+        Basis yawInv = _controlRectYaw.Inverse();
+        _controlRectOffset = yawInv * (_controlRect.GlobalPosition - _controlRectBasePos);
+        _controlRectEditedBasis = yawInv * _controlRect.GlobalBasis;
+        _controlRectEdited = true;
     }
 
     /// <summary>Place the playfield from the live scale/pitch/distance values
@@ -2245,6 +2632,7 @@ public partial class Main : Node3D
             playfieldPos);
         // The HUD pivot cancels the board pitch, so it has to follow it live.
         _hudPivot.RotationDegrees = new Vector3(_playfieldPitch, 0.0f, 0.0f);
+        UpdateUiAnchor();
     }
 
     private static uint TryQueryAbiVersion()

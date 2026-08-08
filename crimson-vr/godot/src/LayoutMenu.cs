@@ -38,22 +38,28 @@ public sealed partial class LayoutMenu : Node3D
     }
 
     private Row[] _rows = Array.Empty<Row>();
+    private VrButton _log = null!;
+
+    /// <summary>Poked to dump the current board/presentation values.</summary>
+    public event Action? OnLogPressed;
 
     public void Build(
         float arenaSideMeters,
         float spriteHeight, Action<float> onSpriteHeight,
         float aimLine, Action<float> onAimLine,
-        float scale, Action<float> onScale,
-        float pitch, Action<float> onPitch,
-        float distance, Action<float> onDistance,
-        float drop, Action<float> onDrop,
         Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
-        // Mirror of the debug FX panel, which stands at -x: this goes to the
-        // player's RIGHT, faced inward, so both can be open at once.
-        Position = new Vector3(s * 1.25f, s * 0.9f, 0.0f);
-        RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
+        // Three dev panels, two side walls. The checklist owns the RIGHT wall
+        // outright (it is the tall one, and it pages), so the two tuning panels
+        // share the LEFT: debug FX at the centre, this one forward of it along
+        // +z. Their footprints along the wall are about s*0.8 wide centred on
+        // their origins, so s*1.1 of separation leaves roughly s*0.3 of gap.
+        //
+        // Do not place this at +x: that is the checklist's exact spot, origin
+        // and yaw both, and the two rendered inside each other.
+        Position = new Vector3(-s * 1.25f, s * 0.9f, s * 1.1f);
+        RotationDegrees = new Vector3(0.0f, 90.0f, 0.0f);
 
         var title = new Label3D
         {
@@ -68,6 +74,10 @@ public sealed partial class LayoutMenu : Node3D
         };
         AddChild(title);
 
+        // Arena PLACEMENT moved to the player-facing Arena & Layout screen. Only
+        // the measure-once-and-bake values stay here, and each value now has
+        // exactly one owner — the same slider in two panels would desync the
+        // moment either was touched.
         _rows = new[]
         {
             // Sprite lift multiplier: 0 pins every entity flat on the terrain,
@@ -75,17 +85,9 @@ public sealed partial class LayoutMenu : Node3D
             new Row { Name = "Sprite height", Steps = 20, Min = 0.0f, Step = 0.1f, Unit = "x", Apply = onSpriteHeight },
             // Cursor pillar as a fraction of the arena side.
             new Row { Name = "Aim line", Steps = 20, Min = 0.0f, Step = 0.05f, Unit = "arena", Apply = onAimLine },
-            // Board size multiplier on the 0.4 m reference square.
-            new Row { Name = "Arena scale", Steps = 20, Min = 0.5f, Step = 0.25f, Unit = "x", Apply = onScale },
-            // Far-edge lift. 0 is the old flat tabletop, 90 stands it vertical.
-            new Row { Name = "Arena tilt", Steps = 18, Min = 0.0f, Step = 5.0f, Unit = "deg", Apply = onPitch },
-            // Near edge, forward of the head.
-            new Row { Name = "Arena distance", Steps = 20, Min = 0.2f, Step = 0.1f, Unit = "m", Apply = onDistance },
-            // Near edge, below the head. Larger = board sits lower.
-            new Row { Name = "Arena drop", Steps = 20, Min = 0.0f, Step = 0.05f, Unit = "m", Apply = onDrop },
         };
 
-        float[] current = { spriteHeight, aimLine, scale, pitch, distance, drop };
+        float[] current = { spriteHeight, aimLine };
         float pitchStep = s * 0.17f;
         float y = s * 0.36f;
 
@@ -122,6 +124,15 @@ public sealed partial class LayoutMenu : Node3D
             y -= pitchStep;
         }
 
+        // Well below the last slider strip: this panel is poked constantly while
+        // tuning, and a log button within a finger's width of a pip row would be
+        // hit by accident on every pass.
+        _log = new VrButton();
+        AddChild(_log);
+        _log.Build(s * 0.34f, s * 0.09f, "log arena", new Color(0.4f, 0.75f, 0.55f), plate: true);
+        _log.Position = new Vector3(0.0f, y - s * 0.10f, 0.0f);
+        _log.OnPress += () => OnLogPressed?.Invoke();
+
         Visible = false;
     }
 
@@ -134,22 +145,6 @@ public sealed partial class LayoutMenu : Node3D
             : $"{row.Name}: {shown}{(row.Unit == "deg" ? " deg" : row.Unit == "m" ? " m" : row.Unit)}";
     }
 
-    /// <summary>Push placement values in from outside (a control-mode switch
-    /// replaces all four at once) so the pips and labels match reality without
-    /// firing the Apply callbacks back at the caller.</summary>
-    public void SyncPlacement(float scale, float pitch, float distance, float drop)
-    {
-        float[] values = { scale, pitch, distance, drop };
-        // Rows 2..5 are the placement group; 0..1 are sprite height and aim line.
-        for (int i = 0; i < values.Length && i + 2 < _rows.Length; i++)
-        {
-            Row row = _rows[i + 2];
-            int step = row.StepFor(values[i]);
-            row.Slider.SetValue(step);
-            row.Label.Text = RowText(row, step);
-        }
-    }
-
     public void SetShown(bool visible)
     {
         Visible = visible;
@@ -157,6 +152,7 @@ public sealed partial class LayoutMenu : Node3D
         {
             r.Slider.ResetPress();
         }
+        _log.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
@@ -169,5 +165,6 @@ public sealed partial class LayoutMenu : Node3D
         {
             r.Slider.PollPoke(probes);
         }
+        _log.PollPoke(probes);
     }
 }

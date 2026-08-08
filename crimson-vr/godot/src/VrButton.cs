@@ -4,19 +4,27 @@ using Godot;
 namespace CrimsonVR;
 
 /// <summary>One controller's per-frame menu probe: whether it's tracking, its
-/// poke-tip world position, and whether its grip is squeezed (for grab-drag).
-/// Passed as a fixed [left, right] span so grabs keep a stable hand identity.</summary>
+/// poke-tip world position, whether its grip is squeezed (for grab-drag), and
+/// its world ORIENTATION. Passed as a fixed [left, right] span so grabs keep a
+/// stable hand identity.
+///
+/// Orientation is unused by the poke widgets — a button does not care which way
+/// the controller points — but two-handed manipulation needs it: hand POSITIONS
+/// alone define a line, which fixes only two rotational axes, so roll about that
+/// line can only come from how the controllers themselves are turned.</summary>
 public readonly struct HandProbe
 {
     public readonly bool Valid;
     public readonly Vector3 Tip;
     public readonly bool Grip;
+    public readonly Basis Rot;
 
-    public HandProbe(bool valid, Vector3 tip, bool grip)
+    public HandProbe(bool valid, Vector3 tip, bool grip, Basis rot = default)
     {
         Valid = valid;
         Tip = tip;
         Grip = grip;
+        Rot = rot;
     }
 }
 
