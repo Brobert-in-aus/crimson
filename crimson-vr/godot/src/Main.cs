@@ -2641,7 +2641,81 @@ public partial class Main : Node3D
         PlaceHudGroup(_hud.HealthRoot, host, cabinet, basis, -edgeX, _hud.HealthContentCentreLocal);
         // XP on the far side from health, so the two frame the playfield.
         PlaceHudGroup(_hud.XpRoot, host, cabinet, basis, edgeX, _hud.XpContentCentreLocal);
+
+        // Bonus rows ride the board too, but standing rather than in-plane.
+        Node3D bonus = _hud.BonusRoot;
+        Node3D bonusHost = cabinet ? _playfieldRoot : (Node3D)_hud;
+        if (bonus.GetParent() != bonusHost)
+        {
+            bonus.GetParent()?.RemoveChild(bonus);
+            bonusHost.AddChild(bonus);
+        }
+        if (!cabinet)
+        {
+            bonus.Transform = Transform3D.Identity;
+        }
+        else
+        {
+            ApplyBonusPlacement();
+        }
     }
+
+    // Where the FIRST bonus row sits in Cabinet, in playfield-local multiples of
+    // the board's reference half-side. Outboard of the XP strip (1.15) but
+    // inside the floor edge (FloorMarginScale/2 = 0.65 of the side, i.e. 1.3
+    // half-sides) so the stack stands on the visible margin; forward of centre
+    // so it reads low in view rather than off at the far edge; lifted just clear
+    // of the plane, with the remaining rows growing upward from there.
+    private const float BonusOutwardFactor = 1.22f;
+    private const float BonusForwardFactor = -0.30f;
+    private const float BonusLiftFactor = 0.06f;
+
+    /// <summary>Stand the bonus rows beside the board, upright, facing the seat.
+    ///
+    /// NOT billboarded. A panel that swings to follow the head is restless in
+    /// peripheral vision, and these rows are glanced at rather than read. It is
+    /// aimed once at the player's seated position — the recenter pose, which is
+    /// where they were when the board was placed — and left there. Recentring
+    /// re-aims it, which is the one moment the seat genuinely moved.
+    ///
+    /// The local basis cancels the board's rotation and substitutes a pure yaw,
+    /// so the panel stands world-vertical however far the board is tilted. Scale
+    /// is deliberately NOT cancelled: the rows should grow with the board.</summary>
+    private void ApplyBonusPlacement()
+    {
+        if (_controlMode != ControlMode.Cabinet || _hud == null)
+        {
+            return;
+        }
+        Node3D bonus = _hud.BonusRoot;
+        float half = ArenaSideMeters * 0.5f;
+        // Where the first row should LAND, in playfield-local space.
+        var anchor = new Vector3(
+            half * BonusOutwardFactor,
+            half * BonusLiftFactor,
+            half * BonusForwardFactor);
+
+        Basis boardRot = _playfieldRoot.GlobalBasis.Orthonormalized();
+        Vector3 toSeat = _recenterHeadPos - _playfieldRoot.GlobalTransform * anchor;
+        toSeat.Y = 0.0f;
+        // Degenerate only if the seat is directly above the panel; keep the
+        // previous aim rather than snapping to an arbitrary one.
+        if (toSeat.LengthSquared() > 1e-6f)
+        {
+            _bonusYaw = Mathf.Atan2(toSeat.X, toSeat.Z);
+        }
+
+        // Cancelling the board's rotation and substituting a pure yaw leaves the
+        // group standing world-vertical however far the board is tilted. Uniform
+        // scale commutes through, so the rows still grow with the board.
+        Basis local = boardRot.Inverse() * Basis.FromEuler(new Vector3(0.0f, _bonusYaw, 0.0f));
+        // Offset in the group's OWN frame, not the board's: the content sits up
+        // and to the left of its origin in panel coordinates, and that offset
+        // has to be rotated by the same yaw before it means anything here.
+        bonus.Transform = new Transform3D(local, anchor - local * _hud.BonusFirstRowLocal);
+    }
+
+    private float _bonusYaw;
 
     /// <param name="contentCentreLocal">Offset from the group's origin to the
     /// middle of its content, in its own (panel) coordinates. Subtracting the
@@ -2818,6 +2892,10 @@ public partial class Main : Node3D
             playfieldPos);
         // The HUD pivot cancels the board pitch, so it has to follow it live.
         _hudPivot.RotationDegrees = new Vector3(_playfieldPitch, 0.0f, 0.0f);
+        // The bonus stack cancels the board's rotation outright and aims at the
+        // seat, so both halves of its transform depend on where the board just
+        // went.
+        ApplyBonusPlacement();
         UpdateUiAnchor();
     }
 

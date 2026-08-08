@@ -1479,18 +1479,34 @@ public sealed partial class Diorama : Node3D
             // the treatment PLAN section 6 has owed since M3 -- survival
             // creatures spawn 40 game units (~0.039 of the side) beyond the
             // playfield and walk in, which the flat game's camera cropped
-            // entirely. Band is in uv, measured outward from the playfield edge.
-            uniform float vignette_band = 0.075;
+            // entirely.
+            //
+            // The ramp spans the WHOLE margin: it used to be a fixed 0.075 uv
+            // against a 0.15 margin, so it hit full darkness exactly half way
+            // out and the outer half sat flat black -- the gradient visibly
+            // stopped short of the board edge. Deriving it from margin_scale
+            // means the fade always ends where the floor does, and cannot drift
+            // if the margin is retuned.
+            //
+            // vignette_span scales that ramp: 1.0 = the full margin, lower =
+            // reach black sooner. vignette_inset pulls the START inward, in uv,
+            // over the playable area -- 0 keeps the play surface undimmed,
+            // which was the original constraint; a small value buys a longer,
+            // softer gradient at the cost of shading the outermost sliver of
+            // the playfield.
+            uniform float vignette_span = 1.0;
+            uniform float vignette_inset = 0.02;
             uniform float vignette_strength = 0.88;
             void fragment() {
                 vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
                 uv = view_center + (uv - view_center) / view_zoom;
                 bool inside = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
                 vec3 c = inside ? texture(baked, uv).rgb : texture(clean_t, fract(uv)).rgb;
-                // 0 on the playfield boundary, growing outward. Deliberately
-                // zero INSIDE, so the playable area is never dimmed.
+                // 0 on the playfield boundary, growing outward, negative inside.
                 float outside = max(max(-uv.x, uv.x - 1.0), max(-uv.y, uv.y - 1.0));
-                float v = clamp(outside / max(vignette_band, 0.0001), 0.0, 1.0);
+                float margin = (margin_scale - 1.0) * 0.5;
+                float band = max(margin * vignette_span + vignette_inset, 0.0001);
+                float v = clamp((outside + vignette_inset) / band, 0.0, 1.0);
                 ALBEDO = c * (1.0 - v * vignette_strength);
             }
             """,

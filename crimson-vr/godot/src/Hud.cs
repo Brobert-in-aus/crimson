@@ -84,6 +84,7 @@ public sealed partial class Hud : Node3D
 
     private Node3D _healthRoot = null!;
     private Node3D _xpRoot = null!;
+    private Node3D _bonusRoot = null!;
 
     /// <summary>The health readout (track, fill, heart) in its own node so Main
     /// can detach it: in Cabinet mode it lies FLAT in the board plane along the
@@ -109,6 +110,24 @@ public sealed partial class Hud : Node3D
 
     public Vector3 XpContentCentreLocal
         => new(LocalX(-68.0f + XpPanelW * 0.5f), LocalY(XpRowTop + 53.0f * 0.5f), 0.0f);
+
+    /// <summary>The active-bonus rows, in their own node so Cabinet can stand
+    /// them beside the board.
+    ///
+    /// Unlike health and XP this one does NOT lie in the board plane. The rows
+    /// carry long names ("Double Experience"), and text laid flat on a tilted
+    /// surface off to one side is read at the worst possible angle — so it stays
+    /// upright and is turned to face the player instead.</summary>
+    public Node3D BonusRoot => _bonusRoot;
+
+    /// <summary>Centre of the FIRST bonus row, in group-local metres, so the
+    /// caller can anchor the stack by the row that is always there and let the
+    /// rest grow upward from it. Anchoring by the group origin instead would
+    /// hang the rows off by half a board (they are laid out from native x -68,
+    /// rising from y -63), and centring on all eight would float the one or two
+    /// live rows high above the anchor.</summary>
+    public Vector3 BonusFirstRowLocal
+        => new(LocalX(BonusRowX + 182.0f * 0.5f), LocalY(BonusRowY0 + 15.0f), 0.0f);
 
     // Draw-order bands: the world runs -8..27 (border, decals, then sprites from
     // 6), the HUD panel 40..44, menus 58..67.
@@ -165,6 +184,11 @@ public sealed partial class Hud : Node3D
         }
         if (_xpPanelMat != null) _xpPanelMat.RenderPriority = cabinet ? XpBoardBackPriority : XpPanelBackPriority;
         if (_xpFillMat != null) _xpFillMat.RenderPriority = cabinet ? XpBoardFacePriority : XpPanelFacePriority;
+        // On the board the backing art is redundant: the group sits on the
+        // vignetted margin, which already separates it from the playfield, and
+        // a second dark plate on top of it just reads as a smudge. In the panel
+        // it is still what holds the readings together.
+        if (_xpPanel != null) _xpPanel.Visible = !cabinet;
     }
 
     private MeshInstance3D? _heart;
@@ -181,6 +205,7 @@ public sealed partial class Hud : Node3D
     private Label3D _xpValue = null!;
     private Label3D _lvlValue = null!;
     private MeshInstance3D? _xpFill;
+    private MeshInstance3D? _xpPanel;
     private StandardMaterial3D? _xpPanelMat;
     private StandardMaterial3D? _xpFillMat;
     private readonly System.Collections.Generic.List<Label3D> _xpLabels = new();
@@ -253,7 +278,7 @@ public sealed partial class Hud : Node3D
         // stacked above it.
         _xpRoot = new Node3D { Name = "HudXp" };
         AddChild(_xpRoot);
-        TexQuad(Load("ui_indPanel"), -68.0f, XpRowTop, XpPanelW, 53.0f, new Color(1, 1, 1, 0.9f), priority: XpPanelBackPriority, out _xpPanelMat, _xpRoot);
+        _xpPanel = TexQuad(Load("ui_indPanel"), -68.0f, XpRowTop, XpPanelW, 53.0f, new Color(1, 1, 1, 0.9f), priority: XpPanelBackPriority, out _xpPanelMat, _xpRoot);
 
         // Health group. Kept in its own node so Cabinet mode can lift it out of
         // this panel and lay it flat along the board's left edge while the rest
@@ -358,14 +383,16 @@ public sealed partial class Hud : Node3D
     private void BuildBonusRows()
     {
         _bonusSheet = Load("bonuses");
+        _bonusRoot = new Node3D { Name = "HudBonus" };
+        AddChild(_bonusRoot);
         for (int i = 0; i < BonusRowCap; i++)
         {
             float y = BonusRowY0 - i * BonusRowPitch; // rows rise above the bar
             var row = new BonusRow();
-            row.Panel = TexQuad(Load("ui_indPanel"), BonusRowX, y - 11.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.7f), priority: 41, out row.PanelMat);
-            row.Icon = TexQuad(_bonusSheet, BonusRowX + 15.0f - 16.0f, y + 16.0f - 16.0f, 32.0f, 32.0f, Colors.White, priority: 42, out row.IconMat);
-            row.Name = MakeLabel(BonusRowX + 36.0f, y + 9.0f, HorizontalAlignment.Left);
-            row.Bar = ColorQuad(BonusRowX + 36.0f, y + 21.0f, 100.0f, 6.0f, new Color(26 / 255f, 77 / 255f, 153 / 255f, 0.7f), priority: 42);
+            row.Panel = TexQuad(Load("ui_indPanel"), BonusRowX, y - 11.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.7f), priority: 41, out row.PanelMat, _bonusRoot);
+            row.Icon = TexQuad(_bonusSheet, BonusRowX + 15.0f - 16.0f, y + 16.0f - 16.0f, 32.0f, 32.0f, Colors.White, priority: 42, out row.IconMat, _bonusRoot);
+            row.Name = MakeLabel(BonusRowX + 36.0f, y + 9.0f, HorizontalAlignment.Left, _bonusRoot);
+            row.Bar = ColorQuad(BonusRowX + 36.0f, y + 21.0f, 100.0f, 6.0f, new Color(26 / 255f, 77 / 255f, 153 / 255f, 0.7f), 42, out _, _bonusRoot);
             SetRowVisible(row, false);
             _bonusRows[i] = row;
         }
@@ -749,7 +776,7 @@ public sealed partial class Hud : Node3D
         // only thing left lit on the table. XP is now in the same position, on
         // the opposite edge, so it needs the same treatment.
         ApplyFade(this, 1.0f - fade);
-        foreach (Node3D group in new[] { _healthRoot, _xpRoot })
+        foreach (Node3D group in new[] { _healthRoot, _xpRoot, _bonusRoot })
         {
             if (group.GetParent() != this)
             {
