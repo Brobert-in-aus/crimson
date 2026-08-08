@@ -2349,6 +2349,13 @@ public partial class Main : Node3D
 
         ApplyPlayfieldPlacement();
         UpdateUiAnchor();
+        // Placements are per-mode, so the switch has to swap them in. Skipped on
+        // the boot call, which runs before the widgets exist; BuildUiEditables
+        // applies the starting mode itself.
+        if (_uiEditTargets.Count > 0)
+        {
+            ApplyUiLayoutForMode();
+        }
     }
 
     // ---- UI edit mode ----
@@ -2358,28 +2365,73 @@ public partial class Main : Node3D
     private readonly System.Collections.Generic.Dictionary<string, Node3D> _uiEditTargets = new();
     private bool _uiEditMode;
 
-    /// <summary>Put every editable widget back to its built-in placement and
-    /// forget the saved overrides.</summary>
-    private void ResetUiLayout()
+    /// <summary>Storage key for a widget's placement, scoped to the control mode
+    /// it was dialled in for.
+    ///
+    /// The two modes put the control surface in completely different places — a
+    /// small flat table at arm's length versus a large tilted board most of a
+    /// metre away — so a pause button placed to fall under the hand in one is
+    /// nowhere near it in the other. Sharing one placement meant every mode
+    /// switch handed back a layout authored for the other geometry.</summary>
+    private string LayoutKey(string id) => $"{_controlMode}/{id}";
+
+    /// <summary>Put each widget where the CURRENT mode says it goes: the saved
+    /// override for this mode, or the built-in placement when this mode has
+    /// none. Both halves matter — without the fallback, switching modes would
+    /// leave the previous mode's placement standing.</summary>
+    private void ApplyUiLayoutForMode()
     {
-        foreach (System.Collections.Generic.KeyValuePair<string, Transform3D> kv in _uiDefaults)
+        foreach (System.Collections.Generic.KeyValuePair<string, Node3D> kv in _uiEditTargets)
         {
-            if (_uiEditTargets.TryGetValue(kv.Key, out Node3D? target))
+            bool isControlRect = ReferenceEquals(kv.Value, _controlRect);
+            if (_settings.UiLayout.TryGetValue(LayoutKey(kv.Key), out Transform3D saved))
             {
-                target.Transform = kv.Value;
+                if (isControlRect)
+                {
+                    // The stored ORIGIN is an offset from the recenter placement,
+                    // not a world position — an absolute one would be wrong the
+                    // moment the player recenters somewhere else. Basis carries
+                    // its tilt and size.
+                    _controlRectOffset = saved.Origin;
+                    _controlRectEditedBasis = saved.Basis;
+                    _controlRectEdited = true;
+                }
+                else
+                {
+                    kv.Value.Transform = saved;
+                }
+            }
+            else if (isControlRect)
+            {
+                _controlRectEdited = false;
+                _controlRectOffset = Vector3.Zero;
+            }
+            else if (_uiDefaults.TryGetValue(kv.Key, out Transform3D def))
+            {
+                kv.Value.Transform = def;
             }
         }
-        // The control rectangle is not restored by its transform: the recenter
-        // placement owns it, so clearing the edit and re-applying is what
-        // actually returns it (and re-parents everything hanging off it).
-        _controlRectEdited = false;
-        _controlRectOffset = Vector3.Zero;
+        // The control rectangle is not placed by its transform: the recenter
+        // placement owns it, so re-applying is what actually moves it (and
+        // re-parents everything hanging off it).
         ApplyControlRectPlacement();
+    }
 
-        _settings.UiLayout.Clear();
+    /// <summary>Put this mode's editable widgets back to their built-in
+    /// placements and forget its saved overrides. Scoped to the current mode on
+    /// purpose: the other mode's layout was dialled in separately and is not
+    /// what the player is looking at when they press this.</summary>
+    private void ResetUiLayout()
+    {
+        foreach (string id in _uiEditTargets.Keys)
+        {
+            _settings.UiLayout.Remove(LayoutKey(id));
+        }
+        ApplyUiLayoutForMode();
+
         _settings.Save();
         _uiLayoutDirty = false;
-        GD.Print("[layout] reset to built-in placements");
+        GD.Print($"[layout] {_controlMode} reset to built-in placements");
     }
 
     /// <summary>Hang grab handles on the repositionable widgets and restore any
@@ -2399,39 +2451,25 @@ public partial class Main : Node3D
         {
             bool isControlRect = mode == UiEditable.Mode.ScaleTilt;
             // Capture the built-in placement BEFORE any saved override lands on
-            // it — that is the only moment it exists, and Reset needs it.
+            // it — that is the only moment it exists, and every mode with no
+            // override of its own falls back to it.
             _uiDefaults[id] = target.Transform;
             _uiEditTargets[id] = target;
-            if (_settings.UiLayout.TryGetValue(id, out Transform3D saved))
-            {
-                if (isControlRect)
-                {
-                    // For the control rectangle the stored ORIGIN is an offset
-                    // from the recenter placement, not a world position — an
-                    // absolute one would be wrong the moment the player recenters
-                    // somewhere else. Basis carries its tilt and size.
-                    _controlRectOffset = saved.Origin;
-                    _controlRectEditedBasis = saved.Basis;
-                    _controlRectEdited = true;
-                }
-                else
-                {
-                    target.Transform = saved;
-                }
-            }
             var editable = new UiEditable();
             AddChild(editable);
             editable.Build(target, mode, w, h, cornersInXZ);
             editable.OnTransformChanged += _ =>
             {
+                // Stored against the mode it was dialled in for; see LayoutKey.
                 if (isControlRect)
                 {
                     CaptureControlRectEdit();
-                    _settings.UiLayout[id] = new Transform3D(_controlRectEditedBasis, _controlRectOffset);
+                    _settings.UiLayout[LayoutKey(id)] =
+                        new Transform3D(_controlRectEditedBasis, _controlRectOffset);
                 }
                 else
                 {
-                    _settings.UiLayout[id] = target.Transform;
+                    _settings.UiLayout[LayoutKey(id)] = target.Transform;
                 }
                 _uiLayoutDirty = true;
             };
@@ -2447,6 +2485,9 @@ public partial class Main : Node3D
             editable.OnLogPressed += () => LogWidgetPlacement(id, target, mode);
             _editables.Add(editable);
         }
+
+        // Widgets exist now, so the starting mode's placements can land.
+        ApplyUiLayoutForMode();
     }
 
     /// <summary>Print a widget's placement in the form the constants are written
@@ -2568,46 +2609,56 @@ public partial class Main : Node3D
         }
     }
 
-    /// <summary>Place the health readout for the control mode.
+    /// <summary>Place the health and XP readouts for the control mode.
     ///
-    /// CABINET lays it FLAT in the board plane along the left edge, running near
-    /// to far and filling toward the far edge. On a large tilted board a single
-    /// standing panel puts every reading in one place at the top; splitting the
-    /// health out to the edge means it sits beside the action rather than above
-    /// it, and lying in-plane keeps it from occluding the left of the playfield
-    /// at the shallow angles a tilted board is viewed from.
+    /// CABINET lays them FLAT in the board plane along OPPOSITE edges, each
+    /// running near to far. On a large tilted board a single standing panel puts
+    /// every reading in one place at the top; splitting the two the player
+    /// actually tracks mid-fight out to the edges means they sit beside the
+    /// action rather than above it, and lying in-plane keeps them from occluding
+    /// the playfield at the shallow angles a tilted board is viewed from.
     ///
-    /// TABLETOP leaves it in the panel: that board is small and viewed from
+    /// TABLETOP leaves both in the panel: that board is small and viewed from
     /// almost overhead, where the one-panel layout already works.</summary>
     private void ApplyHudLayout(ControlMode mode)
     {
-        _hud.SetCabinetLayout(mode == ControlMode.Cabinet);
+        bool cabinet = mode == ControlMode.Cabinet;
+        _hud.SetCabinetLayout(cabinet);
         _controlsScreen?.SetControlMode(mode);
-        Node3D health = _hud.HealthRoot;
-        Node3D host = mode == ControlMode.Cabinet ? _playfieldRoot : (Node3D)_hud;
-        if (health.GetParent() != host)
-        {
-            health.GetParent()?.RemoveChild(health);
-            host.AddChild(health);
-        }
+        Node3D host = cabinet ? _playfieldRoot : (Node3D)_hud;
 
-        if (mode != ControlMode.Cabinet)
-        {
-            health.Transform = Transform3D.Identity;
-            return;
-        }
-
-        // Lay the group's XY page into the board's XZ plane, turned so the bar's
-        // length (group +x) runs along the board's +z, near to far. Columns are
-        // the images of the group's x/y/z axes.
+        // Lay a group's XY page into the board's XZ plane, turned so its length
+        // (group +x) runs along the board's +z, near to far. Columns are the
+        // images of the group's x/y/z axes.
         var basis = new Basis(
             new Vector3(0.0f, 0.0f, 1.0f),   // bar length -> board far
             new Vector3(1.0f, 0.0f, 0.0f),   // bar height -> across the edge
             new Vector3(0.0f, 1.0f, 0.0f));  // page normal -> board up
         // Just outside the playable square, on the visible floor margin, lifted
         // clear of the terrain decals so it never z-fights them.
-        float x = -ArenaSideMeters * 0.5f * (1.0f + (Diorama.FloorMarginScale - 1.0f) * 0.5f);
-        health.Transform = new Transform3D(basis, new Vector3(x, 0.004f, 0.0f));
+        float edgeX = ArenaSideMeters * 0.5f * (1.0f + (Diorama.FloorMarginScale - 1.0f) * 0.5f);
+
+        PlaceHudGroup(_hud.HealthRoot, host, cabinet, basis, -edgeX, _hud.HealthContentCentreLocal);
+        // XP on the far side from health, so the two frame the playfield.
+        PlaceHudGroup(_hud.XpRoot, host, cabinet, basis, edgeX, _hud.XpContentCentreLocal);
+    }
+
+    /// <param name="contentCentreLocal">Offset from the group's origin to the
+    /// middle of its content, in its own (panel) coordinates. Subtracting the
+    /// rotated form of it puts the CONTENT on the edge line at z=0, so the two
+    /// groups sit symmetrically rather than each hanging off by whatever its
+    /// native coordinates happen to be.</param>
+    private static void PlaceHudGroup(
+        Node3D group, Node3D host, bool cabinet, Basis basis, float x, Vector3 contentCentreLocal)
+    {
+        if (group.GetParent() != host)
+        {
+            group.GetParent()?.RemoveChild(group);
+            host.AddChild(group);
+        }
+        group.Transform = cabinet
+            ? new Transform3D(basis, new Vector3(x, 0.004f, 0.0f) - basis * contentCentreLocal)
+            : Transform3D.Identity;
     }
 
     private void HandleRecenter()

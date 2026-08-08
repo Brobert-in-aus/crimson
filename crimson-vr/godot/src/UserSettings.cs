@@ -89,9 +89,14 @@ public sealed class UserSettings
 
     /// <summary>Bump whenever the MEANING of a stored UiLayout transform changes
     /// (frame of reference, what the origin represents, which node it is
-    /// relative to). Old entries are then discarded instead of misread.
-    /// v2: control-rect origin became an offset and its basis recenter-local.</summary>
-    private const int UiLayoutVersion = 2;
+    /// relative to) — or the key namespace, since a key that no longer matches
+    /// is a placement silently lost rather than an error. Old entries are then
+    /// discarded instead of misread or stranded.
+    /// v2: control-rect origin became an offset and its basis recenter-local.
+    /// v3: keys gained a control-mode prefix ("Cabinet/pause"), so each mode
+    ///     carries its own layout — the geometries are too different to share
+    ///     one.</summary>
+    private const int UiLayoutVersion = 3;
     private const string UiLayoutVersionKey = "version";
 
     // Original Options settings (mirrors the base game). Volumes 0-10, graphics

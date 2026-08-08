@@ -83,6 +83,7 @@ public sealed partial class Hud : Node3D
     private Texture2D?[] _ammoTex = System.Array.Empty<Texture2D?>();
 
     private Node3D _healthRoot = null!;
+    private Node3D _xpRoot = null!;
 
     /// <summary>The health readout (track, fill, heart) in its own node so Main
     /// can detach it: in Cabinet mode it lies FLAT in the board plane along the
@@ -90,6 +91,24 @@ public sealed partial class Hud : Node3D
     /// pivot that keeps the panel standing upright. Quads inside keep the panel's
     /// native coordinates, so the fill logic is unaffected by the move.</summary>
     public Node3D HealthRoot => _healthRoot;
+
+    /// <summary>The XP readout (panel art, progress fill, value, level) in its
+    /// own node, for the same reason as <see cref="HealthRoot"/> — Cabinet lays
+    /// it flat along the board edge OPPOSITE health, so the two run down either
+    /// side of the playfield instead of stacking in one panel above it.</summary>
+    public Node3D XpRoot => _xpRoot;
+
+    // Where each group's content sits relative to its own origin, in metres.
+    // Both groups keep PANEL coordinates wherever they are placed, and neither
+    // is centred on its origin there — health spans native x 36..482 while XP
+    // spans -68..172. Placing them by origin alone would hang them off their
+    // board edges by different amounts and in different directions, so Cabinet
+    // subtracts these to centre the content itself.
+    public Vector3 HealthContentCentreLocal
+        => new(LocalX(HealthBarX + HealthBarW * 0.5f), LocalY(HealthBarY + HealthBarH * 0.5f), 0.0f);
+
+    public Vector3 XpContentCentreLocal
+        => new(LocalX(-68.0f + XpPanelW * 0.5f), LocalY(XpRowTop + 53.0f * 0.5f), 0.0f);
 
     // Draw-order bands: the world runs -8..27 (border, decals, then sprites from
     // 6), the HUD panel 40..44, menus 58..67.
@@ -102,14 +121,23 @@ public sealed partial class Hud : Node3D
     // above the arena and had nothing in front of it.
     private const int HealthBoardTrackPriority = 3;
     private const int HealthBoardFacePriority = 4;
+    // XP sits one band above health so its text stays legible over its own
+    // backing art, and still below the sprites (6+) like any floor marking.
+    private const int XpPanelBackPriority = 41;
+    private const int XpPanelFacePriority = 43;
+    private const int XpPanelTextPriority = 44;
+    private const int XpBoardBackPriority = 3;
+    private const int XpBoardFacePriority = 4;
+    private const int XpBoardTextPriority = 5;
 
     /// <summary>Tell the HUD which layout it is in.
     ///
-    /// Two things depend on it. The heart is turned upright to compensate for
-    /// the health group being laid into the board plane, so applying that spin
-    /// unconditionally would leave it on its side in Tabletop where the group is
-    /// never rotated. And the group's draw order has to move from the panel band
-    /// to the world band, since on the board it has creatures in front of it.</summary>
+    /// Two things depend on it. Page content is turned upright to compensate for
+    /// a group being laid into the board plane, so applying that spin
+    /// unconditionally would leave it on its side in Tabletop where the groups
+    /// are never rotated. And a group's draw order has to move from the panel
+    /// band to the world band, since on the board it has creatures in front of
+    /// it.</summary>
     public void SetCabinetLayout(bool cabinet)
     {
         if (_heart != null)
@@ -122,6 +150,21 @@ public sealed partial class Hud : Node3D
         if (_healthTrackMat != null) _healthTrackMat.RenderPriority = track;
         if (_healthFillMat != null) _healthFillMat.RenderPriority = face;
         if (_heartMat != null) _heartMat.RenderPriority = face;
+
+        // The XP group gets the same treatment. Its LABELS take the spin the
+        // heart does: the group rotation runs the page's +x along the board's
+        // near->far axis, which would leave the readings running away from the
+        // player. Rolling them back by the same -90 puts the text across the
+        // board with its tops toward the far edge — read from the seat, not
+        // from the side.
+        float spin = cabinet ? HeartSpinDegrees : 0.0f;
+        foreach (Label3D l in _xpLabels)
+        {
+            l.RotationDegrees = new Vector3(0.0f, 0.0f, spin);
+            l.RenderPriority = cabinet ? XpBoardTextPriority : XpPanelTextPriority;
+        }
+        if (_xpPanelMat != null) _xpPanelMat.RenderPriority = cabinet ? XpBoardBackPriority : XpPanelBackPriority;
+        if (_xpFillMat != null) _xpFillMat.RenderPriority = cabinet ? XpBoardFacePriority : XpPanelFacePriority;
     }
 
     private MeshInstance3D? _heart;
@@ -138,12 +181,21 @@ public sealed partial class Hud : Node3D
     private Label3D _xpValue = null!;
     private Label3D _lvlValue = null!;
     private MeshInstance3D? _xpFill;
+    private StandardMaterial3D? _xpPanelMat;
+    private StandardMaterial3D? _xpFillMat;
+    private readonly System.Collections.Generic.List<Label3D> _xpLabels = new();
     private int _xpSmoothed; // HudState.smooth_xp roll-up (displayed XP eases to target)
     private float _fade = 1.0f;
     private bool _fadeApplied;
 
     private const float HealthBarW = 446.0f; // full top-bar width (36..482; the box art's body ends ~486)
+    // Intra-level progress bar, inside the XP panel. Build and per-frame
+    // re-anchor both read these, so the bar cannot end up drawn on one row and
+    // moved to another (it used to: built on the XP row, updated onto the ammo).
+    private const float XpProgressX = 26.0f;
     private const float XpProgressW = 96.0f; // widened with the panel
+    private const float XpProgressY = XpRowTop + 31.0f;
+    private const float XpProgressH = 5.0f;
 
     private static Texture2D? Load(string name)
     {
@@ -194,7 +246,14 @@ public sealed partial class Hud : Node3D
         // Survival XP panel (ind_panel), above the ammo bar. Widened from the
         // native 182: health leaving the top bar freed the room, and the value
         // and level readings were crowded into each other's space.
-        TexQuad(Load("ui_indPanel"), -68.0f, XpRowTop, XpPanelW, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
+        //
+        // In its own group for the same reason health is: Cabinet lays it flat
+        // along the board edge opposite health, so the two readings the player
+        // actually tracks mid-fight sit either side of the playfield rather than
+        // stacked above it.
+        _xpRoot = new Node3D { Name = "HudXp" };
+        AddChild(_xpRoot);
+        TexQuad(Load("ui_indPanel"), -68.0f, XpRowTop, XpPanelW, 53.0f, new Color(1, 1, 1, 0.9f), priority: XpPanelBackPriority, out _xpPanelMat, _xpRoot);
 
         // Health group. Kept in its own node so Cabinet mode can lift it out of
         // this panel and lay it flat along the board's left edge while the rest
@@ -229,16 +288,18 @@ public sealed partial class Hud : Node3D
         _ammoExtra.Visible = false;
 
         // XP progress fill (left-aligned, updated in Update), on the upper row.
-        _xpFill = ColorQuad(26.0f, XpRowTop + 31.0f, XpProgressW, 5.0f, new Color(0.1f, 0.3f, 0.6f, 1.0f), priority: 43);
+        _xpFill = ColorQuad(XpProgressX, XpProgressY, XpProgressW, XpProgressH, new Color(0.1f, 0.3f, 0.6f, 1.0f), XpPanelFacePriority, out _xpFillMat, _xpRoot);
 
         // XP + level text, spread across the widened panel. Level sits well
         // clear of the value now: at the native spacing a five-figure XP ran
         // straight into it.
-        _xpValue = MakeLabel(26.0f, XpRowTop + 14.0f, HorizontalAlignment.Left);
+        _xpValue = MakeLabel(26.0f, XpRowTop + 14.0f, HorizontalAlignment.Left, _xpRoot);
         // x138, not further: the panel's right edge is at -68 + 240 = 172, and a
         // two-digit level left-aligned much past this starts to overhang it.
-        _lvlValue = MakeLabel(138.0f, XpRowTop + 19.0f, HorizontalAlignment.Left);
-        MakeStaticLabel(4.0f, XpRowTop + 18.0f, "Xp");
+        _lvlValue = MakeLabel(138.0f, XpRowTop + 19.0f, HorizontalAlignment.Left, _xpRoot);
+        _xpLabels.Add(_xpValue);
+        _xpLabels.Add(_lvlValue);
+        _xpLabels.Add(MakeStaticLabel(4.0f, XpRowTop + 18.0f, "Xp", _xpRoot));
 
         // Quest timer (quest mode only): elapsed / time limit. Sits on the upper
         // row clear of the widened XP panel; the sim enforces the timeline, this
@@ -630,8 +691,12 @@ public sealed partial class Hud : Node3D
             float ratio = SurvivalProgress(xp, player.Level);
             _xpFill.Visible = ratio > 0.001f;
             _xpFill.Scale = new Vector3(Mathf.Max(ratio, 0.001f), 1.0f, 1.0f);
-            float cx = 26.0f + XpProgressW * 0.5f * ratio;
-            _xpFill.Position = new Vector3(LocalX(cx), LocalY(91.0f + 2.0f), _xpFill.Position.Z);
+            float cx = XpProgressX + XpProgressW * 0.5f * ratio;
+            // Was a hardcoded 93, left behind when XP and ammo swapped rows: the
+            // bar was built on the XP row and then jumped onto the ammo bars on
+            // its first update. Re-anchor from the same constants it is built
+            // with so the two cannot drift apart again.
+            _xpFill.Position = new Vector3(LocalX(cx), LocalY(XpProgressY + XpProgressH * 0.5f), _xpFill.Position.Z);
         }
     }
 
@@ -763,27 +828,36 @@ public sealed partial class Hud : Node3D
     }
 
     private MeshInstance3D ColorQuad(float x, float y, float w, float h, Color color, int priority)
+        => ColorQuad(x, y, w, h, color, priority, out _, null);
+
+    /// <param name="host">Group to add the quad to; null means the panel itself.
+    /// Same contract as the TexQuad overload — native coordinates are unchanged
+    /// by the move.</param>
+    private MeshInstance3D ColorQuad(
+        float x, float y, float w, float h, Color color, int priority,
+        out StandardMaterial3D mat, Node3D? host)
     {
+        mat = new StandardMaterial3D
+        {
+            AlbedoColor = color,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            // Depth-tested like TexQuad: the tabletop occludes the HUD.
+            RenderPriority = priority,
+        };
         var node = new MeshInstance3D
         {
             Mesh = new QuadMesh { Size = new Vector2(w * _u, h * _u) },
             Position = new Vector3(LocalX(x + w * 0.5f), LocalY(y + h * 0.5f), 0.0f),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = color,
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-                // Depth-tested like TexQuad: the tabletop occludes the HUD.
-                RenderPriority = priority,
-            },
+            MaterialOverride = mat,
         };
-        AddChild(node);
+        (host ?? this).AddChild(node);
         return node;
     }
 
-    private Label3D MakeLabel(float nx, float ny, HorizontalAlignment align)
+    private Label3D MakeLabel(float nx, float ny, HorizontalAlignment align, Node3D? host = null)
     {
         var l = new Label3D
         {
@@ -796,13 +870,14 @@ public sealed partial class Hud : Node3D
             Position = new Vector3(LocalX(nx), LocalY(ny), 0.001f),
             RenderPriority = 44,
         };
-        AddChild(l);
+        (host ?? this).AddChild(l);
         return l;
     }
 
-    private void MakeStaticLabel(float nx, float ny, string text)
+    private Label3D MakeStaticLabel(float nx, float ny, string text, Node3D? host = null)
     {
-        Label3D l = MakeLabel(nx, ny, HorizontalAlignment.Left);
+        Label3D l = MakeLabel(nx, ny, HorizontalAlignment.Left, host);
         l.Text = text;
+        return l;
     }
 }
