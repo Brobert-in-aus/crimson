@@ -1,6 +1,26 @@
 # Builds libcrimson (crimson_host) and copies it into the Godot project's
 # native/ dir (gitignored). Run from anywhere; requires Zig 0.16+ on PATH or
 # at tools/zig/zig.exe in the repo root.
+#
+#   build_libcrimson.ps1 -android           both targets (Quest needs -android)
+#   build_libcrimson.ps1 -Optimize Debug    unoptimized, for a native debugger
+#
+# OPTIMIZE MATTERS A LOT and used to be left unset, which meant Debug: Zig's
+# standardOptimizeOption defaults there, so the Quest shipped an unoptimized
+# simulation for its whole life. It ran, because the sim is cheap per tick --
+# what it showed up as was a stutter on leaving the score screen, where the
+# replay encode walks every recorded tick at once and the per-tick cost finally
+# lands in one frame.
+#
+# ReleaseSafe, not ReleaseFast: this is a deterministic simulation whose replays
+# are verified by re-simulation, and the safety checks ReleaseFast removes are
+# exactly the ones that would turn a silent integer overflow into a run that
+# cannot be reproduced. Keep the checks; take the ~10x anyway.
+
+param(
+    [ValidateSet('Debug', 'ReleaseSafe', 'ReleaseFast', 'ReleaseSmall')]
+    [string]$Optimize = 'ReleaseSafe'
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
@@ -16,11 +36,11 @@ try {
     # trip $ErrorActionPreference in PS 5.1, so without this check a failed zig
     # build silently copies the STALE zig-out artifact (shipped a v10 .so in a
     # v11 APK once - 'ABI mismatch' only visible on-device).
-    & $zig build host-lib
+    & $zig build host-lib "-Doptimize=$Optimize"
     if ($LASTEXITCODE -ne 0) { throw "zig build host-lib (win) failed ($LASTEXITCODE)" }
     New-Item -ItemType Directory -Force (Join-Path $godotNative 'win-x64') | Out-Null
     Copy-Item (Join-Path $zigDir 'zig-out\bin\crimson_host.dll') (Join-Path $godotNative 'win-x64\') -Force
-    Write-Output "win-x64: crimson_host.dll -> $godotNative\win-x64"
+    Write-Output "win-x64: crimson_host.dll -> $godotNative\win-x64 ($Optimize)"
 
     # Quest / Android arm64. Zig 0.16 ships bionic stubs, so no NDK is required
     # to produce the .so; the NDK is only needed for on-device readelf/robustness
@@ -52,11 +72,11 @@ try {
         )
         [System.IO.File]::WriteAllText($libcFile, ($libcLines -join "`n") + "`n")
 
-        & $zig build host-lib -Dtarget=aarch64-linux-android "-Dandroid-libc=$libcFile"
+        & $zig build host-lib -Dtarget=aarch64-linux-android "-Dandroid-libc=$libcFile" "-Doptimize=$Optimize"
         if ($LASTEXITCODE -ne 0) { throw "zig build host-lib (android) failed ($LASTEXITCODE)" }
         New-Item -ItemType Directory -Force (Join-Path $godotNative 'android-arm64') | Out-Null
         Copy-Item (Join-Path $zigDir 'zig-out\lib\libcrimson_host.so') (Join-Path $godotNative 'android-arm64\') -Force
-        Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64 (bionic libc via NDK $ndkRoot)"
+        Write-Output "android-arm64: libcrimson_host.so -> $godotNative\android-arm64 ($Optimize, bionic libc via NDK $ndkRoot)"
     }
 }
 finally {
