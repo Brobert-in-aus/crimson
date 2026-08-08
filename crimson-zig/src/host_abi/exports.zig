@@ -438,6 +438,15 @@ const SessionBox = struct {
     record_stats: RecordedStats = .{},
     record_events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
     record_menu_was_active: bool = false,
+    // Perk traffic seen but not yet stamped. The menu PAUSES the sim, so the
+    // frames carrying a menu-open or a card poke usually advance zero ticks --
+    // stamping those with the current tick index can place an event on an index
+    // the recording never contains, and the replay runner, which applies events
+    // only when it reaches their tick, then silently never applies them. Held
+    // here until a frame actually advances, then stamped with the first tick it
+    // advances, which is by construction a tick the replay will run.
+    record_pending_menu_open: bool = false,
+    record_pending_pick: ?i32 = null,
 };
 
 /// The seven figures the verifier compares, harvested from the live run.
@@ -725,12 +734,31 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
 /// Both are derived from host input transitions, because that is what the live
 /// sim itself reacts to: the frontend owns when the menu is up and which card
 /// was poked.
-fn recordPerkEvents(box: *SessionBox, inputs: []const CrimsonHostInput, tick_index: u64) void {
+fn notePerkInput(box: *SessionBox, inputs: []const CrimsonHostInput) void {
     if (box.record_overflow or inputs.len == 0) return;
     const input = inputs[0];
 
     const menu_active = input.perk_menu_active != 0;
     if (menu_active and !box.record_menu_was_active) {
+        box.record_pending_menu_open = true;
+    }
+    box.record_menu_was_active = menu_active;
+
+    if (input.perk_choice_index >= 0) {
+        box.record_pending_pick = input.perk_choice_index;
+    }
+}
+
+/// Stamp any pending perk traffic onto the first tick this frame advanced.
+///
+/// Called only when ticks_advanced > 0, so the stamped index always names a
+/// tick the recording contains and the replay will therefore reach. Order
+/// matters: the open must precede the pick, because opening is what makes the
+/// re-simulation draw the choice list the index then selects from.
+fn flushPerkEvents(box: *SessionBox, tick_index: u64) void {
+    if (box.record_overflow) return;
+
+    if (box.record_pending_menu_open) {
         box.record_events.append(gpa, .{ .perk_menu_open = .{
             .tick_index = @intCast(tick_index),
             .player_index = 0,
@@ -738,17 +766,19 @@ fn recordPerkEvents(box: *SessionBox, inputs: []const CrimsonHostInput, tick_ind
             box.record_overflow = true;
             return;
         };
+        box.record_pending_menu_open = false;
     }
-    box.record_menu_was_active = menu_active;
 
-    if (input.perk_choice_index >= 0) {
+    if (box.record_pending_pick) |choice| {
         box.record_events.append(gpa, .{ .perk_pick = .{
             .tick_index = @intCast(tick_index),
             .player_index = 0,
-            .choice_index = input.perk_choice_index,
+            .choice_index = choice,
         } }) catch {
             box.record_overflow = true;
+            return;
         };
+        box.record_pending_pick = null;
     }
 }
 
@@ -829,7 +859,7 @@ pub export fn crimson_host_session_tick(
     // simulate, not the one it leaves behind.
     const tick_before = box.runner.session.tick_index;
     if (box.recording) {
-        recordPerkEvents(box, input_ptr[0..input_count], tick_before);
+        notePerkInput(box, input_ptr[0..input_count]);
     }
     const update = box.runner.stepFrame(dt_nominal, frame) catch |err| {
         setErrorFmt("tick failed: {s}", .{@errorName(err)});
@@ -839,6 +869,9 @@ pub export fn crimson_host_session_tick(
     box.last_terrain_fx = update.terrain_fx;
 
     if (box.recording) {
+        if (update.ticks_advanced > 0) {
+            flushPerkEvents(box, tick_before);
+        }
         recordFrame(box, input_ptr[0..input_count], update.ticks_advanced, dt_nominal);
         box.record_stats = .{
             .elapsed_ms_sim = update.elapsed_ms_sim,
@@ -1343,6 +1376,8 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
     box.record_ticks.clearRetainingCapacity();
     box.record_events.clearRetainingCapacity();
     box.record_menu_was_active = false;
+    box.record_pending_menu_open = false;
+    box.record_pending_pick = null;
     box.record_overflow = false;
     box.record_stats = .{};
     box.recording = true;
