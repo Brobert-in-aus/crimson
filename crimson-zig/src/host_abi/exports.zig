@@ -1327,6 +1327,19 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
         setError("invalid session handle");
         return err_invalid_handle;
     };
+    // REFUSE to record a session running a sim mutation the replay format
+    // cannot carry. debug_fx_showcase makes reload cycle the player through the
+    // arsenal, so the live run and any re-simulation of it hold different
+    // weapons from the first reload onward -- different kills, shots, xp and
+    // most-used weapon, while ticks and elapsed stay exact because the tick
+    // stream is faithful. That is precisely the failure real VR replays showed
+    // while scripted gates passed, because the gate config never sets it.
+    // Recording anyway would keep writing files that cannot verify.
+    if (box.config.debug_fx_showcase) {
+        setError("replay recording unavailable: debug_fx_showcase mutates the sim and cannot be replayed");
+        return err_invalid_config;
+    }
+
     box.record_ticks.clearRetainingCapacity();
     box.record_events.clearRetainingCapacity();
     box.record_menu_was_active = false;

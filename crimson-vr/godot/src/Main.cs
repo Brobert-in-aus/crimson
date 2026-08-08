@@ -637,7 +637,7 @@ public partial class Main : Node3D
         {
             _runSeed = GD.Randi();
             _sim = new SimSession(SessionConfig);
-            _sim.ReplayBegin();
+            BeginReplayRecording();
             // Static terrain generation info (ABI v3): slots pick the ground atlas
             // sheets, seed drives the stamp layout. The terrain-base quad render is
             // a follow-up; log it so the plumbing is exercised meanwhile.
@@ -721,7 +721,7 @@ public partial class Main : Node3D
         SaveReplay();
         _runSeed = GD.Randi();
         _sim.Restart(SessionConfig);
-        _sim.ReplayBegin();
+        BeginReplayRecording();
         _diorama.ResetInterpolation();
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
@@ -730,6 +730,32 @@ public partial class Main : Node3D
     }
 
     private const string ReplayDir = "user://replays";
+    private bool _replayRecording;
+
+    /// <summary>Start recording, tolerating a refusal.
+    ///
+    /// The native side declines when the session runs a sim mutation replays
+    /// cannot carry — today that means the Debug setting, which adds
+    /// debug_fx_showcase and cycles weapons on reload. That is a legitimate
+    /// state to play in, not an error, so it must not take down session
+    /// creation; it just means this run produces no replay.</summary>
+    private void BeginReplayRecording()
+    {
+        _replayRecording = false;
+        if (_sim == null)
+        {
+            return;
+        }
+        try
+        {
+            _sim.ReplayBegin();
+            _replayRecording = true;
+        }
+        catch (System.Exception e)
+        {
+            GD.Print($"CrimsonVR: replay recording off for this run: {e.Message}");
+        }
+    }
 
     /// <summary>Write the finished run's replay to user://replays as a standard
     /// .crd — the same format the desktop tooling verifies, produced by the same
@@ -742,7 +768,7 @@ public partial class Main : Node3D
     /// of, which is a far worse trade.</summary>
     private void SaveReplay()
     {
-        if (_sim == null)
+        if (_sim == null || !_replayRecording)
         {
             return;
         }

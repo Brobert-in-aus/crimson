@@ -1554,9 +1554,18 @@ pub fn encodeRecording(
         }
     }
 
+    // The wire carries weapon_usage_count (53) entries; the runtime's status
+    // array is weapon_count_size (54, slot 0 unused). These are NOT the same
+    // number, so an equality check silently substituted an all-zero array for
+    // every recording ever made -- a header claiming a fresh save from a player
+    // who had usage history. Take the leading 53 rather than guess, and refuse
+    // anything shorter instead of quietly zeroing it.
+    if (cfg.weapon_usage_counts.len != 0 and cfg.weapon_usage_counts.len < weapon_usage_count) {
+        return error.InvalidWeaponUsageCounts;
+    }
     const usage_fallback = [_]u32{0} ** weapon_usage_count;
-    const usage: []const u32 = if (cfg.weapon_usage_counts.len == weapon_usage_count)
-        cfg.weapon_usage_counts
+    const usage: []const u32 = if (cfg.weapon_usage_counts.len >= weapon_usage_count)
+        cfg.weapon_usage_counts[0..weapon_usage_count]
     else
         usage_fallback[0..];
 
