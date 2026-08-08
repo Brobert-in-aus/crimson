@@ -20,6 +20,27 @@ public sealed partial class PauseMenu : Node3D
     private VrButton _toggle = null!;
     private VrButton _levelUp = null!;
     private Label3D _levelUpBadge = null!;
+    private Node3D _edgeRoot = null!;
+
+    /// <summary>The pause/level-up poke buttons, held in their own node so Main
+    /// can mount them on the control rectangle (within reach) while the pause
+    /// PANEL stays with the other menus. Reparent right after Build.</summary>
+    public Node3D EdgeRoot => _edgeRoot;
+
+    /// <summary>The two repositionable action buttons, exposed so Main can hang
+    /// UiEditable handles on them. Size is needed for the corner footprint.</summary>
+    public Node3D ToggleButton => _toggle;
+    public Node3D LevelUpButton => _levelUp;
+    public float ButtonWidth { get; private set; }
+    public float ButtonHeight { get; private set; }
+
+    /// <summary>Show/hide the menu AND its detached edge buttons together — once
+    /// EdgeRoot is reparented it no longer inherits this node's visibility.</summary>
+    public void SetMenuVisible(bool visible)
+    {
+        Visible = visible;
+        _edgeRoot.Visible = visible;
+    }
     private Node3D _panel = null!;
     private VrButton _resume = null!;
     private VrButton _settings = null!;
@@ -43,10 +64,21 @@ public sealed partial class PauseMenu : Node3D
         // so they're readable from the seat; the node sits one proud-depth
         // outside the edge plane so the face — even fully depressed — never
         // crosses into the cube. Stacked vertically near the player's end.
+        //
+        // These two are POKE targets, so they follow the CONTROL rectangle, not
+        // the playfield: once the board scaled up and tilted away they would
+        // have been metres out of arm's reach mounted to it. Main reparents
+        // EdgeRoot onto the control rect after Build; the offsets below are
+        // unchanged because the control rect is the same reference square the
+        // old table was.
         float edge = s * 0.5f * Diorama.FloorMarginScale;
         float proud = s * 0.03f;
+        _edgeRoot = new Node3D { Name = "PauseEdgeButtons" };
+        AddChild(_edgeRoot);
+        ButtonWidth = s * 0.18f;
+        ButtonHeight = s * 0.12f;
         _toggle = new VrButton();
-        AddChild(_toggle);
+        _edgeRoot.AddChild(_toggle);
         _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: proud, plate: true);
         _toggle.Position = new Vector3(edge + proud, s * 0.16f, -s * 0.32f);
         _toggle.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
@@ -56,7 +88,7 @@ public sealed partial class PauseMenu : Node3D
         // while a perk pick is pending; poking it opens the perk menu (rather
         // than the cards auto-appearing).
         _levelUp = new VrButton();
-        AddChild(_levelUp);
+        _edgeRoot.AddChild(_levelUp);
         _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: proud, plate: true);
         _levelUp.Position = new Vector3(edge + proud, s * 0.34f, -s * 0.32f);
         _levelUp.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
@@ -81,7 +113,7 @@ public sealed partial class PauseMenu : Node3D
             RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f),
             Visible = false,
         };
-        AddChild(_levelUpBadge);
+        _edgeRoot.AddChild(_levelUpBadge);
 
         // Pause panel above the arena, facing the player (same anchor style as the
         // perk menu): Resume / Settings / Quit stacked vertically.

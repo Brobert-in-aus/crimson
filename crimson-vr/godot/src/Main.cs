@@ -69,7 +69,48 @@ public partial class Main : Node3D
     private const float PlayfieldPitchDegrees = 40.0f;
     private const float PlayfieldNearEdgeMeters = 0.6f;
     private const float PlayfieldNearDropMeters = 0.45f;
-    private const float PlayfieldSideMeters = ArenaSideMeters * PlayfieldScale;
+
+    // Live values behind the Layout panel's sliders; seeded from the constants
+    // above. Placement is recomputed against the LAST RECENTER pose rather than
+    // the live head pose, so dragging a slider never makes the board chase the
+    // player's head while they look at the slider.
+    private float _playfieldScale = PlayfieldScale;
+    private float _playfieldPitch = PlayfieldPitchDegrees;
+    private float _playfieldNearEdge = PlayfieldNearEdgeMeters;
+    private float _playfieldNearDrop = PlayfieldNearDropMeters;
+    private float PlayfieldSideMeters => ArenaSideMeters * _playfieldScale;
+    private Vector3 _recenterHeadPos;
+    private Vector3 _recenterForward = Vector3.Forward;
+    private bool _hasRecentered;
+
+    // Aim pillars: vertical lines rising from each hand's cursor so the aim
+    // point is findable on a large tilted board (the flat reticle art alone is
+    // hard to pick out at distance). Length is a FRACTION of the arena side so
+    // it scales with the board instead of shrinking into it.
+    private const float AimLineFractionDefault = 0.30f;
+    private float _aimLineFraction = AimLineFractionDefault;
+    private float _spriteHeightScale = 1.0f;
+    private LayoutMenu _layoutMenu = null!;
+
+    private ControlMode _controlMode = ControlMode.Cabinet;
+
+    /// <summary>The plane the hands are projected onto. In CABINET this is the
+    /// separate control rectangle and the board is free to be large, far and
+    /// tilted. In TABLETOP it is the board itself — the original scheme, where
+    /// reaching into the arena IS the control — so the board must stay within
+    /// arm's reach. Everything downstream is identical between the two; the mode
+    /// only chooses this node and the placement defaults.</summary>
+    private Node3D ControlSurface => _controlMode == ControlMode.Cabinet ? _controlRect : _playfieldRoot;
+
+    /// <summary>Side length of the control surface in ITS OWN local units. The
+    /// playfield's local frame is the unscaled 0.4 m reference square (ToLocal
+    /// divides out the node scale), so this is ArenaSideMeters regardless of how
+    /// large the board is drawn — which is exactly what keeps hand travel
+    /// unchanged when the arena scale slider moves in Tabletop mode.</summary>
+    private float ControlSurfaceSide =>
+        _controlMode == ControlMode.Cabinet ? ControlRectSideMeters : ArenaSideMeters;
+    private Node3D _leftAimPillar = null!;
+    private Node3D _rightAimPillar = null!;
     private const int SimTicksPerSecond = 60;
 
     private const float TriggerThreshold = 0.5f;
@@ -330,6 +371,7 @@ public partial class Main : Node3D
         _pauseMenu = new PauseMenu();
         _arenaRoot.AddChild(_pauseMenu);
         _pauseMenu.Build(ArenaSideMeters);
+        // EdgeRoot is mounted by SetControlMode, once the mode is known.
         _pauseMenu.OnQuit += ReturnToMenu; // in-game Quit -> main menu (menu Quit exits the app)
         _pauseMenu.OnSettings += () => OpenOptions(fromMenu: false);
         // Level-up button (shown while a perk pick is pending) reveals the perk cards.
@@ -356,7 +398,8 @@ public partial class Main : Node3D
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
-            _settings.PokeMarkers, _settings.RenderScale, _settings.Msaa,
+            _settings.PokeMarkers, (ControlMode)_settings.ControlMode,
+            _settings.RenderScale, _settings.Msaa,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v =>
@@ -368,6 +411,8 @@ public partial class Main : Node3D
         };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
+        _settingsMenu.OnControlModeChanged += m => SetControlMode(m);
+        _settingsMenu.OnUiEditChanged += SetUiEditMode;
         _settingsMenu.OnPokeMarkersChanged += v =>
         {
             _settings.PokeMarkers = v;
@@ -406,6 +451,27 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_debugMenu);
         _debugMenu.Build(ArenaSideMeters);
         _debugMenu.SetShown(_settings.Debug);
+
+        // Layout tuning panel, mirrored on the player's right. Every value it
+        // drives was previously a constant needing a full Quest rebuild to try.
+        _layoutMenu = new LayoutMenu();
+        _arenaRoot.AddChild(_layoutMenu);
+        _layoutMenu.Build(
+            ArenaSideMeters,
+            _spriteHeightScale, v => { _spriteHeightScale = v; _diorama.SetHeightScale(v); },
+            _aimLineFraction, v => _aimLineFraction = v,
+            _playfieldScale, v => { _playfieldScale = v; ApplyPlayfieldPlacement(); },
+            _playfieldPitch, v => { _playfieldPitch = v; ApplyPlayfieldPlacement(); },
+            _playfieldNearEdge, v => { _playfieldNearEdge = v; ApplyPlayfieldPlacement(); },
+            _playfieldNearDrop, v => { _playfieldNearDrop = v; ApplyPlayfieldPlacement(); },
+            LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
+        _layoutMenu.SetShown(_settings.Debug);
+
+        // Apply the saved control mode now that the layout panel and the pause
+        // buttons both exist: it mounts EdgeRoot, sets the board placement for
+        // the mode, and shows or hides the control rectangle.
+        SetControlMode((ControlMode)_settings.ControlMode);
+        BuildUiEditables();
 
         // Debug poke-tip markers (world-space); shown only in debug mode.
         for (int i = 0; i < _pokeMarkers.Length; i++)
@@ -571,7 +637,7 @@ public partial class Main : Node3D
     private void SetGameplayVisible(bool visible)
     {
         _hud.Visible = visible;
-        _pauseMenu.Visible = visible;
+        _pauseMenu.SetMenuVisible(visible);
         _leftReticle.Visible = visible;
         _rightReticle.Visible = visible;
         _leftGuide.Visible = visible;
@@ -1064,7 +1130,33 @@ public partial class Main : Node3D
         _playfieldRoot.AddChild(_rightReticle);
         AddChild(_leftGuide);
         AddChild(_rightGuide);
+        _leftAimPillar = MakeAimPillar(new Color(0.2f, 0.5f, 1.0f, 0.5f));
+        _rightAimPillar = MakeAimPillar(new Color(1.0f, 0.3f, 0.25f, 0.5f));
+        _playfieldRoot.AddChild(_leftAimPillar);
+        _playfieldRoot.AddChild(_rightAimPillar);
         BuildAimOverlays();
+    }
+
+    /// <summary>A cursor pillar: a pivot (child of PlayfieldRoot, so it rides the
+    /// board's position and scale) holding a cylinder that is counter-rotated to
+    /// stand WORLD-vertical rather than normal to a tilted board — a consistent
+    /// upright pillar reads as a position marker from any angle, where a leaning
+    /// one reads as part of the scenery. Length is set each frame from the
+    /// arena-side fraction; the mesh is unit-height so scale.Y IS the length.</summary>
+    private static Node3D MakeAimPillar(Color color)
+    {
+        var pivot = new Node3D();
+        pivot.AddChild(new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = 0.0015f, BottomRadius = 0.0015f, Height = 1.0f },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = color,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
+        });
+        return pivot;
     }
 
     // ---- Aim-hand overlays: reload clock gauge + spread ring ----
@@ -1630,10 +1722,20 @@ public partial class Main : Node3D
         probes[1] = MakeProbe(_rightHand);
         ReadOnlySpan<HandProbe> p = probes;
 
+        // UI edit mode first: while a corner is held, every normal poke is
+        // suppressed for the frame. Grabs use grip and presses use the tip, but
+        // a hand closed around the pause button's corner is also sitting right
+        // on its face — without this, repositioning it would pause the game.
+        if (PollUiEdit(p))
+        {
+            return;
+        }
+
         // The validation checklist stands off to the right of the arena and is always
         // pokeable, in any game state (menu, gameplay, paused) — poll it first.
         _checklist.PollPoke(p);
         _debugMenu.PollPoke(p);
+        _layoutMenu.PollPoke(p);
 
         // Main menu owns the screen while open: poke its items. Gameplay menus stay
         // dormant.
@@ -1771,6 +1873,7 @@ public partial class Main : Node3D
         // up for recording without a rebuild. The status line keeps showing a
         // sim FAILURE even with debug off (see _Ready).
         _checklist.SetShown(on);
+        _layoutMenu.SetShown(on);
         _status.Visible = _sim == null || on;
         // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
         // per-creature facing needle, a one-off sprite-calibration tool. The
@@ -1857,12 +1960,13 @@ public partial class Main : Node3D
     /// Hand travel is fixed by ControlRectSideMeters alone.</summary>
     private Vector2 ComputeReticle(XRController3D hand, out bool over, out Vector3 clampedLocal)
     {
-        Vector3 rectLocal = Mapper.FlattenToPlane(_controlRect.ToLocal(hand.GlobalPosition));
-        over = Mapper.IsOverArena(rectLocal, ControlRectSideMeters);
-        // Off-rect hands clamp along the PLAYER-to-hand line (not per-axis):
+        float side = ControlSurfaceSide;
+        Vector3 rectLocal = Mapper.FlattenToPlane(ControlSurface.ToLocal(hand.GlobalPosition));
+        over = Mapper.IsOverArena(rectLocal, side);
+        // Off-surface hands clamp along the PLAYER-to-hand line (not per-axis):
         // the cursor stays on the aiming line at the boundary instead of being
         // dragged sideways toward the nearest corner.
-        Vector2 raw = Mapper.ArenaLocalToGameUnclamped(rectLocal, ControlRectSideMeters, GameWorldSize);
+        Vector2 raw = Mapper.ArenaLocalToGameUnclamped(rectLocal, side, GameWorldSize);
         Vector2 game = Mapper.ClampGameTowards(_playerGame, raw, GameWorldSize);
         clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
         return game;
@@ -1882,6 +1986,7 @@ public partial class Main : Node3D
         }
 
         ComputeReticle(hand, out bool over, out Vector3 clampedLocal);
+        UpdateAimPillar(isMoveHand ? _leftAimPillar : _rightAimPillar, clampedLocal, tracking);
         if (isMoveHand)
         {
             // Playfield-local: the reticle is a child of PlayfieldRoot, so this
@@ -1909,6 +2014,143 @@ public partial class Main : Node3D
         float guideHeight = Mathf.Max(0.02f, handPos.Y - planeY);
         guide.GlobalPosition = new Vector3(handPos.X, planeY + guideHeight * 0.5f, handPos.Z);
         ((MeshInstance3D)guide).Scale = new Vector3(1, guideHeight, 1);
+    }
+
+    /// <summary>Stand a cursor pillar on the board at a playfield-local point.
+    /// The pivot cancels the board's pitch so the cylinder is world-vertical, and
+    /// the half-length offset is applied along that upright axis so the pillar
+    /// sits ON the surface rather than through it.</summary>
+    private void UpdateAimPillar(Node3D pivot, Vector3 boardLocal, bool visible)
+    {
+        float length = _aimLineFraction * ArenaSideMeters;
+        pivot.Visible = visible && length > 1e-4f;
+        if (!pivot.Visible)
+        {
+            return;
+        }
+        pivot.Position = boardLocal;
+        pivot.RotationDegrees = new Vector3(_playfieldPitch, 0.0f, 0.0f);
+        var bar = (MeshInstance3D)pivot.GetChild(0);
+        bar.Scale = new Vector3(1.0f, length, 1.0f);
+        bar.Position = new Vector3(0.0f, length * 0.5f, 0.0f);
+    }
+
+    /// <summary>Switch control mode: load that mode's placement defaults, move
+    /// the poke buttons to whichever surface is now within reach, and show the
+    /// control rectangle only when it is actually driving anything.</summary>
+    private void SetControlMode(ControlMode mode, bool loadDefaults = true)
+    {
+        _controlMode = mode;
+        _settings.ControlMode = (int)mode;
+        _settings.Save();
+
+        if (loadDefaults)
+        {
+            // Tabletop has to stay reachable, so it takes the old table's
+            // placement at 1x; Cabinet takes the large, distant, tilted board.
+            // Tilt is left alone in both — it is the one value worth carrying
+            // across a mode switch, since a tilted tabletop is a thing the
+            // player may well have dialled in deliberately.
+            if (mode == ControlMode.Tabletop)
+            {
+                _playfieldScale = 1.0f;
+                _playfieldNearEdge = ArenaNearEdgeMeters;
+                _playfieldNearDrop = VerticalDropMeters;
+            }
+            else
+            {
+                _playfieldScale = PlayfieldScale;
+                _playfieldNearEdge = PlayfieldNearEdgeMeters;
+                _playfieldNearDrop = PlayfieldNearDropMeters;
+            }
+            _layoutMenu.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+        }
+
+        // The rectangle is meaningless in Tabletop — the board is the control
+        // surface — and leaving it drawn would read as a second, dead playfield.
+        _controlRect.Visible = mode == ControlMode.Cabinet;
+
+        // Poke buttons belong on whatever the hands can actually reach.
+        Node3D host = ControlSurface;
+        Node3D edge = _pauseMenu.EdgeRoot;
+        if (edge.GetParent() != host)
+        {
+            edge.GetParent()?.RemoveChild(edge);
+            host.AddChild(edge);
+        }
+
+        ApplyPlayfieldPlacement();
+    }
+
+    // ---- UI edit mode ----
+
+    private readonly System.Collections.Generic.List<UiEditable> _editables = new();
+    private bool _uiEditMode;
+
+    /// <summary>Hang grab handles on the repositionable widgets and restore any
+    /// placement the player authored previously. The control rectangle is
+    /// ScaleTilt (its position comes from the recenter pose, but its size and
+    /// pitch are pure feel); the action buttons are Free.</summary>
+    private void BuildUiEditables()
+    {
+        Add("pause", _pauseMenu.ToggleButton, UiEditable.Mode.Free,
+            _pauseMenu.ButtonWidth, _pauseMenu.ButtonHeight, cornersInXZ: false);
+        Add("levelup", _pauseMenu.LevelUpButton, UiEditable.Mode.Free,
+            _pauseMenu.ButtonWidth, _pauseMenu.ButtonHeight, cornersInXZ: false);
+        Add("controlrect", _controlRect, UiEditable.Mode.ScaleTilt,
+            ControlRectSideMeters, ControlRectSideMeters, cornersInXZ: true);
+
+        void Add(string id, Node3D target, UiEditable.Mode mode, float w, float h, bool cornersInXZ)
+        {
+            if (_settings.UiLayout.TryGetValue(id, out Transform3D saved))
+            {
+                target.Transform = saved;
+            }
+            var editable = new UiEditable();
+            AddChild(editable);
+            editable.Build(target, mode, w, h, cornersInXZ);
+            editable.OnTransformChanged += t =>
+            {
+                _settings.UiLayout[id] = t;
+                _uiLayoutDirty = true;
+            };
+            _editables.Add(editable);
+        }
+    }
+
+    private bool _uiLayoutDirty;
+
+    private void SetUiEditMode(bool on)
+    {
+        _uiEditMode = on;
+        foreach (UiEditable e in _editables)
+        {
+            e.SetEditing(on);
+        }
+        if (!on && _uiLayoutDirty)
+        {
+            // Save on EXIT rather than per-frame: a drag fires every frame and
+            // each save writes the whole config file.
+            _settings.Save();
+            _uiLayoutDirty = false;
+        }
+    }
+
+    /// <summary>Drive the grab handles. Returns true while a widget is being
+    /// dragged, so the caller can suppress that frame's normal poke handling —
+    /// otherwise repositioning the pause button would also press it.</summary>
+    private bool PollUiEdit(ReadOnlySpan<HandProbe> probes)
+    {
+        if (!_uiEditMode)
+        {
+            return false;
+        }
+        bool grabbing = false;
+        foreach (UiEditable e in _editables)
+        {
+            grabbing |= e.PollGrab(probes);
+        }
+        return grabbing;
     }
 
     private void HandleRecenter()
@@ -1968,20 +2210,41 @@ public partial class Main : Node3D
             yawBasis * Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0, 0)),
             controlPos);
 
-        // The playfield is placed by its NEAR edge against the head, then tilted
-        // so the far edge rises. Local +z is the far edge, so a NEGATIVE x
-        // rotation lifts it; the near edge correspondingly dips by half the
-        // board, which the placement below accounts for so the near edge lands
-        // exactly at (PlayfieldNearEdge, PlayfieldNearDrop) from the head.
-        float pitch = Mathf.DegToRad(PlayfieldPitchDegrees);
+        // Remember the pose so the Layout sliders can re-place the board later
+        // without a fresh recenter (and without chasing the player's head).
+        _recenterHeadPos = headPos;
+        _recenterForward = forward;
+        _hasRecentered = true;
+        ApplyPlayfieldPlacement();
+    }
+
+    /// <summary>Place the playfield from the live scale/pitch/distance values
+    /// against the last recenter pose. Split out of RecenterArena so the Layout
+    /// sliders re-apply it live.
+    ///
+    /// The board is placed by its NEAR edge. Local +z is the far edge, so a
+    /// NEGATIVE x rotation lifts it; the near edge correspondingly dips by half
+    /// the board, which the offsets below cancel so the near edge lands exactly
+    /// at (nearEdge, nearDrop) from the head whatever the tilt and scale.</summary>
+    private void ApplyPlayfieldPlacement()
+    {
+        if (!_hasRecentered)
+        {
+            return;
+        }
+        float yaw = Mathf.Atan2(_recenterForward.X, _recenterForward.Z);
+        var yawBasis = Basis.FromEuler(new Vector3(0, yaw, 0));
+        float pitch = Mathf.DegToRad(_playfieldPitch);
         float halfBoard = PlayfieldSideMeters * 0.5f;
-        Vector3 playfieldPos = headPos
-            + forward * (PlayfieldNearEdgeMeters + halfBoard * Mathf.Cos(pitch))
-            + Vector3.Up * (halfBoard * Mathf.Sin(pitch) - PlayfieldNearDropMeters);
+        Vector3 playfieldPos = _recenterHeadPos
+            + _recenterForward * (_playfieldNearEdge + halfBoard * Mathf.Cos(pitch))
+            + Vector3.Up * (halfBoard * Mathf.Sin(pitch) - _playfieldNearDrop);
         playfieldPos.Y = Mathf.Max(playfieldPos.Y, 0.05f);
         _playfieldRoot.GlobalTransform = new Transform3D(
-            yawBasis * Basis.FromEuler(new Vector3(-pitch, 0, 0)).Scaled(Vector3.One * PlayfieldScale),
+            yawBasis * Basis.FromEuler(new Vector3(-pitch, 0, 0)).Scaled(Vector3.One * _playfieldScale),
             playfieldPos);
+        // The HUD pivot cancels the board pitch, so it has to follow it live.
+        _hudPivot.RotationDegrees = new Vector3(_playfieldPitch, 0.0f, 0.0f);
     }
 
     private static uint TryQueryAbiVersion()

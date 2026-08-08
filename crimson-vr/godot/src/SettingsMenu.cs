@@ -27,6 +27,8 @@ public sealed partial class SettingsMenu : Node3D
     private Label3D _deadZoneLabel = null!;
     private VrSegmentedSlider _renderScale = null!;
     private Label3D _renderScaleLabel = null!;
+    private VrButton _controlMode = null!;
+    private VrButton _uiEdit = null!;
     private VrButton _aa = null!;
     private VrButton _pokeMarkers = null!;
     private VrButton _debug = null!;
@@ -36,22 +38,26 @@ public sealed partial class SettingsMenu : Node3D
     private bool _debugState;
     private bool _pokeMarkersState;
     private int _msaaState;
+    private ControlMode _controlModeState;
 
     public event Action? OnBack;
     public event Action<bool>? OnHandSwapChanged;
     public event Action<float>? OnDeadZoneChanged;
     public event Action<bool>? OnDebugChanged;
     public event Action<bool>? OnPokeMarkersChanged;
+    public event Action<ControlMode>? OnControlModeChanged;
+    public event Action<bool>? OnUiEditChanged;
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers, ControlMode controlMode, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
         _debugState = debug;
         _pokeMarkersState = pokeMarkers;
         _msaaState = msaa;
+        _controlModeState = controlMode;
 
         // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
         Position = new Vector3(0.0f, s * 0.9f, s * 0.25f);
@@ -76,6 +82,28 @@ public sealed partial class SettingsMenu : Node3D
             NoDepthTest = true,
         };
         AddChild(title);
+        y -= pitch;
+
+        // Control mode: the most consequential setting on this panel, so it
+        // leads. Tabletop = hands reach into the arena (the board must stay in
+        // reach); Cabinet = hands work a control rectangle and the board is a
+        // screen up in front. Switching reloads that mode's board placement.
+        _controlMode = new VrButton();
+        AddChild(_controlMode);
+        _controlMode.Build(bw, bh, ControlModeText(), new Color(0.45f, 0.72f, 1.0f), plate: true);
+        _controlMode.Position = new Vector3(0.0f, y, 0.0f);
+        _controlMode.OnPress += ToggleControlMode;
+        y -= pitch;
+
+        // UI edit mode: grab the corner handles that appear on the action
+        // buttons and the control rectangle to reposition them. Session-scoped
+        // (never persisted on) so a player cannot strand themselves in an edit
+        // mode where the pause button no longer responds to a poke.
+        _uiEdit = new VrButton();
+        AddChild(_uiEdit);
+        _uiEdit.Build(bw, bh, UiEditText(), new Color(0.9f, 0.7f, 0.3f), plate: true);
+        _uiEdit.Position = new Vector3(0.0f, y, 0.0f);
+        _uiEdit.OnPress += ToggleUiEdit;
         y -= pitch;
 
         // Hand-swap toggle.
@@ -192,6 +220,8 @@ public sealed partial class SettingsMenu : Node3D
         // Re-arm + start the settle window on show AND hide, so a lingering finger
         // where a button appears can't instant-fire.
         _handSwap.ResetPress();
+        _controlMode.ResetPress();
+        _uiEdit.ResetPress();
         _debug.ResetPress();
         _pokeMarkers.ResetPress();
         _back.ResetPress();
@@ -207,6 +237,8 @@ public sealed partial class SettingsMenu : Node3D
             return;
         }
         _handSwap.PollPoke(probes);
+        _controlMode.PollPoke(probes);
+        _uiEdit.PollPoke(probes);
         _debug.PollPoke(probes);
         _pokeMarkers.PollPoke(probes);
         _back.PollPoke(probes);
@@ -227,6 +259,29 @@ public sealed partial class SettingsMenu : Node3D
         _debugState = !_debugState;
         _debug.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
+    }
+
+    private bool _uiEditState;
+
+    private string UiEditText() => _uiEditState ? "UI edit: ON (grab corners)" : "UI edit mode";
+
+    private void ToggleUiEdit()
+    {
+        _uiEditState = !_uiEditState;
+        _uiEdit.SetText(UiEditText());
+        OnUiEditChanged?.Invoke(_uiEditState);
+    }
+
+    private string ControlModeText() =>
+        _controlModeState == ControlMode.Cabinet ? "Control: Cabinet" : "Control: Tabletop";
+
+    private void ToggleControlMode()
+    {
+        _controlModeState = _controlModeState == ControlMode.Cabinet
+            ? ControlMode.Tabletop
+            : ControlMode.Cabinet;
+        _controlMode.SetText(ControlModeText());
+        OnControlModeChanged?.Invoke(_controlModeState);
     }
 
     private string PokeMarkersText() => _pokeMarkersState ? "Poke markers: On" : "Poke markers: Off";

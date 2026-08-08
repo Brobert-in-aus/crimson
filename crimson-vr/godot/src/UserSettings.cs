@@ -46,6 +46,22 @@ public sealed class UserSettings
     /// on as part of showing every dev overlay.</summary>
     public bool PokeMarkers;
 
+    /// <summary>Which <see cref="CrimsonVR.ControlMode"/> the hands act in.
+    /// Stored as an int so an unknown future value degrades to a number rather
+    /// than throwing on load. Defaults to Cabinet, the mode the playfield's
+    /// scale and tilt were designed around.</summary>
+    public int ControlMode = (int)CrimsonVR.ControlMode.Cabinet;
+
+    /// <summary>Player-authored widget placements from UI edit mode, keyed by
+    /// widget id. Absent means "use the built-in placement", which is why this
+    /// is a dictionary of overrides rather than fields with defaults: a widget
+    /// the player never touched must keep following any future change to its
+    /// designed position instead of being frozen at today's value.
+    ///
+    /// The control rectangle stores scale and pitch here too — under Cabinet its
+    /// size IS the hand-travel range, so it is a control setting, not decoration.</summary>
+    public readonly Dictionary<string, Transform3D> UiLayout = new();
+
     // Original Options settings (mirrors the base game). Volumes 0-10, graphics
     // detail 1-5, info-texts toggle — same scales as the desktop Options screen.
     public int SfxVolume = 10;
@@ -105,6 +121,7 @@ public sealed class UserSettings
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
         PokeMarkers = cf.GetValue("input", "poke_markers", PokeMarkers).AsBool();
+        ControlMode = cf.GetValue("input", "control_mode", ControlMode).AsInt32();
         RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
@@ -155,6 +172,21 @@ public sealed class UserSettings
             }
         }
 
+        // Transform3D round-trips through ConfigFile as a native Variant, so the
+        // keys are stored individually under one section rather than serialised.
+        UiLayout.Clear();
+        if (cf.HasSection("ui_layout"))
+        {
+            foreach (string key in cf.GetSectionKeys("ui_layout"))
+            {
+                Variant v = cf.GetValue("ui_layout", key);
+                if (v.VariantType == Variant.Type.Transform3D)
+                {
+                    UiLayout[key] = v.AsTransform3D();
+                }
+            }
+        }
+
         Checklist.Clear();
         string ck = cf.GetValue("dev", "checklist", string.Empty).AsString();
         if (!string.IsNullOrEmpty(ck))
@@ -182,6 +214,11 @@ public sealed class UserSettings
         cf.SetValue("input", "hand_swap", HandSwap);
         cf.SetValue("input", "dead_zone", DeadZone);
         cf.SetValue("input", "poke_markers", PokeMarkers);
+        cf.SetValue("input", "control_mode", ControlMode);
+        foreach (KeyValuePair<string, Transform3D> kv in UiLayout)
+        {
+            cf.SetValue("ui_layout", kv.Key, kv.Value);
+        }
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);

@@ -111,6 +111,15 @@ public sealed partial class VrSegmentedSlider : Node3D
         Refresh();
     }
 
+    /// <summary>Set the value from code (no OnValueChanged), for when something
+    /// other than a poke moves it — e.g. switching control mode reloads a whole
+    /// set of placement values and the pips must follow.</summary>
+    public void SetValue(int value)
+    {
+        _value = Mathf.Clamp(value, _min, _max);
+        Refresh();
+    }
+
     private void Refresh()
     {
         for (int i = 0; i < _count; i++)

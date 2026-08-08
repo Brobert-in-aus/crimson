@@ -194,6 +194,18 @@ public sealed partial class Diorama : Node3D
     private const float ShadowLift = 0.0015f; // just above terrain to avoid z-fight
 
     private float _arenaSideMeters;
+
+    // Proportional multiplier on every entity layer's plane lift. The lifts were
+    // chosen against a small, near-level tabletop viewed from almost directly
+    // above, where a lift is hidden behind its own sprite. On a large tilted
+    // board seen from a shallow angle the same lift opens a visible gap between
+    // sprite and shadow and the entities read as floating. Scaling all layers by
+    // one factor preserves their relative bands (ground decals and shadows are
+    // NOT scaled — they are z-fight guards on the terrain, not visual height).
+    private float _heightScale = 1.0f;
+
+    /// <summary>Set the proportional lift multiplier for every entity layer.</summary>
+    public void SetHeightScale(float scale) => _heightScale = Mathf.Max(scale, 0.0f);
     private float _worldSize;
     private float _energizerTimer; // global energizer bonus timer (snapshot header)
 
@@ -1692,7 +1704,7 @@ public sealed partial class Diorama : Node3D
         float g = ratio * 0.9f + 0.1f;
 
         Vector3 basePos = Mapper.GameToArenaLocal(barCentre, _arenaSideMeters, _worldSize)
-            + new Vector3(0.0f, TargetBarLift, 0.0f);
+            + new Vector3(0.0f, TargetBarLift * _heightScale, 0.0f);
         _targetBarBg!.Position = basePos;
         _targetBarBg.Basis = FlatBasis.Scaled(new Vector3(64.0f * k, 1.0f, 4.0f * k));
         _targetBarBgMat!.AlbedoColor = new Color(r * 0.6f, g * 0.6f, 0.7f * 0.6f, 0.2f * 0.4f);
@@ -1802,8 +1814,10 @@ public sealed partial class Diorama : Node3D
 
             Vector3 arena = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize);
             // Flat on the plane at a constant per-layer lift; layering is by draw
-            // order (RenderPriority), not physical height.
-            Vector3 pos = arena + new Vector3(0.0f, layer.Lift, 0.0f);
+            // order (RenderPriority), not physical height. HeightScale multiplies
+            // every layer's lift together so the bands keep their relative order
+            // and spacing — the whole stack rises or settles as one.
+            Vector3 pos = arena + new Vector3(0.0f, layer.Lift * _heightScale, 0.0f);
             // Faithful creature world size: 64 * clamp(size/64, 0.25, 2.0) game
             // units (creature_render_type). Others scale linearly from size.
             float sizeUnits = layer.ClampRefSize
