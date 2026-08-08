@@ -913,10 +913,37 @@ screen-space overlays:
 7. **Haptics — BUILT (2026-07-09).** Fire pulse (aim hand, from shot audio
    events), strong both-hand pulse on damage, reload-complete tick, via the OpenXR
    "haptic" action. On-device feel + action binding need eyes.
-8. **Replay recording — DEFERRED (mini-milestone).** The one invasive-ABI slice.
-   Fully mapped: `crimson-vr/notes/replay-recording-plan.md` (reuses the existing
-   Zig msgpack encoder + `replay_runner` to fill verify-exact `claimed_stats`; a
-   record->verify gate test is the oracle). Its own attended slice.
+8. **Replay recording — BUILT (2026-08-09), one confirmation outstanding.** The
+   invasive-ABI slice (ABI 19 -> 21). Every run records to `user://replays/
+   <stamp>.crd` in the standard format, produced by the same native encoder the
+   desktop tooling verifies, so a VR run checks out under `crimson-zig replay
+   verify` like any other. Recording is refused for `debug_fx_showcase` sessions
+   (reload cycles weapons, which no replay can carry) and finish fails closed if
+   the row count ever disagrees with the session tick count.
+
+   Five bugs, each surfaced by a real VR replay rather than by a gate — the gates
+   were green throughout, because their defaults dodged every one (no usage
+   history, no perks, no pauses, and runs too short to matter):
+   - a 5.7s freeze on leaving the score screen — finish re-simulated the whole
+     run to source claimed stats; live counters now, 5694ms -> 86ms;
+   - perk events never recorded at all;
+   - perk events stamped on ticks the replay never reaches (the perk menu pauses
+     the sim, so those frames advance zero ticks);
+   - `weapon_usage_counts` silently zeroed by a `==` against a length that never
+     matched (wire carries 53, runtime keeps 54);
+   - and the header's usage array built from **dead stack** — `recordingHeaderFor`
+     returned a slice into a by-value copy of the config. Usage counts reroll
+     weapon drops, so replays desynced part-way through long runs. This was the
+     4000-tick gate's off-by-one `shots_hit`.
+
+   Each now has a gate that would have caught it, including a header round-trip
+   check: verifying alone cannot catch a corrupt header, because the header is
+   what the replay is re-simulated FROM, so the bad value lands on both sides of
+   the comparison.
+
+   **Outstanding:** a real VR run recorded on ABI v21 that passes `replay verify`.
+   Everything before v21 was recorded with the corrupt usage header, so no
+   earlier VR replay counts as confirmation.
 9. **Settings persistence — BUILT (2026-07-09).** `UserSettings` (Godot ConfigFile
    under user://): hand-swap, dead-zone, first-run-done, highscores; loaded at
    startup, saved on change. Arena scale/height not stored (deferred slices).
@@ -1170,9 +1197,8 @@ verify itself*. Rules to keep it that way:
 
 ## 12. Immediate next steps
 
-**Updated 2026-08-08.** M0-M4 are built (M4 slice 8, replay recording, remains
-deferred). The list below had gone stale — it still named M2 and M3, both long
-since complete.
+**Updated 2026-08-09.** M0-M4 are built. M4 slice 8 (replay recording) landed
+2026-08-08/09 and needs one confirming VR run on ABI v21.
 
 **In flight: control modes (§4/§5).** Tabletop/Cabinet, the Arena & Layout
 screen, and UI edit mode all landed 2026-08-08 and are being validated
@@ -1186,9 +1212,11 @@ Remaining, in rough order:
    Layout values into the constants they were measured for. The debug Layout
    panel is session-only precisely so those numbers get baked rather than
    silently persisted per-install.
-2. **M4 slice 8 — replay recording.** The one invasive-ABI slice, fully mapped
-   in `notes/replay-recording-plan.md`. Explicitly wants its own attended
-   session: the record->verify gate test is the oracle.
+2. **Confirm slice 8** — one VR run recorded on ABI v21 that passes `replay
+   verify`. Everything recorded before v21 carried a corrupt usage header, so
+   no earlier VR replay counts. The five bugs behind that are in the M4 slice 8
+   entry above; the standing lesson is that every one of them was found by a
+   real replay and none by a gate, so the confirming run is the gate.
 3. **M5 — shell + CI builds.** The VR-native menu exists; what is missing is
    the fork-runnable GitHub Actions workflow (workflow_dispatch, no repo
    secrets, auto-generated keystore). That is the §10 worst-case distribution
