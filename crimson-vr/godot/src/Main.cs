@@ -629,6 +629,7 @@ public partial class Main : Node3D
         {
             _runSeed = GD.Randi();
             _sim = new SimSession(SessionConfig);
+            _sim.ReplayBegin();
             // Static terrain generation info (ABI v3): slots pick the ground atlas
             // sheets, seed drives the stamp layout. The terrain-base quad render is
             // a follow-up; log it so the plumbing is exercised meanwhile.
@@ -707,13 +708,77 @@ public partial class Main : Node3D
         // native save-status parity: usage accrues on every pickup and
         // survives aborted runs too, not just completed ones.
         CaptureWeaponUsage();
+        // Same reason, same moment: the recording belongs to the run that just
+        // ended and the native capture is discarded by Restart.
+        SaveReplay();
         _runSeed = GD.Randi();
         _sim.Restart(SessionConfig);
+        _sim.ReplayBegin();
         _diorama.ResetInterpolation();
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
         _diorama.ResetTerrainFx();
         _diorama.ResetViewZoom(); // death cinematic ends with the run
         _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+    }
+
+    private const string ReplayDir = "user://replays";
+
+    /// <summary>Write the finished run's replay to user://replays as a standard
+    /// .crd — the same format the desktop tooling verifies, produced by the same
+    /// native encoder, so a VR run can be checked with `replay verify` like any
+    /// other.
+    ///
+    /// Every failure here is swallowed to a log line. A run that ends without a
+    /// replay file has lost a nicety; taking down the session over it would cost
+    /// the player the death screen and highscore entry they are in the middle
+    /// of, which is a far worse trade.</summary>
+    private void SaveReplay()
+    {
+        if (_sim == null)
+        {
+            return;
+        }
+        try
+        {
+            // The native side re-simulates the whole run to fill claimed stats,
+            // so this is proportional to run LENGTH, not to a frame. It runs at
+            // the death -> restart hand-off where a pause is least jarring, and
+            // is timed because a long survival run is the case most likely to
+            // read as a hang.
+            ulong startMs = Time.GetTicksMsec();
+            byte[] bytes = _sim.ReplayFinish();
+            if (bytes.Length == 0)
+            {
+                return;
+            }
+
+            if (!DirAccess.DirExistsAbsolute(ReplayDir))
+            {
+                Error mk = DirAccess.MakeDirRecursiveAbsolute(ReplayDir);
+                if (mk != Error.Ok)
+                {
+                    GD.PrintErr($"CrimsonVR: could not create {ReplayDir} ({mk}); replay dropped");
+                    return;
+                }
+            }
+
+            string stamp = Time.GetDatetimeStringFromSystem(false, true)
+                .Replace(":", "").Replace("-", "").Replace("T", "-");
+            string path = $"{ReplayDir}/{stamp}.crd";
+            using FileAccess? file = FileAccess.Open(path, FileAccess.ModeFlags.Write);
+            if (file == null)
+            {
+                GD.PrintErr($"CrimsonVR: could not open {path} ({FileAccess.GetOpenError()}); replay dropped");
+                return;
+            }
+            file.StoreBuffer(bytes);
+            GD.Print($"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
+                     $"{Time.GetTicksMsec() - startMs} ms to encode)");
+        }
+        catch (System.Exception e)
+        {
+            GD.PrintErr($"CrimsonVR: replay save failed: {e.Message}");
+        }
     }
 
     /// <summary>Quest results "Next Quest": advance to the next global index.</summary>

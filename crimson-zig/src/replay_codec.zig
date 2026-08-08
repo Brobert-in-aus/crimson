@@ -193,6 +193,77 @@ pub fn unpackInputFlags(flags: u32) InputFlags {
     return decoded;
 }
 
+/// Inverse of `unpackInputFlags`. Kept immediately beside it so the two are
+/// read together: a recorder that packs a bit the verifier reads differently
+/// produces replays that decode cleanly and then diverge during re-simulation,
+/// which surfaces as a claimed-stats mismatch far from the actual cause.
+pub fn packInputFlags(decoded: InputFlags) u32 {
+    var flags: u32 = 0;
+    if (decoded.fire_down) flags |= fire_down_flag;
+    if (decoded.fire_pressed) flags |= fire_pressed_flag;
+    if (decoded.reload_pressed) flags |= reload_pressed_flag;
+    if (decoded.reload_down) flags |= reload_down_flag;
+
+    // The movement-key group is all-or-nothing: unpack only reads the four bits
+    // when the present flag is set, so pack only sets it when the group is
+    // actually being carried.
+    if (decoded.move_forward_pressed != null or
+        decoded.move_backward_pressed != null or
+        decoded.turn_left_pressed != null or
+        decoded.turn_right_pressed != null)
+    {
+        flags |= move_keys_present_flag;
+        if (decoded.move_forward_pressed orelse false) flags |= move_forward_flag;
+        if (decoded.move_backward_pressed orelse false) flags |= move_backward_flag;
+        if (decoded.turn_left_pressed orelse false) flags |= turn_left_flag;
+        if (decoded.turn_right_pressed orelse false) flags |= turn_right_flag;
+    }
+
+    if (decoded.move_mode) |mode| {
+        flags |= move_mode_present_flag;
+        flags |= (@as(u32, @intCast(mode)) & move_mode_mask) << move_mode_shift;
+    }
+    if (decoded.aim_scheme) |scheme| {
+        flags |= aim_scheme_present_flag;
+        // -1 is carried as the all-ones pattern; unpack maps it back (line ~191).
+        const raw: u32 = if (scheme < 0) aim_scheme_mask else @as(u32, @intCast(scheme)) & aim_scheme_mask;
+        flags |= raw << aim_scheme_shift;
+    }
+    return flags;
+}
+
+test "packInputFlags round-trips through unpackInputFlags" {
+    const cases = [_]InputFlags{
+        .{ .fire_down = false, .fire_pressed = false, .reload_pressed = false, .reload_down = false },
+        .{ .fire_down = true, .fire_pressed = true, .reload_pressed = true, .reload_down = true },
+        .{ .fire_down = true, .fire_pressed = false, .reload_pressed = false, .reload_down = false, .move_mode = 4, .aim_scheme = 0 },
+        .{ .fire_down = false, .fire_pressed = false, .reload_pressed = false, .reload_down = false, .move_mode = 0, .aim_scheme = -1 },
+        .{
+            .fire_down = false,
+            .fire_pressed = false,
+            .reload_pressed = false,
+            .reload_down = false,
+            .move_forward_pressed = true,
+            .move_backward_pressed = false,
+            .turn_left_pressed = true,
+            .turn_right_pressed = false,
+        },
+    };
+    for (cases) |original| {
+        const round = unpackInputFlags(packInputFlags(original));
+        try std.testing.expectEqual(original.fire_down, round.fire_down);
+        try std.testing.expectEqual(original.fire_pressed, round.fire_pressed);
+        try std.testing.expectEqual(original.reload_pressed, round.reload_pressed);
+        try std.testing.expectEqual(original.reload_down, round.reload_down);
+        try std.testing.expectEqual(original.move_mode, round.move_mode);
+        try std.testing.expectEqual(original.aim_scheme, round.aim_scheme);
+        try std.testing.expectEqual(original.move_forward_pressed, round.move_forward_pressed);
+        try std.testing.expectEqual(original.move_backward_pressed, round.move_backward_pressed);
+        try std.testing.expectEqual(original.turn_left_pressed, round.turn_left_pressed);
+        try std.testing.expectEqual(original.turn_right_pressed, round.turn_right_pressed);
+    }
+}
+
 pub fn isLatestRulesetGameVersion(game_version: []const u8) bool {
     for (latest_ruleset_game_version_prefixes) |prefix| {
         if (std.mem.startsWith(u8, game_version, prefix)) return true;
@@ -1375,6 +1446,122 @@ pub fn buildSmokeTestReplayPayload(allocator: std.mem.Allocator) ![]u8 {
         },
         .inputs = inputs[0..],
         .dt = dt[0..],
+        .events = &.{},
+    };
+
+    var writer: std.Io.Writer.Allocating = .init(allocator);
+    errdefer writer.deinit();
+    try msgpack.encode(replay, &writer.writer);
+    return writer.toOwnedSlice();
+}
+
+/// Session facts a recording's header must carry. These have to match the
+/// session that was actually played, exactly: the verifier re-simulates from
+/// seed + config, so a wrong value here makes the re-sim diverge from the run
+/// it is supposed to confirm, and the failure surfaces as a claimed-stats
+/// mismatch rather than as "the config was wrong".
+pub const RecordingHeader = struct {
+    game_mode_id: i32,
+    seed: u32,
+    world_size: f32,
+    tick_rate: i32,
+    player_count: i32,
+    detail_preset: i32,
+    gore_disabled: i32,
+    hardcore: bool,
+    preserve_bugs: bool,
+    quest_level: []const u8 = "",
+    game_version: []const u8,
+    quest_unlock_index: i32 = 0,
+    quest_unlock_index_full: i32 = 0,
+    weapon_usage_counts: []const u32 = &.{},
+};
+
+/// Encode captured inputs into replay bytes. `inputs` is one row per SIM TICK
+/// (not per rendered frame), each row one entry per player.
+///
+/// Deliberately lives in the native deterministic stack rather than the host:
+/// the encoder and the verifier then share one definition of the wire format,
+/// so a recording cannot drift from what `replay verify` expects.
+pub fn encodeRecording(
+    allocator: std.mem.Allocator,
+    cfg: RecordingHeader,
+    inputs: []const []const ReplayPlayerInput,
+    dt: []const f32,
+    claimed: ReplayClaimedStats,
+) ![]u8 {
+    // ReplayPlayerInput and ReplayInputWire are field-identical; the wire type
+    // stays file-scope so encoding does not widen the public surface.
+    var rows = try allocator.alloc([]const ReplayInputWire, inputs.len);
+    defer {
+        for (rows) |row| allocator.free(@constCast(row));
+        allocator.free(rows);
+    }
+    var built: usize = 0;
+    errdefer {
+        for (rows[0..built]) |row| allocator.free(@constCast(row));
+    }
+    for (inputs, 0..) |tick_inputs, idx| {
+        const row = try allocator.alloc(ReplayInputWire, tick_inputs.len);
+        for (tick_inputs, 0..) |player, p| {
+            row[p] = .{
+                .move_x = player.move_x,
+                .move_y = player.move_y,
+                .aim_x = player.aim_x,
+                .aim_y = player.aim_y,
+                // The wire carries flags as a NON-NEGATIVE i32:
+                // parseInputFlagsValue rejects negatives outright, so a bitcast
+                // of a bit-31 value would produce a replay that fails to decode.
+                // Safe by construction — the input flag set tops out at bit 16.
+                .flags = @intCast(player.flags),
+            };
+        }
+        rows[idx] = row;
+        built = idx + 1;
+    }
+
+    const usage_fallback = [_]u32{0} ** weapon_usage_count;
+    const usage: []const u32 = if (cfg.weapon_usage_counts.len == weapon_usage_count)
+        cfg.weapon_usage_counts
+    else
+        usage_fallback[0..];
+
+    const replay: ReplayWire = .{
+        .header = .{
+            .game_mode_id = cfg.game_mode_id,
+            .seed = cfg.seed,
+            .replay_format_version = replay_format_version,
+            .quest_level = cfg.quest_level,
+            .bootstrap_kind = "none",
+            .bootstrap_seed = 0,
+            .game_version = cfg.game_version,
+            .tick_rate = cfg.tick_rate,
+            .difficulty_level = 0,
+            .hardcore = cfg.hardcore,
+            .preserve_bugs = cfg.preserve_bugs,
+            .detail_preset = cfg.detail_preset,
+            .gore_disabled = cfg.gore_disabled,
+            .world_size = cfg.world_size,
+            .player_count = cfg.player_count,
+            .status = .{
+                .quest_unlock_index = cfg.quest_unlock_index,
+                .quest_unlock_index_full = cfg.quest_unlock_index_full,
+                .weapon_usage_counts = usage,
+            },
+            .claimed_stats = .{
+                .complete = claimed.complete,
+                .ticks = claimed.ticks,
+                .elapsed_ms = claimed.elapsed_ms,
+                .score_xp = claimed.score_xp,
+                .kills = claimed.kills,
+                .most_used_weapon_id = claimed.most_used_weapon_id,
+                .shots_fired = claimed.shots_fired,
+                .shots_hit = claimed.shots_hit,
+            },
+            .input_quantization = "f32",
+        },
+        .inputs = rows,
+        .dt = dt,
         .events = &.{},
     };
 

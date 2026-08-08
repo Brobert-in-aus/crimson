@@ -56,8 +56,92 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v19" {
-    try std.testing.expectEqual(@as(u32, 19), exports.crimson_host_abi_version());
+test "abi version reports v20" {
+    try std.testing.expectEqual(@as(u32, 20), exports.crimson_host_abi_version());
+}
+
+test "recorded replay verifies through the ABI" {
+    // THE gate for M4 slice 8. Recording is only worth anything if the bytes it
+    // produces pass the same verifier a hand-made .crd goes through, so the
+    // oracle is the verifier itself rather than any assertion about the
+    // recorder's internals: play a scripted run, finish it, and feed the result
+    // straight back into crimson_host_verify_replay_json.
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(handle));
+
+    for (0..600) |tick| {
+        var inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(
+            exports.ok,
+            exports.crimson_host_session_tick(handle, &inputs, 1, null),
+        );
+    }
+
+    // Size-then-fill, the same protocol as crimson_host_snapshot.
+    var size: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_finish(handle, null, &size));
+    try std.testing.expect(size > 0);
+
+    const bytes = try std.testing.allocator.alloc(u8, size);
+    defer std.testing.allocator.free(bytes);
+    var len: u32 = size;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_finish(handle, bytes.ptr, &len));
+    try std.testing.expectEqual(size, len);
+
+    var json_len: u32 = 0;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, null, &json_len),
+    );
+    const json = try std.testing.allocator.alloc(u8, json_len);
+    defer std.testing.allocator.free(json);
+    var json_out: u32 = json_len;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, json.ptr, &json_out),
+    );
+
+    // The verdict lives at header_claim.match, NOT at the top level — the top
+    // level only reports whether the verifier ran. A mismatch also names the
+    // offending fields, so a failure points straight at the header value or
+    // captured input that diverged.
+    const Verdict = struct {
+        status: []const u8 = "",
+        header_claim: struct {
+            match: bool = false,
+            mismatched_fields: []const []const u8 = &.{},
+        } = .{},
+    };
+    const parsed = try std.json.parseFromSlice(
+        Verdict,
+        std.testing.allocator,
+        json[0..json_out],
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    if (!parsed.value.header_claim.match) {
+        std.debug.print("verify rejected the recording:\n{s}\n", .{json[0..json_out]});
+    }
+    try std.testing.expectEqualStrings("ok", parsed.value.status);
+    try std.testing.expect(parsed.value.header_claim.match);
+}
+
+test "replay finish refuses a session that was never recording" {
+    const handle = try createTestSession();
+    defer exports.crimson_host_session_destroy(handle);
+
+    var inputs = [_]exports.CrimsonHostInput{scriptedInput(0)};
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_session_tick(handle, &inputs, 1, null),
+    );
+
+    // Emitting an empty replay would produce a file that fails verification
+    // later, for a reason far removed from the missing begin call.
+    var size: u32 = 0;
+    try std.testing.expect(exports.crimson_host_replay_finish(handle, null, &size) != exports.ok);
 }
 
 test "abi player snapshot carries the death timer" {

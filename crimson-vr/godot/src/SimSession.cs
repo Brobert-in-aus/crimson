@@ -252,6 +252,48 @@ public sealed class SimSession : IDisposable
         return new TerrainFxView(_terrainFxBuf.AsSpan(0, (int)len));
     }
 
+    /// <summary>Start (or restart) replay capture for this session. Cheap;
+    /// discards anything captured so far.</summary>
+    public void ReplayBegin()
+    {
+        int rc = Sim.ReplayBegin(Handle);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException($"replay begin failed ({rc}): {Sim.LastError()}");
+        }
+    }
+
+    /// <summary>Encode the captured run as standard .crd bytes, or null if the
+    /// session has nothing recorded (no begin, or capture overflowed).
+    ///
+    /// EXPENSIVE: the native side re-simulates the entire run to fill the
+    /// claimed stats, so this blocks for roughly the length of the run's
+    /// simulation. Call it once when a session ends — never per frame.
+    ///
+    /// Throws on failure, like the other capture calls here. This class stays
+    /// free of engine types (the test project compiles it without a Godot
+    /// runtime), so reporting is the caller's job — Main swallows it to a log
+    /// line, because a run ending without a replay is a missing nicety and not
+    /// a reason to take down the session the player is still looking at.</summary>
+    public byte[] ReplayFinish()
+    {
+        uint len = 0;
+        int rc = Sim.ReplayFinish(Handle, Span<byte>.Empty, ref len);
+        if (rc != Sim.Ok || len == 0)
+        {
+            throw new InvalidOperationException(
+                $"replay finish (size query) failed ({rc}): {Sim.LastError()}");
+        }
+
+        var buf = new byte[len];
+        rc = Sim.ReplayFinish(Handle, buf, ref len);
+        if (rc != Sim.Ok)
+        {
+            throw new InvalidOperationException($"replay finish failed ({rc}): {Sim.LastError()}");
+        }
+        return len == buf.Length ? buf : buf.AsSpan(0, (int)len).ToArray();
+    }
+
     /// <summary>Query the static terrain generation info (slots + seed). Stable
     /// for the life of the session; call once after construction.</summary>
     public Sim.TerrainInfo TerrainInfo()

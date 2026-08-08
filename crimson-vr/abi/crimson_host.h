@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 19u
+#define CRIMSON_HOST_ABI_VERSION 20u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -462,6 +462,25 @@ int32_t crimson_host_verify_replay_json(const uint8_t *replay,
                                         uint32_t replay_len,
                                         uint8_t *out,
                                         uint32_t *out_len);
+
+/* Replay recording (ABI v20).
+ *
+ * begin starts (or restarts) capture, discarding anything held so far. The
+ * session then records one input row per SIM TICK -- not per call -- so a frame
+ * that advances several ticks contributes several rows.
+ *
+ * finish encodes the run as standard .crd bytes, using the same buffer protocol
+ * as crimson_host_snapshot. Claimed stats are not taken from the live run: the
+ * bytes are encoded, re-simulated through the same code path the verifier uses,
+ * and re-encoded with the result, so the output verifies by construction.
+ * Because that re-simulation is a full run, finish is NOT cheap -- call it once
+ * at the end of a session, not per frame.
+ *
+ * finish fails if begin was never called, or if capture ran out of memory:
+ * emitting a truncated replay would produce a file that fails verification for
+ * a reason no longer visible at that point. */
+int32_t crimson_host_replay_begin(uint64_t handle);
+int32_t crimson_host_replay_finish(uint64_t handle, uint8_t *buf, uint32_t *len);
 
 #ifdef __cplusplus
 }

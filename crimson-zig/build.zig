@@ -270,7 +270,16 @@ pub fn build(b: *std.Build) void {
             .{ .name = "raylib", .module = raylib_module },
         },
     });
-    const mod_tests = b.addTest(.{ .root_module = test_root_module });
+    // -Dtest-filter runs a subset by name. Useful because parts of the suite
+    // depend on the host environment (UDP sockets, path separators) and fail on
+    // some machines for reasons unrelated to whatever is being changed; without
+    // a filter those drown out the signal from a targeted gate.
+    const test_filters = b.option(
+        []const []const u8,
+        "test-filter",
+        "Only run tests whose name contains one of these substrings",
+    ) orelse &[_][]const u8{};
+    const mod_tests = b.addTest(.{ .root_module = test_root_module, .filters = test_filters });
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
     const root_lib_test_module = b.createModule(.{
@@ -281,7 +290,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "msgpack", .module = msgpack_dep.module("msgpack") },
         },
     });
-    const root_lib_tests = b.addTest(.{ .root_module = root_lib_test_module });
+    const root_lib_tests = b.addTest(.{ .root_module = root_lib_test_module, .filters = test_filters });
     const run_root_lib_tests = b.addRunArtifact(root_lib_tests);
 
     const test_step = b.step("test", "Run tests");

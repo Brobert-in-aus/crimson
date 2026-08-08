@@ -18,8 +18,10 @@ const live_runner = crimson_zig.live_runner;
 const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
+const replay_codec = crimson_zig.replay_codec;
+const replay_runner = crimson_zig.replay_runner;
 
-pub const abi_version: u32 = 19;
+pub const abi_version: u32 = 20;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -424,6 +426,25 @@ const SessionBox = struct {
     runner: live_runner.LiveRunner,
     last_audio: live_runner.FrameAudioEvents = .{},
     last_terrain_fx: terrain_fx_mod.TerrainFxBatch = .{},
+
+    // Replay recording. `config` is snapshotted at create because the header
+    // must describe the session EXACTLY — the verifier re-simulates from seed +
+    // config, so reconstructing it later from the runner would risk a value
+    // that has since drifted, and the resulting divergence would surface as a
+    // stats mismatch rather than as a config error.
+    config: HostSessionConfig = .{},
+    recording: bool = false,
+    record_ticks: std.ArrayList(RecordedTick) = .empty,
+    record_overflow: bool = false,
+};
+
+/// One SIM TICK of captured input. Rows are per tick, never per rendered
+/// frame: the runner may advance more than one tick in a frame under load, and
+/// a replay with one row per frame silently desynchronises from the run.
+const RecordedTick = struct {
+    players: [state_mod.max_players]replay_codec.ReplayPlayerInput,
+    player_count: usize,
+    dt: f32,
 };
 
 const max_sessions = 8;
@@ -591,6 +612,7 @@ pub export fn crimson_host_session_create(
     box.* = .{
         .generation = next_generation,
         .runner = undefined,
+        .config = config,
     };
     box.runner.restoreSnapshot(staging);
 
@@ -670,6 +692,56 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
     return frame;
 }
 
+/// Append one row per tick the frame actually advanced.
+///
+/// The VR loop drives a fixed 60 Hz accumulator so this is normally 1:1, but
+/// "normally" is not a guarantee: under load stepFrame can catch up several
+/// ticks at once, and a row-per-FRAME recording would then claim fewer ticks
+/// than were simulated and diverge on replay. Repeating the frame's input
+/// across its own substeps is what the runner did to it anyway.
+///
+/// A recording that outgrows memory stops capturing and latches
+/// `record_overflow`, so finish can refuse rather than emit a truncated replay
+/// that fails verification for a reason nobody can see.
+fn recordFrame(
+    box: *SessionBox,
+    inputs: []const CrimsonHostInput,
+    ticks_advanced: u64,
+    dt: f32,
+) void {
+    if (ticks_advanced == 0 or box.record_overflow) return;
+
+    var row: RecordedTick = .{
+        .players = undefined,
+        .player_count = @min(inputs.len, state_mod.max_players),
+        .dt = dt,
+    };
+    for (inputs[0..row.player_count], 0..) |input, idx| {
+        row.players[idx] = .{
+            .move_x = input.move_x,
+            .move_y = input.move_y,
+            .aim_x = input.aim_x,
+            .aim_y = input.aim_y,
+            .flags = replay_codec.packInputFlags(.{
+                .fire_down = input.flags & input_flag_fire_down != 0,
+                .fire_pressed = input.flags & input_flag_fire_pressed != 0,
+                .reload_pressed = input.flags & input_flag_reload_pressed != 0,
+                .reload_down = input.flags & input_flag_reload_down != 0,
+                .move_mode = if (input.move_mode >= 0) input.move_mode else null,
+                .aim_scheme = if (input.aim_scheme >= 0) input.aim_scheme else null,
+            }),
+        };
+    }
+
+    var remaining = ticks_advanced;
+    while (remaining > 0) : (remaining -= 1) {
+        box.record_ticks.append(gpa, row) catch {
+            box.record_overflow = true;
+            return;
+        };
+    }
+}
+
 pub export fn crimson_host_session_tick(
     handle: u64,
     inputs: ?[*]const CrimsonHostInput,
@@ -691,12 +763,17 @@ pub export fn crimson_host_session_tick(
     }
 
     const frame = frameInputFromHost(input_ptr[0..input_count]);
-    const update = box.runner.stepFrame(box.runner.session.dt_nominal, frame) catch |err| {
+    const dt_nominal = box.runner.session.dt_nominal;
+    const update = box.runner.stepFrame(dt_nominal, frame) catch |err| {
         setErrorFmt("tick failed: {s}", .{@errorName(err)});
         return err_generic;
     };
     box.last_audio = update.audio;
     box.last_terrain_fx = update.terrain_fx;
+
+    if (box.recording) {
+        recordFrame(box, input_ptr[0..input_count], update.ticks_advanced, dt_nominal);
+    }
 
     if (out_result) |out| {
         const elapsed_bits: u64 = @bitCast(update.elapsed_ms_sim);
@@ -1167,6 +1244,151 @@ pub export fn crimson_host_terrain_fx(handle: u64, buf: ?[*]u8, len: ?*u32) i32 
 
 /// Passthrough to the native replay verifier. Lets hosts (and the M1 test
 /// gate) validate that this library links the exact verified replay stack.
+/// Start (or restart) replay capture on a session. Safe to call mid-run; it
+/// discards anything captured so far.
+pub export fn crimson_host_replay_begin(handle: u64) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    box.record_ticks.clearRetainingCapacity();
+    box.record_overflow = false;
+    box.recording = true;
+    return ok;
+}
+
+/// Encode the captured run as replay bytes, using the same
+/// buffer-size protocol as `crimson_host_snapshot`: call with a null buffer to
+/// learn the size, then again with one that large.
+///
+/// Stats are NOT sourced from the live run. The bytes are encoded once with
+/// empty claims, decoded, and re-simulated through the very function the
+/// verifier uses; the resulting figures are then written back and the bytes
+/// re-encoded. Because the recorded inputs and seed replay deterministically,
+/// the claims match the re-simulation BY CONSTRUCTION rather than by agreement
+/// between two separate accounting paths — which is what makes a recording
+/// that verifies the default rather than the lucky case.
+pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
+    };
+    const len_ptr = len orelse {
+        setError("len is null");
+        return err_invalid_input;
+    };
+    if (box.record_overflow) {
+        setError("replay recording ran out of memory; capture is incomplete");
+        return err_generic;
+    }
+    if (box.record_ticks.items.len == 0) {
+        setError("no recorded ticks (was crimson_host_replay_begin called?)");
+        return err_generic;
+    }
+
+    var bytes_slot: ?[]u8 = null;
+    runOnBigStack(encodeSessionReplay, .{ box, &bytes_slot }) catch |err| {
+        setErrorFmt("replay encode failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    const bytes = bytes_slot orelse {
+        setError("replay encode produced no output");
+        return err_generic;
+    };
+    defer gpa.free(bytes);
+
+    const out_ptr = buf orelse {
+        len_ptr.* = @intCast(bytes.len);
+        return ok;
+    };
+    if (len_ptr.* < bytes.len) {
+        len_ptr.* = @intCast(bytes.len);
+        setError("replay buffer too small");
+        return err_buffer_too_small;
+    }
+    @memcpy(out_ptr[0..bytes.len], bytes);
+    len_ptr.* = @intCast(bytes.len);
+    return ok;
+}
+
+/// The encode-resim-reencode cycle. Runs on the big-stack thread: the re-sim
+/// builds the same multi-megabyte state a session init does.
+fn encodeSessionReplay(box: *SessionBox, out: *?[]u8) !void {
+    const tick_count = box.record_ticks.items.len;
+
+    const rows = try gpa.alloc([]const replay_codec.ReplayPlayerInput, tick_count);
+    defer gpa.free(rows);
+    const dts = try gpa.alloc(f32, tick_count);
+    defer gpa.free(dts);
+    for (box.record_ticks.items, 0..) |*row, idx| {
+        rows[idx] = row.players[0..row.player_count];
+        dts[idx] = row.dt;
+    }
+
+    var quest_buf: [16]u8 = undefined;
+    const header = recordingHeaderFor(box, &quest_buf);
+
+    // Pass 1: empty claims, purely to get bytes the runner can consume.
+    const probe = try replay_codec.encodeRecording(gpa, header, rows, dts, .{});
+    defer gpa.free(probe);
+
+    var replay = try replay_codec.parseReplay(gpa, probe);
+    defer replay.deinit(gpa);
+    const run = try replay_runner.runReplayWithOptions(replay, .{});
+
+    // Pass 2: the claims the verifier will itself compute.
+    out.* = try replay_codec.encodeRecording(gpa, header, rows, dts, .{
+        .complete = true,
+        .ticks = @intCast(run.ticks),
+        .elapsed_ms = run.elapsed_ms_sim,
+        .score_xp = run.player_experience,
+        .kills = run.creature_kill_count,
+        .most_used_weapon_id = run.most_used_weapon_id,
+        .shots_fired = run.shots_fired,
+        .shots_hit = run.shots_hit,
+    });
+}
+
+/// The ruleset version recordings are stamped with. Must keep a prefix in
+/// `replay_codec.latest_ruleset_game_version_prefixes` or the verifier applies
+/// legacy rules to a run simulated under current ones.
+const recording_game_version: []const u8 = "0.9.0";
+
+/// `quest_buf` backs the formatted quest-level string and must outlive the
+/// encode that consumes the returned header.
+fn recordingHeaderFor(box: *SessionBox, quest_buf: []u8) replay_codec.RecordingHeader {
+    const cfg = box.config;
+    // The config carries the level as major*100 + minor (101 = "1.1"); the wire
+    // wants the dotted string. Only quests mode has one — every other mode
+    // records the empty string, as the fixtures do.
+    const quest_level: []const u8 = if (cfg.game_mode == @intFromEnum(game_ids.GameModeId.quests))
+        std.fmt.bufPrint(quest_buf, "{d}.{d}", .{
+            @divTrunc(cfg.quest_level_key, 100),
+            @mod(cfg.quest_level_key, 100),
+        }) catch ""
+    else
+        "";
+
+    return .{
+        .game_mode_id = cfg.game_mode,
+        .seed = cfg.seed,
+        .world_size = cfg.world_size,
+        .tick_rate = cfg.tick_rate,
+        .player_count = cfg.player_count,
+        .detail_preset = cfg.detail_preset,
+        .gore_disabled = cfg.gore_disabled,
+        .hardcore = cfg.hardcore,
+        .preserve_bugs = cfg.preserve_bugs,
+        .quest_level = quest_level,
+        .game_version = recording_game_version,
+        .quest_unlock_index = cfg.status_quest_unlock_index,
+        .quest_unlock_index_full = cfg.status_quest_unlock_index_full,
+        .weapon_usage_counts = cfg.status_weapon_usage_counts[0..],
+    };
+}
+
 pub export fn crimson_host_verify_replay_json(
     replay: ?[*]const u8,
     replay_len: u32,
