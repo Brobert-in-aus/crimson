@@ -28,25 +28,29 @@ public sealed partial class SettingsMenu : Node3D
     private VrSegmentedSlider _renderScale = null!;
     private Label3D _renderScaleLabel = null!;
     private VrButton _aa = null!;
+    private VrButton _pokeMarkers = null!;
     private VrButton _debug = null!;
     private VrButton _back = null!;
 
     private bool _swapState;
     private bool _debugState;
+    private bool _pokeMarkersState;
     private int _msaaState;
 
     public event Action? OnBack;
     public event Action<bool>? OnHandSwapChanged;
     public event Action<float>? OnDeadZoneChanged;
     public event Action<bool>? OnDebugChanged;
+    public event Action<bool>? OnPokeMarkersChanged;
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
         _debugState = debug;
+        _pokeMarkersState = pokeMarkers;
         _msaaState = msaa;
 
         // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
@@ -118,7 +122,19 @@ public sealed partial class SettingsMenu : Node3D
         _aa.OnPress += CycleAa;
         y -= pitch;
 
-        // Debug-overlay toggle (poke-tip markers + creature facing needle).
+        // Poke-tip markers, standalone. Sits above Debug because it is a normal
+        // comfort/visibility option now, not a dev switch: the tips hover over
+        // the control rectangle rather than the playfield, so leaving them on
+        // costs the player nothing.
+        _pokeMarkers = new VrButton();
+        AddChild(_pokeMarkers);
+        _pokeMarkers.Build(bw, bh, PokeMarkersText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _pokeMarkers.Position = new Vector3(0.0f, y, 0.0f);
+        _pokeMarkers.OnPress += TogglePokeMarkers;
+        y -= pitch;
+
+        // Debug-overlay toggle (validation checklist, status line, debug FX menu,
+        // and the poke markers regardless of their own toggle).
         _debug = new VrButton();
         AddChild(_debug);
         _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f), plate: true);
@@ -177,6 +193,7 @@ public sealed partial class SettingsMenu : Node3D
         // where a button appears can't instant-fire.
         _handSwap.ResetPress();
         _debug.ResetPress();
+        _pokeMarkers.ResetPress();
         _back.ResetPress();
         _aa.ResetPress();
         _deadZone.ResetPress();
@@ -191,6 +208,7 @@ public sealed partial class SettingsMenu : Node3D
         }
         _handSwap.PollPoke(probes);
         _debug.PollPoke(probes);
+        _pokeMarkers.PollPoke(probes);
         _back.PollPoke(probes);
         _aa.PollPoke(probes);
         _deadZone.PollPoke(probes);
@@ -209,6 +227,15 @@ public sealed partial class SettingsMenu : Node3D
         _debugState = !_debugState;
         _debug.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
+    }
+
+    private string PokeMarkersText() => _pokeMarkersState ? "Poke markers: On" : "Poke markers: Off";
+
+    private void TogglePokeMarkers()
+    {
+        _pokeMarkersState = !_pokeMarkersState;
+        _pokeMarkers.SetText(PokeMarkersText());
+        OnPokeMarkersChanged?.Invoke(_pokeMarkersState);
     }
 
     /// <summary>A dark translucent backing strip behind a title, sized from the

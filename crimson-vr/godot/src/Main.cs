@@ -14,9 +14,10 @@ namespace CrimsonVR;
 /// </summary>
 public partial class Main : Node3D
 {
-    // 0.4 m/side suits a seated player's reach (chest to fully-outstretched is
-    // well under a meter). A proper seated reach-envelope calibration is a
-    // future setup step (PLAN §5); for now this is the fixed default.
+    // 0.4 m/side is the UI REFERENCE scale: every menu, panel and prompt sizes
+    // itself from it (Build(ArenaSideMeters)), and it remains the unit the
+    // diorama geometry is built in. It is no longer the player's reach envelope
+    // — see the control rectangle below.
     private const float ArenaSideMeters = 0.4f;
     private const float ArenaHeightMeters = 0.75f;
     private const float GameWorldSize = 1024.0f;
@@ -32,6 +33,43 @@ public partial class Main : Node3D
     // become tunables in the M4 arena-customisation tool (PLAN §5).
     private const float VerticalDropMeters = 0.5f;
     private const float MinVerticalDropMeters = 0.35f;
+
+    // ---- Control rectangle (hands) vs playfield (eyes) ----
+    // Adopted from OpenTyrianVR's hand-rectangle steering: the hands project
+    // onto their OWN small rectangle, and its extent — not the drawn arena's —
+    // is what maps onto the playfield. Previously the two were the same 0.4 m
+    // square, so the arena had to stay inside arm's reach, which is what forced
+    // the player to sit looking down at a table. Split apart, hand travel is
+    // fixed by ControlRectSide while the playfield is free to be large, far and
+    // tilted up into a comfortable gaze line.
+    //
+    // The control rectangle deliberately reproduces the old table EXACTLY —
+    // same side, same near-edge offset, same drop, and level — so the hand
+    // mapping is bit-for-bit what previous headset passes were tuned against
+    // and this first pass isolates one variable: the picture moved, the controls
+    // did not. Shrinking it (less arm travel, now that the board no longer has
+    // to be within reach) is the obvious next trial, but it costs precision —
+    // at 0.40 m one mm of hand tremor is ~2.6 game units, at 0.30 m ~3.4 — so
+    // it is worth changing on its own, after the tilt is judged.
+    // Level by default: hovering over a level surface is the proven gesture, and
+    // the projection drops along the rect's own normal, so tilting changes that
+    // feel. Tilt is exposed for in-headset trials.
+    private const float ControlRectSideMeters = 0.40f;
+    private const float ControlRectNearEdgeMeters = 0.10f;
+    private const float ControlRectDropMeters = 0.5f;
+    private const float ControlRectPitchDegrees = 0.0f;
+
+    // Playfield presentation. Scale multiplies the diorama's built geometry
+    // (uniform, so decals/shadows/lifts scale coherently); pitch lifts the FAR
+    // edge so the board tilts toward the player like a cabinet screen. Placement
+    // is by near edge again, but now measured against the head rather than
+    // reach: at 3x/40 deg the board's centre lands near eye level instead of
+    // ~60 deg down. All four are first-pass values to dial in-headset.
+    private const float PlayfieldScale = 3.0f;
+    private const float PlayfieldPitchDegrees = 40.0f;
+    private const float PlayfieldNearEdgeMeters = 0.6f;
+    private const float PlayfieldNearDropMeters = 0.45f;
+    private const float PlayfieldSideMeters = ArenaSideMeters * PlayfieldScale;
     private const int SimTicksPerSecond = 60;
 
     private const float TriggerThreshold = 0.5f;
@@ -77,6 +115,15 @@ public partial class Main : Node3D
     private XRController3D _leftHand = null!;
     private XRController3D _rightHand = null!;
     private Node3D _arenaRoot = null!;
+    // Sibling of _arenaRoot, not a child: the playfield carries its own scale,
+    // pitch and placement so growing/tilting the board never drags the menus
+    // and panels (which stay parented to _arenaRoot at the reference scale).
+    private Node3D _playfieldRoot = null!;
+    // The hands' input surface. Everything the player POINTS AT lives here;
+    // everything they LOOK AT lives under _playfieldRoot.
+    private Node3D _controlRect = null!;
+    // Cancels the playfield tilt for the HUD so the scoreboard stays vertical.
+    private Node3D _hudPivot = null!;
     private Node3D _leftReticle = null!;
     private Node3D _rightReticle = null!;
     private Node3D _leftGuide = null!;
@@ -212,6 +259,11 @@ public partial class Main : Node3D
         _status.Text = _sim != null
             ? $"CrimsonVR | sim abi v{TryQueryAbiVersion()}"
             : $"sim unavailable: {_simError ?? "native lib missing"}";
+        // The healthy build-stamp line is a dev readout and stays behind the
+        // debug gate so it is out of recorded footage. A FAILURE line always
+        // shows regardless: diagnostics must remain visible in-headset when the
+        // native side did not come up, which is the whole point of the label.
+        _status.Visible = _sim == null || _settings.Debug;
     }
 
     public override void _ExitTree()
@@ -234,22 +286,38 @@ public partial class Main : Node3D
         _handSwap = _settings.HandSwap;
         _deadZone = _settings.DeadZone;
 
+        // The playfield and everything registered TO it (terrain, entities,
+        // positional audio, the scoreboard) hang off PlayfieldRoot, so they
+        // inherit its scale and tilt. Menus and panels stay on ArenaRoot.
         _diorama = new Diorama();
-        _arenaRoot.AddChild(_diorama);
+        _playfieldRoot.AddChild(_diorama);
         _diorama.Configure(ArenaSideMeters, GameWorldSize);
 
-        // Audio is anchored under ArenaRoot so its players sit at the tabletop
-        // (positions are arena-local meters, like the diorama).
+        // Audio is anchored under the playfield so its players sit on the board
+        // (positions are arena-local meters, like the diorama) and pan/attenuate
+        // from where the action actually is now that the board has moved.
         _audio = new AudioBank();
-        _arenaRoot.AddChild(_audio);
+        _playfieldRoot.AddChild(_audio);
         _audio.Configure(ArenaSideMeters, GameWorldSize);
         // Every diegetic poke button plays a UI click cue (menu = click, keyboard
         // keys = type, Enter = type-enter), via the global VrButton press hook.
         VrButton.OnAnyPress = kind => _audio.PlayUi(kind);
 
-        // HUD panel at the arena's near edge (health/ammo/level), also arena-local.
+        // HUD scoreboard, standing at the playfield's far edge. It rides the
+        // board's position and scale but NOT its tilt: a sign leaning back 40
+        // degrees with the floor is hard to read and looks pasted on, so a pivot
+        // at its far-edge anchor cancels the playfield pitch and the panel stays
+        // world-vertical. The pivot carries the anchor offset; Hud.Build places
+        // itself relative to that anchor (its own float above the plane only).
+        _hudPivot = new Node3D
+        {
+            Name = "HudPivot",
+            Position = new Vector3(0.0f, 0.0f, ArenaSideMeters * 0.5f * Diorama.FloorMarginScale),
+            RotationDegrees = new Vector3(PlayfieldPitchDegrees, 0.0f, 0.0f),
+        };
+        _playfieldRoot.AddChild(_hudPivot);
         _hud = new Hud();
-        _arenaRoot.AddChild(_hud);
+        _hudPivot.AddChild(_hud);
         _hud.Build(ArenaSideMeters);
 
         // Perk pick cards float above the arena (poke to choose), arena-local.
@@ -288,7 +356,7 @@ public partial class Main : Node3D
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
-            _settings.RenderScale, _settings.Msaa,
+            _settings.PokeMarkers, _settings.RenderScale, _settings.Msaa,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v =>
@@ -300,6 +368,17 @@ public partial class Main : Node3D
         };
         _settingsMenu.OnDeadZoneChanged += v => { _deadZone = v; _settings.DeadZone = v; _settings.Save(); };
         _settingsMenu.OnDebugChanged += SetDebug;
+        _settingsMenu.OnPokeMarkersChanged += v =>
+        {
+            _settings.PokeMarkers = v;
+            _settings.Save();
+            // Turning it off must clear them now: the per-frame updater simply
+            // stops running, so a stale marker would otherwise hang in the air.
+            if (!PokeMarkersVisible)
+            {
+                HidePokeMarkers();
+            }
+        };
         _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
         _settingsMenu.OnMsaaChanged += v => { _settings.Msaa = v; ApplyRenderQuality(); _settings.Save(); };
 
@@ -316,7 +395,10 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_checklist);
         _checklist.Build(ArenaSideMeters, _settings.Checklist);
         _checklist.OnItemChanged += (id, state) => { _settings.Checklist[id] = state; _settings.Save(); };
-        _checklist.SetShown(true);
+        // Dev overlay, same gate as the debug menu below it: this was shown
+        // unconditionally, so it stood in every session — including recorded
+        // footage — with no way to dismiss it.
+        _checklist.SetShown(_settings.Debug);
 
         // Debug FX menu: runtime force-toggles for the effect render passes,
         // mirrored on the player's left. Visible only while debug is on.
@@ -856,16 +938,79 @@ public partial class Main : Node3D
 
     private void BuildArena()
     {
-        // Initial position is a placeholder; RecenterArena() repositions it in
-        // front of the head once tracking is valid (see HandleRecenter).
+        // Initial positions are placeholders; RecenterArena() repositions both
+        // roots in front of the head once tracking is valid (see HandleRecenter).
         _arenaRoot = new Node3D { Position = new Vector3(0.0f, ArenaHeightMeters, -ArenaDistanceMeters) };
         AddChild(_arenaRoot);
+
+        _playfieldRoot = new Node3D
+        {
+            Name = "PlayfieldRoot",
+            Position = new Vector3(0.0f, ArenaHeightMeters, -ArenaDistanceMeters),
+            Scale = Vector3.One * PlayfieldScale,
+        };
+        AddChild(_playfieldRoot);
+
+        BuildControlRect();
 
         // The visible ground is the Diorama terrain floor (textured from the base
         // slot, extended past the playfield, greyed by fog). The old brown
         // placeholder plane + rim were removed: they sat on top of the floor
         // (hiding the terrain and z-fighting its edge). A larger world floor at
         // foot level (BuildWorldFloor) extends that same ground around the player.
+    }
+
+    /// <summary>Build the hands' control surface: a small level square the
+    /// player hovers over, sized by <see cref="ControlRectSideMeters"/> and
+    /// placed by RecenterArena. It is drawn faintly because it is no longer
+    /// coincident with the visible playfield — without a mark, the limits of
+    /// the control area would be invisible and the player would run their hand
+    /// off the edge with no cue. Kept deliberately dim so it reads as a desk
+    /// surface, not a second thing to look at.</summary>
+    private void BuildControlRect()
+    {
+        _controlRect = new Node3D { Name = "ControlRect" };
+        AddChild(_controlRect);
+
+        float s = ControlRectSideMeters;
+        _controlRect.AddChild(new MeshInstance3D
+        {
+            Name = "Bounds",
+            Mesh = new PlaneMesh { Size = new Vector2(s, s) },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.35f, 0.55f, 0.9f, 0.10f),
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            },
+        });
+
+        // A brighter rim so the edge (where the cursor stops clamping) is
+        // legible at a glance without looking down at it.
+        float w = s * 0.012f;
+        float half = s * 0.5f;
+        var rimMat = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.45f, 0.65f, 1.0f, 0.35f),
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        };
+        foreach ((float cx, float cz, float sx, float sz) in new[]
+        {
+            (0.0f, -half, s + w, w),
+            (0.0f, half, s + w, w),
+            (-half, 0.0f, w, s + w),
+            (half, 0.0f, w, s + w),
+        })
+        {
+            _controlRect.AddChild(new MeshInstance3D
+            {
+                Mesh = new PlaneMesh { Size = new Vector2(sx, sz) },
+                MaterialOverride = rimMat,
+                Position = new Vector3(cx, 0.0005f, cz),
+            });
+        }
     }
 
     private const float WorldFloorSize = 24.0f;   // metres; fog hides the edge
@@ -912,8 +1057,11 @@ public partial class Main : Node3D
         _rightReticle = MakeReticle(new Color(1.0f, 0.3f, 0.25f));
         _leftGuide = MakeGuide(new Color(0.2f, 0.5f, 1.0f, 0.35f));
         _rightGuide = MakeGuide(new Color(1.0f, 0.3f, 0.25f, 0.35f));
-        AddChild(_leftReticle);
-        AddChild(_rightReticle);
+        // Cursor art lives ON the board (inherits its tilt/scale); the guide
+        // lines belong to the HANDS and stay in world space, dropping to the
+        // control rectangle.
+        _playfieldRoot.AddChild(_leftReticle);
+        _playfieldRoot.AddChild(_rightReticle);
         AddChild(_leftGuide);
         AddChild(_rightGuide);
         BuildAimOverlays();
@@ -935,7 +1083,7 @@ public partial class Main : Node3D
         float k = ArenaSideMeters / GameWorldSize;
         float gauge = ReloadGaugeUnits * k;
         _reloadGauge = new Node3D { Visible = false };
-        AddChild(_reloadGauge);
+        _playfieldRoot.AddChild(_reloadGauge);
         _reloadGauge.AddChild(new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(gauge, gauge) },
@@ -956,7 +1104,7 @@ public partial class Main : Node3D
                 color: new Color(1.0f, 1.0f, 1.0f, 0.4f)),
             Visible = false,
         };
-        AddChild(_spreadRing);
+        _playfieldRoot.AddChild(_spreadRing);
     }
 
     /// <summary>Position/refresh the aim-hand overlays each rendered frame: the
@@ -974,14 +1122,16 @@ public partial class Main : Node3D
             _spreadRing.Visible = false;
             return;
         }
-        ComputeReticle(aimHand, out _, out Vector3 world);
+        ComputeReticle(aimHand, out _, out Vector3 local);
 
         bool reloading = _lastPlayer.ReloadActive != 0
             && _lastPlayer.ReloadTimerMax > 1e-6f && _lastPlayer.ReloadTimer > 1e-6f;
         _reloadGauge.Visible = reloading;
         if (reloading)
         {
-            _reloadGauge.GlobalPosition = world + new Vector3(0.0f, 0.004f, 0.0f);
+            // Local lift: +y is the BOARD's normal, so this stays a hair above
+            // the surface however the board is tilted.
+            _reloadGauge.Position = local + new Vector3(0.0f, 0.004f, 0.0f);
             float progress = Mathf.Clamp(_lastPlayer.ReloadTimer / _lastPlayer.ReloadTimerMax, 0.0f, 1.0f);
             // Clockwise sweep seen from above; flip the sign if it reads backward
             // in-headset.
@@ -996,7 +1146,7 @@ public partial class Main : Node3D
         float k = ArenaSideMeters / GameWorldSize;
         float side = (radius + 2.0f) * 2.0f * k;
         _spreadRing.Visible = true;
-        _spreadRing.GlobalPosition = world + new Vector3(0.0f, 0.003f, 0.0f);
+        _spreadRing.Position = local + new Vector3(0.0f, 0.003f, 0.0f);
         _spreadRing.Scale = new Vector3(side, 1.0f, side);
     }
 
@@ -1432,14 +1582,28 @@ public partial class Main : Node3D
         // and report even if the native lib failed to load).
         PollMenuPoke();
         UpdateHandMarkers();
-        if (_debug)
+        if (PokeMarkersVisible)
         {
             UpdatePokeMarkers();
         }
     }
 
-    /// <summary>Debug: show a marker at each controller's poke tip so the physical
-    /// poke point is visible against the menu buttons.</summary>
+    /// <summary>Whether poke-tip markers should be drawn: either the player asked
+    /// for them outright, or Debug is on and shows every dev overlay.</summary>
+    private bool PokeMarkersVisible => _debug || _settings.PokeMarkers;
+
+    private void HidePokeMarkers()
+    {
+        foreach (MeshInstance3D m in _pokeMarkers)
+        {
+            m.Visible = false;
+        }
+    }
+
+    /// <summary>Show a marker at each controller's poke tip so the physical poke
+    /// point is visible against the menu buttons. No longer debug-only: the tips
+    /// sit over the control rectangle, not the playfield, so they obscure nothing
+    /// during play (see UserSettings.PokeMarkers).</summary>
     private void UpdatePokeMarkers()
     {
         UpdateMarker(0, _leftHand);
@@ -1603,16 +1767,20 @@ public partial class Main : Node3D
         _settings.Debug = on;
         _settings.Save();
         _debugMenu.SetShown(on);
+        // Every dev overlay follows the one switch, so a session can be cleaned
+        // up for recording without a rebuild. The status line keeps showing a
+        // sim FAILURE even with debug off (see _Ready).
+        _checklist.SetShown(on);
+        _status.Visible = _sim == null || on;
         // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
         // per-creature facing needle, a one-off sprite-calibration tool. The
         // settings debug flag means "fx showcase" now; flip the needle on in
         // code if a new sheet ever needs recalibrating.
-        if (!on)
+        // Debug off no longer implies markers off: the player may have turned them
+        // on in their own right, in which case they stay.
+        if (!PokeMarkersVisible)
         {
-            foreach (MeshInstance3D m in _pokeMarkers)
-            {
-                m.Visible = false;
-            }
+            HidePokeMarkers();
         }
     }
 
@@ -1673,23 +1841,30 @@ public partial class Main : Node3D
     private static Vector3 PokeTip(XRController3D hand)
         => hand.GlobalPosition;
 
-    /// <summary>Shared vertical projection of a controller onto the arena plane
-    /// (PLAN §4). Returns the clamped game-space point; also reports whether the
-    /// hand is over the arena footprint and the clamped world position.</summary>
-    private Vector2 ComputeReticle(XRController3D hand, out bool over, out Vector3 clampedWorld)
+    /// <summary>Shared projection of a controller onto the CONTROL rectangle
+    /// (PLAN §4, revised): the hand's position drops onto the small rect the
+    /// player hovers over, and its position within that rect maps onto the
+    /// playfield. Returns the clamped game-space point; also reports whether the
+    /// hand is over the control footprint and the clamped PLAYFIELD-LOCAL
+    /// position, which is where the cursor is drawn — the hand and the thing it
+    /// commands are now in two different places, exactly as intended. Callers
+    /// place cursor art as children of PlayfieldRoot using that local point, so
+    /// the art inherits the board's tilt and scale and stays flat ON the board
+    /// instead of needing a world-space lift that a tilt would break.
+    ///
+    /// Input never reads the playfield's transform, so the board's scale, tilt
+    /// and distance are free to change without touching the feel of the controls.
+    /// Hand travel is fixed by ControlRectSideMeters alone.</summary>
+    private Vector2 ComputeReticle(XRController3D hand, out bool over, out Vector3 clampedLocal)
     {
-        float planeY = _arenaRoot.GlobalPosition.Y;
-        Vector3 handPos = hand.GlobalPosition;
-        Vector3 hit = Mapper.ProjectVertically(handPos, planeY);
-        Vector3 arenaLocal = _arenaRoot.ToLocal(hit);
-        over = Mapper.IsOverArena(arenaLocal, ArenaSideMeters);
-        // Off-arena hands clamp along the PLAYER-to-hand line (not per-axis):
+        Vector3 rectLocal = Mapper.FlattenToPlane(_controlRect.ToLocal(hand.GlobalPosition));
+        over = Mapper.IsOverArena(rectLocal, ControlRectSideMeters);
+        // Off-rect hands clamp along the PLAYER-to-hand line (not per-axis):
         // the cursor stays on the aiming line at the boundary instead of being
         // dragged sideways toward the nearest corner.
-        Vector2 raw = Mapper.ArenaLocalToGameUnclamped(arenaLocal, ArenaSideMeters, GameWorldSize);
+        Vector2 raw = Mapper.ArenaLocalToGameUnclamped(rectLocal, ControlRectSideMeters, GameWorldSize);
         Vector2 game = Mapper.ClampGameTowards(_playerGame, raw, GameWorldSize);
-        Vector3 clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
-        clampedWorld = _arenaRoot.ToGlobal(clampedLocal);
+        clampedLocal = Mapper.GameToArenaLocal(game, ArenaSideMeters, GameWorldSize);
         return game;
     }
 
@@ -1706,10 +1881,12 @@ public partial class Main : Node3D
             return;
         }
 
-        ComputeReticle(hand, out bool over, out Vector3 clampedWorld);
+        ComputeReticle(hand, out bool over, out Vector3 clampedLocal);
         if (isMoveHand)
         {
-            reticle.GlobalPosition = clampedWorld + new Vector3(0, 0.002f, 0);
+            // Playfield-local: the reticle is a child of PlayfieldRoot, so this
+            // lands it flat on the board at whatever tilt/scale the board has.
+            reticle.Position = clampedLocal + new Vector3(0, 0.002f, 0);
 
             var mesh = (MeshInstance3D)reticle;
             var material = (StandardMaterial3D)mesh.MaterialOverride;
@@ -1723,8 +1900,11 @@ public partial class Main : Node3D
                 : baseColor.Darkened(0.6f);
         }
 
-        // Vertical guide line from the controller down to the plane point.
-        float planeY = _arenaRoot.GlobalPosition.Y;
+        // Vertical guide line from the controller down to the CONTROL rectangle
+        // (the surface the hand is actually addressing), not the playfield. With
+        // the board now far away and tilted, a guide drawn to it would be a long
+        // line across the scene pointing at nothing the hand touches.
+        float planeY = _controlRect.GlobalPosition.Y;
         Vector3 handPos = hand.GlobalPosition;
         float guideHeight = Mathf.Max(0.02f, handPos.Y - planeY);
         guide.GlobalPosition = new Vector3(handPos.X, planeY + guideHeight * 0.5f, handPos.Z);
@@ -1776,7 +1956,32 @@ public partial class Main : Node3D
         float drop = Mathf.Max(VerticalDropMeters, MinVerticalDropMeters);
         pos.Y = Mathf.Max(headPos.Y - drop, 0.05f);
         float yaw = Mathf.Atan2(forward.X, forward.Z);
-        _arenaRoot.GlobalTransform = new Transform3D(Basis.FromEuler(new Vector3(0, yaw, 0)), pos);
+        var yawBasis = Basis.FromEuler(new Vector3(0, yaw, 0));
+        _arenaRoot.GlobalTransform = new Transform3D(yawBasis, pos);
+
+        // The control rectangle takes over the old table's placement: same near
+        // edge and drop, so the hands keep the hover geometry every previous
+        // headset pass was tuned against. Only its size changed.
+        Vector3 controlPos = headPos + forward * (ControlRectNearEdgeMeters + ControlRectSideMeters * 0.5f);
+        controlPos.Y = Mathf.Max(headPos.Y - ControlRectDropMeters, 0.05f);
+        _controlRect.GlobalTransform = new Transform3D(
+            yawBasis * Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0, 0)),
+            controlPos);
+
+        // The playfield is placed by its NEAR edge against the head, then tilted
+        // so the far edge rises. Local +z is the far edge, so a NEGATIVE x
+        // rotation lifts it; the near edge correspondingly dips by half the
+        // board, which the placement below accounts for so the near edge lands
+        // exactly at (PlayfieldNearEdge, PlayfieldNearDrop) from the head.
+        float pitch = Mathf.DegToRad(PlayfieldPitchDegrees);
+        float halfBoard = PlayfieldSideMeters * 0.5f;
+        Vector3 playfieldPos = headPos
+            + forward * (PlayfieldNearEdgeMeters + halfBoard * Mathf.Cos(pitch))
+            + Vector3.Up * (halfBoard * Mathf.Sin(pitch) - PlayfieldNearDropMeters);
+        playfieldPos.Y = Mathf.Max(playfieldPos.Y, 0.05f);
+        _playfieldRoot.GlobalTransform = new Transform3D(
+            yawBasis * Basis.FromEuler(new Vector3(-pitch, 0, 0)).Scaled(Vector3.One * PlayfieldScale),
+            playfieldPos);
     }
 
     private static uint TryQueryAbiVersion()

@@ -38,6 +38,14 @@ public sealed class UserSettings
     public bool FirstRunDone;
     public bool Debug;
 
+    /// <summary>Show a marker at each controller's poke tip. Previously reachable
+    /// only via the Debug flag, because the markers hovered over the playfield and
+    /// obscured it during play. With the control rectangle split from the arena
+    /// the tips sit over the control surface instead, so they no longer cover
+    /// anything and are worth having as a standalone aid. Debug still forces them
+    /// on as part of showing every dev overlay.</summary>
+    public bool PokeMarkers;
+
     // Original Options settings (mirrors the base game). Volumes 0-10, graphics
     // detail 1-5, info-texts toggle — same scales as the desktop Options screen.
     public int SfxVolume = 10;
@@ -96,6 +104,7 @@ public sealed class UserSettings
         MusicVolume = cf.GetValue("audio", "music_volume", MusicVolume).AsInt32();
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
+        PokeMarkers = cf.GetValue("input", "poke_markers", PokeMarkers).AsBool();
         RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
 
@@ -172,6 +181,7 @@ public sealed class UserSettings
         var cf = new ConfigFile();
         cf.SetValue("input", "hand_swap", HandSwap);
         cf.SetValue("input", "dead_zone", DeadZone);
+        cf.SetValue("input", "poke_markers", PokeMarkers);
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);

@@ -3,21 +3,31 @@ using Godot;
 namespace CrimsonVR;
 
 /// <summary>
-/// Pure coordinate mapping between headset world space, arena-local space,
-/// and Crimsonland game space. See crimson-vr/PLAN.md §4-§5 for the spec.
+/// Pure coordinate mapping between headset world space, square-plane-local
+/// space, and Crimsonland game space. See crimson-vr/PLAN.md §4-§5 for the spec.
 /// Game space: origin top-left, x right, y down, side length worldSize.
-/// Arena-local space: origin at table center, +x right, +z toward the player
-/// ("south" edge), plane at y = 0.
+/// Plane-local space: origin at the square's center, +x right, +z AWAY from the
+/// player (the far edge), plane at y = 0. (The header previously said +z was
+/// toward the player; the recenter yaw makes local +z the head's forward, and
+/// both Diorama's edge labels and the Hud's far-edge anchor agree it is far.)
+/// Two such planes exist: the CONTROL
+/// rectangle the player's hands hover over, and the ARENA the playfield is drawn
+/// on. They share this mapping but no longer share a transform (see Main).
 /// </summary>
 public static class Mapper
 {
-    /// <summary>Project a world-space point straight down (world -Y) onto the
-    /// horizontal plane at planeY. Controller orientation is ignored by design.</summary>
-    public static Vector3 ProjectVertically(Vector3 worldPoint, float planeY)
-        => new(worldPoint.X, planeY, worldPoint.Z);
+    /// <summary>Drop the plane-normal (local +y) component of a plane-local
+    /// point, projecting it onto the square's surface. Callers pass a point
+    /// already in plane-local space, so a tilted plane projects along its own
+    /// normal and the mapping stays 1:1 with the rectangle the player sees;
+    /// for a level plane this is exactly a straight-down world projection.
+    /// Controller orientation is ignored by design — hand POSITION is the
+    /// input, so the projection never depends on how the controller is held.</summary>
+    public static Vector3 FlattenToPlane(Vector3 planeLocal)
+        => new(planeLocal.X, 0.0f, planeLocal.Z);
 
-    /// <summary>Arena-local (meters, origin at center) to game coordinates,
-    /// clamped to the playfield. Game +y maps to arena +z.</summary>
+    /// <summary>Plane-local (meters, origin at center) to game coordinates,
+    /// clamped to the playfield. Game +y maps to plane +z.</summary>
     public static Vector2 ArenaLocalToGame(Vector3 arenaLocal, float arenaSideMeters, float worldSize)
     {
         float k = worldSize / arenaSideMeters;
@@ -28,9 +38,12 @@ public static class Mapper
             Mathf.Clamp(gy, 0.0f, worldSize));
     }
 
-    /// <summary>Arena-local (meters, origin at center) to game coordinates
+    /// <summary>Plane-local (meters, origin at center) to game coordinates
     /// WITHOUT clamping — may fall outside 0..worldSize when the hand is off
-    /// the playfield. Pair with <see cref="ClampGameTowards"/>.</summary>
+    /// the plane. Pair with <see cref="ClampGameTowards"/>. This is the control
+    /// path's map: it is fed CONTROL-rectangle local coords and its rect side,
+    /// so hand travel is sized by the control rectangle, never by how large the
+    /// arena happens to be drawn.</summary>
     public static Vector2 ArenaLocalToGameUnclamped(Vector3 arenaLocal, float arenaSideMeters, float worldSize)
     {
         float k = worldSize / arenaSideMeters;

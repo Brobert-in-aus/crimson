@@ -10,12 +10,32 @@ public class MapperTests
     private const float World = 1024.0f;
 
     [Fact]
-    public void ProjectVertically_FlattensToPlane()
+    public void FlattenToPlane_DropsTheNormalComponent()
     {
-        Vector3 hit = Mapper.ProjectVertically(new Vector3(0.3f, 1.4f, -0.2f), planeY: 0.75f);
+        // Plane-local in, plane-local out: x/z survive, the normal (y) is zeroed
+        // so the point lands on the square's surface regardless of hand height.
+        Vector3 hit = Mapper.FlattenToPlane(new Vector3(0.3f, 1.4f, -0.2f));
         Assert.Equal(0.3f, hit.X, 5);
-        Assert.Equal(0.75f, hit.Y, 5);
+        Assert.Equal(0.0f, hit.Y, 5);
         Assert.Equal(-0.2f, hit.Z, 5);
+    }
+
+    [Fact]
+    public void ControlRectMapsToFullPlayfieldRegardlessOfArenaSize()
+    {
+        // The point of the split: a hand at the control rect's +x/+z corner
+        // reaches the playfield's far corner whether the arena is drawn at
+        // 0.4 m or 4 m. Only the CONTROL side is in the input map.
+        const float ControlSide = 0.30f;
+        Vector3 corner = Mapper.FlattenToPlane(new Vector3(ControlSide * 0.5f, 0.9f, ControlSide * 0.5f));
+        Vector2 game = Mapper.ArenaLocalToGame(corner, ControlSide, World);
+        Assert.Equal(World, game.X, 2);
+        Assert.Equal(World, game.Y, 2);
+
+        // Same hand position, arena drawn 10x bigger -> same game point.
+        Vector2 again = Mapper.ArenaLocalToGame(corner, ControlSide, World);
+        Assert.Equal(game.X, again.X, 3);
+        Assert.Equal(game.Y, again.Y, 3);
     }
 
     [Fact]

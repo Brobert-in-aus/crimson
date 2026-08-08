@@ -88,7 +88,6 @@ public sealed partial class Hud : Node3D
     public void Build(float arenaSideMeters)
     {
         _side = arenaSideMeters;
-        float half = arenaSideMeters * 0.5f;
         // The HUD top bar spans ~1.15x the arena width; scale native units to fit.
         _u = arenaSideMeters * 1.15f / NativeSpan;
 
@@ -100,7 +99,12 @@ public sealed partial class Hud : Node3D
         // the origin), so the origin sits at twice the content height. Arena
         // local +z = far; the 180 yaw turns the art back toward the player.
         // Quads stay depth-tested.
-        Position = new Vector3(0.0f, 2.0f * NativeBottomY * _u, half * Diorama.FloorMarginScale);
+        //
+        // The far-edge offset itself now lives on Main's HudPivot, which sits at
+        // that anchor and counter-rotates the playfield tilt so this panel stays
+        // world-vertical instead of leaning back with the floor. Only the float
+        // above the plane is positioned here.
+        Position = new Vector3(0.0f, 2.0f * NativeBottomY * _u, 0.0f);
         RotationDegrees = new Vector3(0.0f, 180.0f, 0.0f);
 
         _wicons = Load("ui_wicons");
