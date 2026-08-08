@@ -240,14 +240,41 @@ existing asset — the parity/replay infrastructure — as an automated reviewer
 
 ### Controller projection (the core mechanic)
 
+**REVISED 2026-08-08 — the control surface is no longer the arena.** Originally
+the hands projected onto the playfield itself, which welded control to display:
+the board had to stay inside arm's reach, and that is what forced the player to
+sit looking down at a small table. Adopting OpenTyrianVR's hand-rectangle
+steering, the projection target became a parameter. Two **control modes**, a
+persisted setting:
+
+- **Tabletop** — hands project onto the playfield. The original scheme; the
+  board doubles as the control surface, so it must stay within reach.
+- **Cabinet** — hands project onto a separate **control rectangle** at a
+  comfortable seated position, like an arcade cabinet's panel below its screen.
+  The board becomes pure display: free to be large, distant and tilted up into a
+  comfortable gaze line, with hand travel fixed by the rectangle regardless.
+
+Everything downstream is identical between the two; the mode chooses only which
+node the hands read and which board placement defaults load. Consequences worth
+keeping in mind:
+
+- Projection is along the **surface's own normal**, not world −Y, so either
+  surface can be tilted. `Mapper.FlattenToPlane` takes plane-LOCAL coordinates;
+  a level surface reduces to the original straight-down drop exactly.
+- The playfield's scale is divided out by `ToLocal`, so the control mapping
+  always reads the unscaled reference square. In Tabletop this means arena size
+  changes how big the board *looks*, not how far the player reaches.
+- Plane-local `+z` is the FAR edge (the recenter yaw makes local `+z` the head's
+  forward). The header of `Mapper` claimed the opposite until 2026-08-08; tilt
+  signs depend on it.
+
 Per rendered frame, for each hand:
 
 1. Take the controller grip pose position `p` in Godot world space.
-2. Project **vertically along world −Y** onto the arena plane `y = h`:
-   `hit = (p.x, h, p.z)`. (Spec: straight down/up the Y axis — *not* a pointer
-   ray along the controller's facing. Controller orientation is ignored for
-   targeting.)
-3. Transform `hit` into arena-local space, then into game space; clamp to
+2. Project onto the active control surface along its normal — for a level
+   surface this is straight down the Y axis. *Not* a pointer ray along the
+   controller's facing: controller orientation is ignored for targeting.
+3. Transform into surface-local space, then into game space; clamp to
    `[0, world_size]²`.
 4. Render a reticle at `hit` on the plane (always, both hands, distinct
    visuals; a faint vertical guide line from controller to reticle, since
@@ -287,6 +314,20 @@ Notes:
 ---
 
 ## 5. Arena placement and scaling
+
+**REVISED 2026-08-08.** Most of the reach-driven constraints below apply to
+**Tabletop** mode only. In **Cabinet** the board is not touched, so its size and
+distance are limited by comfortable *viewing* rather than reach, and the seated
+reach envelope constrains the control rectangle instead. First-pass Cabinet
+default is a 1.2 m board (3x the 0.4 m reference square) tilted 40 degrees, near
+edge 0.6 m out and 0.45 m below the head — which puts the board's centre near
+eye level instead of the ~59 degrees down the tabletop required.
+
+**The arena-size adjustment UI is BUILT** (VR Settings -> Arena & Layout): size,
+tilt, distance and height sliders, persisted, plus a corner-grab UI edit mode for
+the control rectangle and the action buttons. This retires the "deferred slice"
+note below. Seated reach *calibration* is still not built — the sliders let the
+player set it by hand, which is a weaker form of the same thing.
 
 - **Uniform scale only.** Arena side length `L` in meters:
   - Minimum: **0.4 m**.
@@ -829,7 +870,14 @@ screen-space overlays:
   keyboard) where precise/fiddly.
 - **Comfort:** none for v1 (no artificial locomotion — the arena is world-anchored,
   so the only vection source is the optional follow-mode).
-- **HUD:** unchanged for now (near-edge panel); refine later.
+- **HUD:** **revised 2026-08-08 for Cabinet.** The single far-edge panel worked
+  on a small near-overhead tabletop but not on a large tilted board, where it
+  put every reading in one place well above the action. Health is now lifted out
+  of the panel and laid FLAT in the board plane along a side edge; ammo owns the
+  full-width bar on the panel's lowest row, nearest the board; XP sits above it.
+  Rows are deliberately inverted relative to the flat game — ammo is what gets
+  glanced at mid-fight, so it takes the shortest eye movement off the action.
+  Tabletop keeps the original single-panel layout.
 
 **M4 slices (in order):**
 1. **Physical-button primitive — BUILT (2026-07-09, in-headset pending).**
@@ -886,8 +934,9 @@ poke-tip markers (validate where a poke registers) + the creature facing needle
 (`Diorama.SetDebug`). Extend both as new things need eyes.
 
 Deferred to their own later slices (flagged, not M4-blocking): seated
-reach-envelope calibration (§5), the arena-size adjustment UI, player-centered
-follow-mode toggle (§5).
+reach-envelope calibration (§5) and the player-centered follow-mode toggle (§5).
+~~The arena-size adjustment UI~~ shipped 2026-08-08 as the Arena & Layout screen
+(§5), which also carries tilt, distance, height and the corner-grab UI editor.
 
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
   without touching desktop; recorded `.crd` verifies; settings persist.
@@ -1121,16 +1170,32 @@ verify itself*. Rules to keep it that way:
 
 ## 12. Immediate next steps
 
-M0, M1, and M2 (code) are done — see each milestone's Status block. ~~M0 spike~~
-~~/ Android export~~, ~~M1 host ABI + replay gate~~, and ~~M2 diorama skeleton +~~
-~~C# tests + `.crd` verify gate~~ are complete. Remaining, in order:
+**Updated 2026-08-08.** M0-M4 are built (M4 slice 8, replay recording, remains
+deferred). The list below had gone stale — it still named M2 and M3, both long
+since complete.
 
-1. **Finish M2**: in-headset PCVR playtest — build the desktop frontend, confirm
-   the diorama boots/ticks/renders and move/aim/fire/reload feel right (the
-   win-x64 `crimson_host.dll` is staged; the scene already runs headless).
-2. **M3 — Real presentation**: asset bake pipeline, terrain + decal layer,
-   2.5D sprites with tilt + shadows, positional audio, HUD; Quest 72 Hz stress
-   pass. This retires the last big rendering risk (§9.2).
-3. Development proceeds privately using upstream's asset flow; the
-   banteg/10tons permission conversations happen with a finished build in
-   hand (per §10), with M6 as the hard gate before anything ships.
+**In flight: control modes (§4/§5).** Tabletop/Cabinet, the Arena & Layout
+screen, and UI edit mode all landed 2026-08-08 and are being validated
+in-headset. The new checklist batch (`cabsteer` … `hudfade`) tracks it. Nothing
+in that batch has a confirmed pass yet, and several pieces were written against
+a screenshot rather than a headset, so expect another round.
+
+Remaining, in rough order:
+
+1. **Finish validating the control-mode work**, then promote the dialled-in
+   Layout values into the constants they were measured for. The debug Layout
+   panel is session-only precisely so those numbers get baked rather than
+   silently persisted per-install.
+2. **M4 slice 8 — replay recording.** The one invasive-ABI slice, fully mapped
+   in `notes/replay-recording-plan.md`. Explicitly wants its own attended
+   session: the record->verify gate test is the oracle.
+3. **M5 — shell + CI builds.** The VR-native menu exists; what is missing is
+   the fork-runnable GitHub Actions workflow (workflow_dispatch, no repo
+   secrets, auto-generated keystore). That is the §10 worst-case distribution
+   path, so it is a requirement rather than a nicety, and it needs no headset.
+4. **Seated reach calibration (§5).** Now partly served by the Arena & Layout
+   sliders; a measured calibration is still the stronger version.
+5. **M6 — asset removal + licensing decoupling.** The hard gate before anything
+   ships publicly. Development continues privately against upstream's asset
+   flow until then; the banteg/10tons conversations happen with a finished
+   build in hand (per §10).

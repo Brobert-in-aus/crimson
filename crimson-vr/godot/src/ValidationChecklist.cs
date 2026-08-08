@@ -33,6 +33,23 @@ public sealed partial class ValidationChecklist : Node3D
         ("bonushud", "Bonus rows: icon + name + timer bar"),
         ("weaponpopup", "Weapon pickup: name popup flashes"),
         ("controls", "Options: Controls card reads right"),
+        // Batch added 2026-08-08 — the control-rectangle split and everything
+        // that followed it. All of this is either brand new or was changed
+        // blind against a screenshot, so none of it has a confirmed pass.
+        ("cabsteer", "Cabinet: steering feel off the control rect"),
+        ("modeswap", "Settings: Tabletop <-> Cabinet switch"),
+        ("arenaslid", "Arena & Layout: all four sliders move the board"),
+        ("arenasave", "Arena placement survives a relaunch"),
+        ("editmove", "UI edit: one corner moves a button"),
+        ("edit6dof", "UI edit: two corners scale + rotate + PITCH"),
+        ("editrect", "UI edit: rect scales, tilts and moves"),
+        ("editreset", "Reset layout restores built-in placements"),
+        ("editscope", "Edit mode ends on leaving the screen"),
+        ("lvlbadge", "Level-up xN badge follows its button"),
+        ("aimpillar", "Aim lines: gameplay only, normal to board"),
+        ("spriteht", "Sprite height slider seats the entities"),
+        ("hudcab", "Cabinet HUD: health edge, ammo wide, XP above"),
+        ("hudfade", "HUD incl. health fades on the perk pick"),
     };
 
     private const int PerPage = 4;

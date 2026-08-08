@@ -35,14 +35,21 @@ public sealed partial class Hud : Node3D
     // limit/clamp again (96 + 30*11 + 10 <= 508).
     private const int AmmoBarLimit = 30;       // HUD_AMMO_BAR_LIMIT
     private const int AmmoBarClamp = 20;       // HUD_AMMO_BAR_CLAMP
-    private const float AmmoBarStep = 11.0f;
-    private const float AmmoBarW = 10.0f;
-    private const float AmmoBarH = 26.0f;
+    // Ammo owns the WHOLE top bar now. Health vacating it left a 512-wide,
+    // 64-tall slab of backing art empty, and the ammo row had been dropped onto
+    // the XP panel's line — where the ind_panel art is only 182 wide, so the
+    // bars ran off their own background into open space. Back on the top bar,
+    // spread across its full width and grown to fill its height.
+    private const float AmmoBarStep = 13.0f;
+    private const float AmmoBarW = 11.0f;
+    private const float AmmoBarH = 34.0f;
     private const float AmmoBaseX = 96.0f;
-    // Sits on the panel's BOTTOM row now — nearest the board's far edge — since
-    // health vacated the top row for the left edge. Ammo is the reading a player
-    // glances at mid-fight, so it belongs closest to the play surface.
-    private const float AmmoBaseY = 76.0f;
+    // Row geometry. XP occupies 0..53, the ammo bar 49..113; NativeBottomY (113)
+    // is the panel's bottom edge, which rests on the arena's far edge.
+    private const float XpRowTop = 0.0f;
+    private const float XpPanelW = 240.0f;
+    private const float AmmoRowTop = 49.0f;
+    private const float AmmoBaseY = AmmoRowTop + 15.0f; // centres 34 in the 64-tall bar
     private const int WeaponGrid = 8;          // ui_wicons is 8x8
 
     // Health bar stretched much taller than the native 9px sliver so it reads in
@@ -51,6 +58,10 @@ public sealed partial class Hud : Node3D
     private const float HealthBarY = 2.0f;   // hugs the bar top: breathing room over the ammo row
     private const float HealthBarH = 22.0f;
     private const float HeartBase = 40.0f; // heart quad base size (native ~32)
+    /// <summary>Roll applied to the heart quad alone, to stand it upright again
+    /// after the health group is laid into the board plane. Negative = clockwise
+    /// seen from the front.</summary>
+    private const float HeartSpinDegrees = -90.0f;
 
     // Bottom of the laid-out native content (XP panel 60..113): used to anchor
     // the panel's BOTTOM edge on the arena plane.
@@ -96,7 +107,7 @@ public sealed partial class Hud : Node3D
     private bool _fadeApplied;
 
     private const float HealthBarW = 446.0f; // full top-bar width (36..482; the box art's body ends ~486)
-    private const float XpProgressW = 54.0f;
+    private const float XpProgressW = 96.0f; // widened with the panel
 
     private static Texture2D? Load(string name)
     {
@@ -136,11 +147,18 @@ public sealed partial class Hud : Node3D
         _indLife = Load("ui_indLife");
         _ammoTex = new[] { Load("ui_indBullet"), Load("ui_indFire"), Load("ui_indRocket"), Load("ui_indElectric") };
 
-        // Top bar backing.
-        TexQuad(Load("ui_gameTop"), 0.0f, 0.0f, 512.0f, 64.0f, new Color(1, 1, 1, 0.7f), priority: 40);
+        // Rows are SWAPPED relative to the flat game: the wide bar carrying ammo
+        // is the LOWEST row, so it sits nearest the board's far edge, with XP
+        // above it. Native y grows downward and the panel's bottom edge rests on
+        // the arena, so the largest y is the closest thing to the play surface —
+        // and ammo is what gets glanced at mid-fight, where a shorter eye
+        // movement off the action is worth more than it is for a score readout.
+        TexQuad(Load("ui_gameTop"), 0.0f, AmmoRowTop, 512.0f, 64.0f, new Color(1, 1, 1, 0.7f), priority: 40);
 
-        // Survival XP panel (ind_panel), behind its text.
-        TexQuad(Load("ui_indPanel"), -68.0f, 60.0f, 182.0f, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
+        // Survival XP panel (ind_panel), above the ammo bar. Widened from the
+        // native 182: health leaving the top bar freed the room, and the value
+        // and level readings were crowded into each other's space.
+        TexQuad(Load("ui_indPanel"), -68.0f, XpRowTop, XpPanelW, 53.0f, new Color(1, 1, 1, 0.9f), priority: 41);
 
         // Health group. Kept in its own node so Cabinet mode can lift it out of
         // this panel and lay it flat along the board's left edge while the rest
@@ -148,8 +166,13 @@ public sealed partial class Hud : Node3D
         _healthRoot = new Node3D { Name = "HudHealth" };
         AddChild(_healthRoot);
 
-        // Pulsing heart (updated each frame), on the HP row's left edge.
+        // Pulsing heart (updated each frame), at the health bar's base. Turned
+        // back upright INSIDE the group: laying the group into the board plane
+        // to stand the bar vertical takes the heart with it, and a heart is the
+        // one element here that has an obvious right way up. Rotating the quad
+        // rather than the group leaves the bar's orientation alone.
         _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43, out _, _healthRoot);
+        _heart.RotationDegrees = new Vector3(0.0f, 0.0f, HeartSpinDegrees);
 
         // ROW 1 — full-width health bar. VR glanceability: a near-opaque
         // DARKENED track under an overbright fill, so the missing section
@@ -157,8 +180,8 @@ public sealed partial class Hud : Node3D
         TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42, out _, _healthRoot);
         _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1.35f, 1.35f, 1.35f, 1.0f), priority: 43, out _healthFillMat, _healthRoot);
 
-        // Weapon icon at the left of the ammo row, tracking it down the panel.
-        _weaponIcon = TexQuad(_wicons, 36.0f, AmmoBaseY, 52.0f, 26.0f, new Color(1, 1, 1, 0.9f), priority: 43, out _weaponMat);
+        // Weapon icon at the left of the ammo row, matching its height.
+        _weaponIcon = TexQuad(_wicons, 36.0f, AmmoBaseY, 52.0f, AmmoBarH, new Color(1, 1, 1, 0.9f), priority: 43, out _weaponMat);
 
         // Ammo bars (per-shot, enlarged), textured by ammo class in Update.
         for (int i = 0; i < AmmoBarLimit; i++)
@@ -170,17 +193,20 @@ public sealed partial class Hud : Node3D
         _ammoExtra = MakeLabel(AmmoBaseX, AmmoBaseY + 10.0f, HorizontalAlignment.Left);
         _ammoExtra.Visible = false;
 
-        // XP progress fill (left-aligned, updated in Update).
-        _xpFill = ColorQuad(26.0f, 91.0f, XpProgressW, 4.0f, new Color(0.1f, 0.3f, 0.6f, 1.0f), priority: 43);
+        // XP progress fill (left-aligned, updated in Update), on the upper row.
+        _xpFill = ColorQuad(26.0f, XpRowTop + 31.0f, XpProgressW, 5.0f, new Color(0.1f, 0.3f, 0.6f, 1.0f), priority: 43);
 
-        // XP + level text on the panel.
-        _xpValue = MakeLabel(26.0f, 74.0f, HorizontalAlignment.Left);
-        _lvlValue = MakeLabel(85.0f, 79.0f, HorizontalAlignment.Left);
-        MakeStaticLabel(4.0f, 78.0f, "Xp");
+        // XP + level text, spread across the widened panel. Level sits well
+        // clear of the value now: at the native spacing a five-figure XP ran
+        // straight into it.
+        _xpValue = MakeLabel(26.0f, XpRowTop + 14.0f, HorizontalAlignment.Left);
+        _lvlValue = MakeLabel(150.0f, XpRowTop + 19.0f, HorizontalAlignment.Left);
+        MakeStaticLabel(4.0f, XpRowTop + 18.0f, "Xp");
 
-        // Quest timer (quest mode only): elapsed / time limit, centred under
-        // the top bar. The sim enforces the timeline; this is the readout.
-        _questTimer = MakeLabel(256.0f, 74.0f, HorizontalAlignment.Center);
+        // Quest timer (quest mode only): elapsed / time limit. Sits on the upper
+        // row clear of the widened XP panel; the sim enforces the timeline, this
+        // is only the readout.
+        _questTimer = MakeLabel(340.0f, XpRowTop + 20.0f, HorizontalAlignment.Center);
         _questTimer.Visible = false;
 
         BuildBonusRows();

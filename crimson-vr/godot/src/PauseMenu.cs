@@ -113,13 +113,17 @@ public sealed partial class PauseMenu : Node3D
             Modulate = new Color(1.0f, 0.9f, 0.3f),
             OutlineSize = 28,
             OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
+            // CHILD of the level-up button, not a sibling: as a sibling it kept
+            // its own place in the edge group, so moving the button in UI edit
+            // mode left the "xN" behind. Expressed in the button's local frame
+            // (which is yawed -90, so its +x runs along the face) it now
+            // follows every move, scale and rotation the player gives it.
             // 0.22s along the face: far enough that a wide "x12" never reaches
             // back over the button label (0.16s clipped the button edge).
-            Position = new Vector3(edge + s * 0.01f, s * 0.34f, -s * 0.32f + s * 0.22f),
-            RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f),
+            Position = new Vector3(s * 0.22f, 0.0f, s * 0.02f),
             Visible = false,
         };
-        _edgeRoot.AddChild(_levelUpBadge);
+        _levelUp.AddChild(_levelUpBadge);
 
         // Pause panel above the arena, facing the player (same anchor style as the
         // perk menu): Resume / Settings / Quit stacked vertically.
