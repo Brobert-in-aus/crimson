@@ -770,8 +770,11 @@ public partial class Main : Node3D
                 }
             }
 
+            // "2026-08-08 21:53:39" -> "20260808-215339". The space had to go:
+            // it survived the first pass and produced filenames that need
+            // quoting for every CLI that touches them, `replay verify` included.
             string stamp = Time.GetDatetimeStringFromSystem(false, true)
-                .Replace(":", "").Replace("-", "").Replace("T", "-");
+                .Replace(":", "").Replace("-", "").Replace("T", "-").Replace(" ", "-");
             string path = $"{ReplayDir}/{stamp}.crd";
             using FileAccess? file = FileAccess.Open(path, FileAccess.ModeFlags.Write);
             if (file == null)

@@ -19,7 +19,6 @@ const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
 const replay_codec = crimson_zig.replay_codec;
-const replay_runner = crimson_zig.replay_runner;
 
 pub const abi_version: u32 = 20;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
@@ -436,6 +435,26 @@ const SessionBox = struct {
     recording: bool = false,
     record_ticks: std.ArrayList(RecordedTick) = .empty,
     record_overflow: bool = false,
+    record_stats: RecordedStats = .{},
+};
+
+/// The seven figures the verifier compares, harvested from the live run.
+///
+/// finish originally got these by re-simulating the recording and reading the
+/// result, which made them correct by construction -- and cost a full re-run of
+/// the game on the calling thread. In headset that was a 5.7 second freeze when
+/// leaving the score screen. The live run already computes exactly these
+/// fields every tick, so the re-sim was buying a guarantee the determinism gate
+/// already provides: the slice-8 test feeds a recording built from THESE values
+/// to the verifier, so if the live counters ever diverged from a re-simulation
+/// that test fails rather than a player's replay silently failing later.
+const RecordedStats = struct {
+    elapsed_ms_sim: i64 = 0,
+    player_experience: i32 = 0,
+    creature_kill_count: i32 = 0,
+    most_used_weapon_id: i32 = 0,
+    shots_fired: i32 = 0,
+    shots_hit: i32 = 0,
 };
 
 /// One SIM TICK of captured input. Rows are per tick, never per rendered
@@ -773,6 +792,14 @@ pub export fn crimson_host_session_tick(
 
     if (box.recording) {
         recordFrame(box, input_ptr[0..input_count], update.ticks_advanced, dt_nominal);
+        box.record_stats = .{
+            .elapsed_ms_sim = update.elapsed_ms_sim,
+            .player_experience = update.player_experience,
+            .creature_kill_count = update.creature_kill_count,
+            .most_used_weapon_id = update.most_used_weapon_id,
+            .shots_fired = update.shots_fired,
+            .shots_hit = update.shots_hit,
+        };
     }
 
     if (out_result) |out| {
@@ -1254,6 +1281,7 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
     };
     box.record_ticks.clearRetainingCapacity();
     box.record_overflow = false;
+    box.record_stats = .{};
     box.recording = true;
     return ok;
 }
@@ -1313,8 +1341,18 @@ pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i
     return ok;
 }
 
-/// The encode-resim-reencode cycle. Runs on the big-stack thread: the re-sim
-/// builds the same multi-megabyte state a session init does.
+/// Encode the captured run. ONE pass, with claims taken from the live counters.
+///
+/// This deliberately does NOT re-simulate to source the stats. Doing so made
+/// them agree by construction, but cost a full replay of the run on the calling
+/// thread -- 5.7 seconds of frozen headset on leaving the score screen. The
+/// determinism guarantee comes from the slice-8 gate instead: it builds a
+/// recording from these same live counters and hands it to the verifier, so a
+/// divergence between live and re-simulated stats breaks the test rather than
+/// quietly producing replays that fail to verify.
+///
+/// Still on the big-stack thread: the encode allocates and the msgpack writer
+/// is not something to run on a 1 MiB host stack.
 fn encodeSessionReplay(box: *SessionBox, out: *?[]u8) !void {
     const tick_count = box.record_ticks.items.len;
 
@@ -1329,25 +1367,19 @@ fn encodeSessionReplay(box: *SessionBox, out: *?[]u8) !void {
 
     var quest_buf: [16]u8 = undefined;
     const header = recordingHeaderFor(box, &quest_buf);
+    const stats = box.record_stats;
 
-    // Pass 1: empty claims, purely to get bytes the runner can consume.
-    const probe = try replay_codec.encodeRecording(gpa, header, rows, dts, .{});
-    defer gpa.free(probe);
-
-    var replay = try replay_codec.parseReplay(gpa, probe);
-    defer replay.deinit(gpa);
-    const run = try replay_runner.runReplayWithOptions(replay, .{});
-
-    // Pass 2: the claims the verifier will itself compute.
     out.* = try replay_codec.encodeRecording(gpa, header, rows, dts, .{
         .complete = true,
-        .ticks = @intCast(run.ticks),
-        .elapsed_ms = run.elapsed_ms_sim,
-        .score_xp = run.player_experience,
-        .kills = run.creature_kill_count,
-        .most_used_weapon_id = run.most_used_weapon_id,
-        .shots_fired = run.shots_fired,
-        .shots_hit = run.shots_hit,
+        // The recording's own row count IS the tick count -- rows are appended
+        // per tick advanced, so this cannot drift from what a replay will run.
+        .ticks = @intCast(tick_count),
+        .elapsed_ms = stats.elapsed_ms_sim,
+        .score_xp = stats.player_experience,
+        .kills = stats.creature_kill_count,
+        .most_used_weapon_id = stats.most_used_weapon_id,
+        .shots_fired = stats.shots_fired,
+        .shots_hit = stats.shots_hit,
     });
 }
 
