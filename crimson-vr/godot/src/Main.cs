@@ -809,8 +809,16 @@ public partial class Main : Node3D
                 return;
             }
             file.StoreBuffer(bytes);
+            // Live-side stats logged alongside, so a verification mismatch can be
+            // read against what the run actually finished on without guessing
+            // which side drifted. A real replay currently matches on every field
+            // except score_xp (claimed 6582 vs re-simulated 3078) while kills,
+            // shots and hits are identical — so the sim agrees and the xp FIGURE
+            // does not, which this line is here to pin down.
             GD.Print($"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
-                     $"{Time.GetTicksMsec() - startMs} ms to encode)");
+                     $"{Time.GetTicksMsec() - startMs} ms to encode) " +
+                     $"live: xp={_lastPlayer.Experience} level={_lastPlayer.Level} " +
+                     $"kills={_sim.LastResult.CreatureKillCount} shots={_sim.LastResult.ShotsFired}");
         }
         catch (System.Exception e)
         {
