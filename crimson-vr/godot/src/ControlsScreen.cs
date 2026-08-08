@@ -21,11 +21,12 @@ public sealed partial class ControlsScreen : Node3D
 
     public event Action? OnBack;
 
-    public void Build(float arenaSideMeters, bool handSwap)
+    public void Build(float arenaSideMeters, bool handSwap, ControlMode mode = ControlMode.Cabinet)
     {
         float s = arenaSideMeters;
         _side = s;
         _handSwap = handSwap;
+        _mode = mode;
         Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
@@ -62,6 +63,22 @@ public sealed partial class ControlsScreen : Node3D
         RebuildLines();
     }
 
+    /// <summary>Refresh after a control-mode change. The two modes are steered
+    /// completely differently — over the arena itself, or over a separate pad —
+    /// so a card that described only one of them would be wrong half the time,
+    /// and wrong about the first thing a player needs to know.</summary>
+    public void SetControlMode(ControlMode mode)
+    {
+        if (mode == _mode)
+        {
+            return;
+        }
+        _mode = mode;
+        RebuildLines();
+    }
+
+    private ControlMode _mode = ControlMode.Cabinet;
+
     private void RebuildLines()
     {
         foreach (SmallFontLabel l in _lines)
@@ -74,24 +91,36 @@ public sealed partial class ControlsScreen : Node3D
 
         string moveHand = _handSwap ? "Right hand" : "Left hand";
         string aimHand = _handSwap ? "Left hand" : "Right hand";
+        bool cabinet = _mode == ControlMode.Cabinet;
+        // The surface the hands work over is the whole difference between the
+        // modes, and it is not guessable from looking at the scene — in Cabinet
+        // the thing you touch and the thing you watch are in two places.
+        string surface = cabinet ? "the control pad in front of you" : "the arena";
         string[] lines =
         {
-            $"{moveHand}  -  move: the trooper chases its ring reticle",
+            cabinet ? "Mode: Cabinet  -  hands on the pad, board up ahead"
+                    : "Mode: Tabletop  -  hands reach into the arena",
+            "",
+            $"{moveHand}  -  hold over {surface}: the trooper chases your ring",
             $"{aimHand}  -  aim: the spread ring is the crosshair",
             "Trigger (aim hand)  -  fire",
             "Reload  -  automatic when the clip runs dry",
             "Buttons  -  poke them with either hand sphere",
-            "Pause  -  the flat button beside the arena",
+            cabinet ? "Pause  -  the flat button beside the pad"
+                    : "Pause  -  the flat button beside the arena",
             "",
-            "Hand swap and stick dead zone live in VR Settings.",
+            "Mode, arena size and layout live in VR Settings.",
         };
 
         float s = _side;
         SmallFont? font = SmallFont.Shared();
         if (font != null)
         {
-            float y = s * 0.22f;
-            float step = s * 0.075f;
+            // Tightened to fit ten lines above the Back button at -0.42s: at the
+            // old 0.22/0.075 the mode header and trailing hint pushed the last
+            // two lines straight through it.
+            float y = s * 0.25f;
+            float step = s * 0.062f;
             foreach (string line in lines)
             {
                 var l = new SmallFontLabel();

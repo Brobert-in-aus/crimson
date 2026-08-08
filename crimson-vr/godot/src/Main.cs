@@ -433,7 +433,7 @@ public partial class Main : Node3D
         // read-only VR mapping, honouring hand-swap.
         _controlsScreen = new ControlsScreen();
         _arenaRoot.AddChild(_controlsScreen);
-        _controlsScreen.Build(ArenaSideMeters, _handSwap);
+        _controlsScreen.Build(ArenaSideMeters, _handSwap, (ControlMode)_settings.ControlMode);
         _controlsScreen.OnBack += CloseControls;
 
         // Validation checklist: a standing panel 90 deg to the RIGHT of the arena,
@@ -2449,6 +2449,7 @@ public partial class Main : Node3D
     private void ApplyHudLayout(ControlMode mode)
     {
         _hud.SetCabinetLayout(mode == ControlMode.Cabinet);
+        _controlsScreen?.SetControlMode(mode);
         Node3D health = _hud.HealthRoot;
         Node3D host = mode == ControlMode.Cabinet ? _playfieldRoot : (Node3D)_hud;
         if (health.GetParent() != host)
