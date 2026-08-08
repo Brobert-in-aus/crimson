@@ -121,9 +121,12 @@ public partial class Main : Node3D
     private const float TriggerThreshold = 0.5f;
     private const float GripThreshold = 0.7f;
 
-    // Standard 1024 world at 60 Hz (mirrors HostSessionConfig). With the Debug
-    // setting on at boot, debug_fx_showcase is added: reload cycles the player
-    // through the arsenal for a one-run weapon tour.
+    // Standard 1024 world at 60 Hz (mirrors HostSessionConfig). The Weapon
+    // showcase dev toggle adds debug_fx_showcase: reload cycles the player
+    // through the arsenal for a one-run weapon tour. It hangs off its own
+    // setting rather than Debug because it MUTATES THE SIM and the native side
+    // refuses to record a replay for a session that has it — sharing a flag meant
+    // showing the dev overlays silently disabled replay capture.
     //
     // The seed is randomized PER RUN like the base game (base_gameplay_mode
     // seeds each reset from the live app RNG state, so no two runs replay the
@@ -144,7 +147,7 @@ public partial class Main : Node3D
         + $",\"status_quest_unlock_index\":{_settings.QuestUnlockIndex}"
         + $",\"status_quest_unlock_index_full\":{_settings.QuestUnlockIndexFull}"
         + $",\"status_weapon_usage_counts\":[{string.Join(',', _settings.WeaponUsageCounts)}]"
-        + (_settings.Debug ? ",\"debug_fx_showcase\":true" : string.Empty) + "}";
+        + (_settings.WeaponShowcase ? ",\"debug_fx_showcase\":true" : string.Empty) + "}";
 
     // Sim.GameModeId values (game_ids.zig).
     private const int GameModeSurvival = 1;
@@ -457,9 +460,18 @@ public partial class Main : Node3D
 
         // Debug FX menu: runtime force-toggles for the effect render passes,
         // mirrored on the player's left. Visible only while debug is on.
+        //
+        // Weapon showcase joins them as an extra row. It is not an FX pass: it
+        // mutates the sim and costs the run its replay, so it is labelled with
+        // both facts and only takes effect on the next session (the config is
+        // snapshotted at create).
         _debugMenu = new DebugMenu();
         _arenaRoot.AddChild(_debugMenu);
-        _debugMenu.Build(ArenaSideMeters);
+        _debugMenu.Build(
+            ArenaSideMeters,
+            ("Weapon showcase (next run, no replay)",
+                () => _settings.WeaponShowcase,
+                v => { _settings.WeaponShowcase = v; _settings.Save(); }));
         _debugMenu.SetShown(_settings.Debug);
 
         // Layout tuning panel, mirrored on the player's right. Every value it
@@ -735,8 +747,8 @@ public partial class Main : Node3D
     /// <summary>Start recording, tolerating a refusal.
     ///
     /// The native side declines when the session runs a sim mutation replays
-    /// cannot carry — today that means the Debug setting, which adds
-    /// debug_fx_showcase and cycles weapons on reload. That is a legitimate
+    /// cannot carry — today that means the Weapon showcase dev toggle, which
+    /// adds debug_fx_showcase and cycles weapons on reload. That is a legitimate
     /// state to play in, not an error, so it must not take down session
     /// creation; it just means this run produces no replay.</summary>
     private void BeginReplayRecording()
@@ -2075,9 +2087,13 @@ public partial class Main : Node3D
         SetLogButtonsVisible(on);
         _status.Visible = _sim == null || on;
         // Deliberately NOT wired to _diorama.SetDebug: that overlay is the
-        // per-creature facing needle, a one-off sprite-calibration tool. The
-        // settings debug flag means "fx showcase" now; flip the needle on in
-        // code if a new sheet ever needs recalibrating.
+        // per-creature facing needle, a one-off sprite-calibration tool. Flip it
+        // on in code if a new sheet ever needs recalibrating.
+        //
+        // This switch is presentation only. The one dev switch that touches the
+        // sim — the weapon showcase — is its own setting, reachable from the
+        // Debug FX menu, so turning overlays on no longer costs the run its
+        // replay.
         // Debug off no longer implies markers off: the player may have turned them
         // on in their own right, in which case they stay.
         if (!PokeMarkersVisible)

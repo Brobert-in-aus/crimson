@@ -38,6 +38,18 @@ public sealed class UserSettings
     public bool FirstRunDone;
     public bool Debug;
 
+    /// <summary>Reload cycles the player through the arsenal, for touring weapon
+    /// FX in one run (`debug_fx_showcase` on the session config).
+    ///
+    /// Split out of <see cref="Debug"/> because it is the one dev switch that
+    /// MUTATES THE SIM, and the native side refuses to record a replay for a
+    /// session that has it — so while the two shared a flag, turning on the dev
+    /// overlays silently turned off replay capture. They want opposite defaults
+    /// during validation: overlays on, showcase off.
+    ///
+    /// Read once at session create, so a change takes effect on the next run.</summary>
+    public bool WeaponShowcase;
+
     /// <summary>Show a marker at each controller's poke tip. Previously reachable
     /// only via the Debug flag, because the markers hovered over the playfield and
     /// obscured it during play. With the control rectangle split from the arena
@@ -136,6 +148,7 @@ public sealed class UserSettings
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
         Debug = cf.GetValue("dev", "debug", Debug).AsBool();
+        WeaponShowcase = cf.GetValue("dev", "weapon_showcase", WeaponShowcase).AsBool();
         SfxVolume = cf.GetValue("audio", "sfx_volume", SfxVolume).AsInt32();
         MusicVolume = cf.GetValue("audio", "music_volume", MusicVolume).AsInt32();
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
@@ -280,6 +293,7 @@ public sealed class UserSettings
         cf.SetValue("video", "render_scale", RenderScale);
         cf.SetValue("video", "msaa", Msaa);
         cf.SetValue("dev", "debug", Debug);
+        cf.SetValue("dev", "weapon_showcase", WeaponShowcase);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
         cf.Save(ConfigPath);
     }

@@ -8,11 +8,15 @@ namespace CrimsonVR;
 /// passes on/off at runtime (see <see cref="DebugFx"/>). Shown only while the
 /// debug setting is on. Mirrors the ValidationChecklist panel, standing off to
 /// the player's LEFT (arena-local -x, the checklist's mirror) so both can be
-/// open at once. Toggles are session-only and default off.
+/// open at once. FX toggles are session-only and default off.
+///
+/// <see cref="Build"/> also accepts extra rows the caller owns, for dev switches
+/// that are not <see cref="DebugFx"/> statics — a persisted setting, say, or one
+/// that only takes effect on the next session.
 /// </summary>
 public sealed partial class DebugMenu : Node3D
 {
-    private static readonly (string Label, Func<bool> Get, Action<bool> Set)[] Items =
+    private static readonly (string Label, Func<bool> Get, Action<bool> Set)[] FxItems =
     {
         ("Laser sight", () => DebugFx.LaserSight, v => DebugFx.LaserSight = v),
         ("Radioactive aura", () => DebugFx.RadioactiveAura, v => DebugFx.RadioactiveAura = v),
@@ -24,10 +28,20 @@ public sealed partial class DebugMenu : Node3D
     private static readonly Color OffColor = new(0.45f, 0.45f, 0.5f);
     private static readonly Color OnColor = new(0.3f, 0.7f, 0.35f);
 
-    private readonly VrButton[] _rows = new VrButton[Items.Length];
+    private (string Label, Func<bool> Get, Action<bool> Set)[] _items = FxItems;
+    private VrButton[] _rows = System.Array.Empty<VrButton>();
 
-    public void Build(float arenaSideMeters)
+    public void Build(
+        float arenaSideMeters,
+        params (string Label, Func<bool> Get, Action<bool> Set)[] extraItems)
     {
+        if (extraItems.Length > 0)
+        {
+            _items = new (string, Func<bool>, Action<bool>)[FxItems.Length + extraItems.Length];
+            FxItems.CopyTo(_items, 0);
+            extraItems.CopyTo(_items, FxItems.Length);
+        }
+        _rows = new VrButton[_items.Length];
         float s = arenaSideMeters;
         // Mirror of the checklist panel (which stands at +x): off to the
         // player's LEFT, faced inward. Tune yaw sign in-headset if flipped.
@@ -54,7 +68,7 @@ public sealed partial class DebugMenu : Node3D
         float gap = s * 0.03f;
         float top = s * 0.32f;
 
-        for (int i = 0; i < Items.Length; i++)
+        for (int i = 0; i < _items.Length; i++)
         {
             var b = new VrButton();
             AddChild(b);
@@ -99,7 +113,7 @@ public sealed partial class DebugMenu : Node3D
 
     private void ToggleItem(int row)
     {
-        (string label, Func<bool> get, Action<bool> set) = Items[row];
+        (string label, Func<bool> get, Action<bool> set) = _items[row];
         bool on = !get();
         set(on);
         ApplyRow(row);
@@ -108,7 +122,7 @@ public sealed partial class DebugMenu : Node3D
 
     private void RefreshAll()
     {
-        for (int i = 0; i < Items.Length; i++)
+        for (int i = 0; i < _items.Length; i++)
         {
             ApplyRow(i);
         }
@@ -116,7 +130,7 @@ public sealed partial class DebugMenu : Node3D
 
     private void ApplyRow(int row)
     {
-        (string label, Func<bool> get, _) = Items[row];
+        (string label, Func<bool> get, _) = _items[row];
         bool on = get();
         _rows[row].SetText((on ? "[ON]  " : "[OFF] ") + label);
         _rows[row].SetColor(on ? OnColor : OffColor);
