@@ -1142,31 +1142,86 @@ public sealed partial class Diorama : Node3D
     {
         float half = _arenaSideMeters * 0.5f;
         float w = _arenaSideMeters * 0.008f;
-        var mat = new StandardMaterial3D
+
+        // (centerX, centerZ, sizeX, sizeZ, edge) per strip; corners overlap.
+        // Edge identifies which playfield boundary the strip marks, so each can
+        // fade on the player's distance to ITS OWN edge.
+        (float cx, float cz, float sx, float sz, BorderEdge edge)[] strips =
         {
-            AlbedoColor = new Color(0.75f, 0.22f, 0.16f, 0.55f),
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-            RenderPriority = 2, // over decals/corpses/shadows, under reticles + creatures
+            (0.0f, -half, _arenaSideMeters + w, w, BorderEdge.MinY),
+            (0.0f, half, _arenaSideMeters + w, w, BorderEdge.MaxY),
+            (-half, 0.0f, w, _arenaSideMeters + w, BorderEdge.MinX),
+            (half, 0.0f, w, _arenaSideMeters + w, BorderEdge.MaxX),
         };
-        // (centerX, centerZ, sizeX, sizeZ) per strip; corners covered by overlap.
-        (float cx, float cz, float sx, float sz)[] strips =
+
+        foreach ((float cx, float cz, float sx, float sz, BorderEdge edge) in strips)
         {
-            (0.0f, -half, _arenaSideMeters + w, w), // near edge
-            (0.0f, half, _arenaSideMeters + w, w),  // far edge
-            (-half, 0.0f, w, _arenaSideMeters + w), // left
-            (half, 0.0f, w, _arenaSideMeters + w),  // right
-        };
-        foreach ((float cx, float cz, float sx, float sz) in strips)
-        {
-            AddChild(new MeshInstance3D
+            // A material EACH: they shared one, so per-edge fading was
+            // impossible without every edge lighting up together.
+            var mat = new StandardMaterial3D
+            {
+                // Dull, and ordered UNDER everything. At the old RenderPriority 2
+                // the strips drew after the other transparents, which is why they
+                // painted over blood, corpse stamps AND the menus — transparent
+                // draws do not write depth, so between two of them the later one
+                // simply wins wherever they overlap, however far away it is. A
+                // negative priority puts the border first, so ground detail
+                // covers it like dirt over paint and any panel in front of it
+                // occludes it properly.
+                AlbedoColor = new Color(BorderRed, BorderGreen, BorderBlue, 0.0f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+                RenderPriority = -8,
+            };
+            var strip = new MeshInstance3D
             {
                 Mesh = new PlaneMesh { Size = new Vector2(sx, sz) },
                 MaterialOverride = mat,
-                Position = new Vector3(cx, 0.002f, cz),
-            });
+                // Below the corpse stamps (0.0004) so ground detail sits on top,
+                // but clear of the floor itself. Sub-mm gaps between coplanar
+                // quads resolve per-eye under VR multiview, so this keeps the
+                // same ~0.2 mm minimum the decal lifts use.
+                Position = new Vector3(cx, 0.0002f, cz),
+            };
+            AddChild(strip);
+            _borderStrips.Add((mat, edge));
+        }
+    }
+
+    private enum BorderEdge { MinX, MaxX, MinY, MaxY }
+
+    private const float BorderRed = 0.34f, BorderGreen = 0.10f, BorderBlue = 0.08f;
+
+    /// <summary>Peak border opacity, reached when the player is on the line.</summary>
+    private const float BorderMaxAlpha = 0.45f;
+
+    /// <summary>Game units from an edge at which its border starts to show. The
+    /// border exists to tell the player where the wall is, which only matters
+    /// when they are near one — drawn permanently it is a box around the
+    /// diorama, competing with the action for attention in every frame of
+    /// footage.</summary>
+    private const float BorderProximityGame = 150.0f;
+
+    private readonly System.Collections.Generic.List<(StandardMaterial3D Mat, BorderEdge Edge)> _borderStrips = new();
+
+    /// <summary>Fade each border strip on the player's distance to its own edge.
+    /// Per-edge rather than global so approaching one wall lights that wall,
+    /// not the whole perimeter.</summary>
+    public void UpdateBorderProximity(Vector2 playerGame)
+    {
+        foreach ((StandardMaterial3D mat, BorderEdge edge) in _borderStrips)
+        {
+            float distance = edge switch
+            {
+                BorderEdge.MinX => playerGame.X,
+                BorderEdge.MaxX => _worldSize - playerGame.X,
+                BorderEdge.MinY => playerGame.Y,
+                _ => _worldSize - playerGame.Y,
+            };
+            float t = 1.0f - Mathf.Clamp(distance / BorderProximityGame, 0.0f, 1.0f);
+            mat.AlbedoColor = new Color(BorderRed, BorderGreen, BorderBlue, t * BorderMaxAlpha);
         }
     }
 
@@ -1419,12 +1474,24 @@ public sealed partial class Diorama : Node3D
             // the sprite view transform. 1.0 = off.
             uniform float view_zoom = 1.0;
             uniform vec2 view_center = vec2(0.5);
+            // Edge vignette: darkens the floor OUTSIDE the playfield so the
+            // spawn margin reads as off-stage instead of as more arena. This is
+            // the treatment PLAN section 6 has owed since M3 -- survival
+            // creatures spawn 40 game units (~0.039 of the side) beyond the
+            // playfield and walk in, which the flat game's camera cropped
+            // entirely. Band is in uv, measured outward from the playfield edge.
+            uniform float vignette_band = 0.075;
+            uniform float vignette_strength = 0.88;
             void fragment() {
                 vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
                 uv = view_center + (uv - view_center) / view_zoom;
                 bool inside = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
                 vec3 c = inside ? texture(baked, uv).rgb : texture(clean_t, fract(uv)).rgb;
-                ALBEDO = c;
+                // 0 on the playfield boundary, growing outward. Deliberately
+                // zero INSIDE, so the playable area is never dimmed.
+                float outside = max(max(-uv.x, uv.x - 1.0), max(-uv.y, uv.y - 1.0));
+                float v = clamp(outside / max(vignette_band, 0.0001), 0.0, 1.0);
+                ALBEDO = c * (1.0 - v * vignette_strength);
             }
             """,
     };
@@ -1941,15 +2008,34 @@ public sealed partial class Diorama : Node3D
     // existence standing on the margin band. Fade them in across a short band
     // inside the bounds instead; fully outside = invisible. Spawn positions
     // are exact sim state — only the presentation fades.
-    private const float EdgeFadeBandGame = 24.0f;
+    /// <summary>How far outside the playfield survival creatures are spawned
+    /// (`rand_survival_spawn_pos`: edge = -40 or terrain+40). The flat game's
+    /// camera crops this margin entirely; the diorama shows the whole plane.</summary>
+    private const float SpawnMarginGame = 40.0f;
 
-    /// <summary>0 outside the terrain bounds, ramping to 1 a fade-band inside.</summary>
+    private const float EdgeFadeBandGame = SpawnMarginGame;
+
+    /// <summary>Creature opacity near the arena edge: 0 at the spawn line,
+    /// ramping to 1 by the time they reach the playfield.
+    ///
+    /// The band deliberately sits ENTIRELY OUTSIDE the playfield. It used to
+    /// ramp from the playfield edge inward, which hid the spawn itself but then
+    /// played the whole materialisation in plain view a few units onto the
+    /// board — you watched creatures assemble out of nothing mid-arena. Running
+    /// it across the spawn margin instead means they finish fading before they
+    /// arrive, which is the behaviour the original got for free by cropping the
+    /// margin off-screen.
+    ///
+    /// Still an interim treatment: PLAN section 6 owes a rim mask / vignette so
+    /// the margin reads as off-stage rather than as visible floor. This only
+    /// moves where the fade happens; it does not hide the margin.</summary>
     private float EdgeFadeAlpha(Vector2 game)
     {
+        // Signed distance inside the playfield; negative out in the margin.
         float edge = Mathf.Min(
             Mathf.Min(game.X, _worldSize - game.X),
             Mathf.Min(game.Y, _worldSize - game.Y));
-        return Mathf.Clamp(edge / EdgeFadeBandGame, 0.0f, 1.0f);
+        return Mathf.Clamp((edge + SpawnMarginGame) / EdgeFadeBandGame, 0.0f, 1.0f);
     }
 
     /// <summary>Per-creature draw tint (draw.py draw_creatures): the spawn-template

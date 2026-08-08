@@ -91,19 +91,42 @@ public sealed partial class Hud : Node3D
     /// native coordinates, so the fill logic is unaffected by the move.</summary>
     public Node3D HealthRoot => _healthRoot;
 
-    /// <summary>Tell the HUD which layout it is in. Only the heart cares: it is
-    /// turned upright to compensate for the health group being laid into the
-    /// board plane, so applying that spin unconditionally would leave it lying
-    /// on its side in Tabletop, where the group is never rotated at all.</summary>
+    // Draw-order bands: the world runs -8..27 (border, decals, then sprites from
+    // 6), the HUD panel 40..44, menus 58..67.
+    private const int HealthPanelTrackPriority = 42;
+    private const int HealthPanelFacePriority = 43;
+    // On the board, health is a FLOOR MARKING and belongs in the world band
+    // below the sprites. At panel priorities it drew after every creature,
+    // projectile and blood splat, so a bar lying in the playfield painted over
+    // the entire game — the panel numbers were right only while it floated
+    // above the arena and had nothing in front of it.
+    private const int HealthBoardTrackPriority = 3;
+    private const int HealthBoardFacePriority = 4;
+
+    /// <summary>Tell the HUD which layout it is in.
+    ///
+    /// Two things depend on it. The heart is turned upright to compensate for
+    /// the health group being laid into the board plane, so applying that spin
+    /// unconditionally would leave it on its side in Tabletop where the group is
+    /// never rotated. And the group's draw order has to move from the panel band
+    /// to the world band, since on the board it has creatures in front of it.</summary>
     public void SetCabinetLayout(bool cabinet)
     {
         if (_heart != null)
         {
             _heart.RotationDegrees = new Vector3(0.0f, 0.0f, cabinet ? HeartSpinDegrees : 0.0f);
         }
+
+        int track = cabinet ? HealthBoardTrackPriority : HealthPanelTrackPriority;
+        int face = cabinet ? HealthBoardFacePriority : HealthPanelFacePriority;
+        if (_healthTrackMat != null) _healthTrackMat.RenderPriority = track;
+        if (_healthFillMat != null) _healthFillMat.RenderPriority = face;
+        if (_heartMat != null) _heartMat.RenderPriority = face;
     }
 
     private MeshInstance3D? _heart;
+    private StandardMaterial3D? _heartMat;
+    private StandardMaterial3D? _healthTrackMat;
     private StandardMaterial3D? _healthFillMat;
     private MeshInstance3D? _healthFill;
     private MeshInstance3D? _weaponIcon;
@@ -184,12 +207,12 @@ public sealed partial class Hud : Node3D
         // to stand the bar vertical takes the heart with it, and a heart is the
         // one element here that has an obvious right way up. Rotating the quad
         // rather than the group leaves the bar's orientation alone.
-        _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43, out _, _healthRoot);
+        _heart = TexQuad(Load("ui_lifeHeart"), 18.0f - HeartBase * 0.5f, 17.0f - HeartBase * 0.5f, HeartBase, HeartBase, new Color(1, 1, 1, 0.8f), priority: 43, out _heartMat, _healthRoot);
 
         // ROW 1 — full-width health bar. VR glanceability: a near-opaque
         // DARKENED track under an overbright fill, so the missing section
         // reads at a glance (the flat game's subtle dim didn't survive VR).
-        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42, out _, _healthRoot);
+        TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(0.30f, 0.30f, 0.30f, 0.95f), priority: 42, out _healthTrackMat, _healthRoot);
         _healthFill = TexQuad(_indLife, HealthBarX, HealthBarY, HealthBarW, HealthBarH, new Color(1.35f, 1.35f, 1.35f, 1.0f), priority: 43, out _healthFillMat, _healthRoot);
 
         // Weapon icon at the left of the ammo row, matching its height.

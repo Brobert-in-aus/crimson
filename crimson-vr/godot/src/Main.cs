@@ -87,6 +87,11 @@ public partial class Main : Node3D
     // point is findable on a large tilted board (the flat reticle art alone is
     // hard to pick out at distance). Length is a FRACTION of the arena side so
     // it scales with the board instead of shrinking into it.
+    /// <summary>Cursor pillar radius. A third of the original 0.0015: at full
+    /// thickness two of these were the boldest thing on the board, reading as
+    /// scenery rather than as a cursor.</summary>
+    private const float AimPillarRadius = 0.0005f;
+
     private const float AimLineFractionDefault = 0.30f;
     private float _aimLineFraction = AimLineFractionDefault;
     private float _spriteHeightScale = 1.0f;
@@ -175,7 +180,10 @@ public partial class Main : Node3D
     // ui_cursor = move-hand pointer (staged by bake_assets.py; null -> plain quad).
     private Texture2D? _aimTex;
     private Texture2D? _cursorTex;
-    private const float ReticleSizeMeters = 0.02f; // ~creature-sized on the 0.4m arena
+    // Quarter of the original 0.02 radius. At creature size the move-hand ring
+    // was a dark disc sitting under the blue pillar, big enough to mask whatever
+    // the player was walking toward; it only has to mark a point.
+    private const float ReticleSizeMeters = 0.005f;
 
     private SimSession? _sim;
     private Diorama _diorama = null!;
@@ -1279,7 +1287,12 @@ public partial class Main : Node3D
         var pivot = new Node3D { Visible = false };
         pivot.AddChild(new MeshInstance3D
         {
-            Mesh = new CylinderMesh { TopRadius = 0.0015f, BottomRadius = 0.0015f, Height = 1.0f },
+            Mesh = new CylinderMesh
+            {
+                TopRadius = AimPillarRadius,
+                BottomRadius = AimPillarRadius,
+                Height = 1.0f,
+            },
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = color,
@@ -1689,6 +1702,7 @@ public partial class Main : Node3D
         }
         _perkMenu.Update(snap);
         _diorama.PushSnapshot(snap);
+        _diorama.UpdateBorderProximity(_playerGame);
 
         // Accumulate this tick's blood/scorch splats + corpse stamps (ABI v3).
         TerrainFxView terrainFx = _sim.CaptureTerrainFx();
