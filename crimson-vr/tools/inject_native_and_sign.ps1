@@ -16,8 +16,8 @@
 #    leaving stale v1 signature files around breaks v1 verification.
 
 param(
-    [string]$InputApk = 'D:\Projects\crimson\artifacts\CrimsonVR.apk',
-    [string]$OutputApk = 'D:\Projects\crimson\artifacts\CrimsonVR.quest.apk'
+    [string]$InputApk = 'D:\Projects\games-xr\crimson\artifacts\CrimsonVR.apk',
+    [string]$OutputApk = 'D:\Projects\games-xr\crimson\artifacts\CrimsonVR.quest.apk'
 )
 
 $ErrorActionPreference = 'Stop'

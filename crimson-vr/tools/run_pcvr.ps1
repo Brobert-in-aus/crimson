@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $proj = Join-Path $repoRoot 'crimson-vr\godot'
 $dll  = Join-Path $proj 'native\win-x64\crimson_host.dll'
-$godot = 'D:\Projects\CrimsonVR\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
+$godot = 'D:\Projects\games-xr\_tools\godot\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
 
 if (-not (Test-Path $dll))   { throw "native crimson_host.dll missing: $dll (run tools/build_libcrimson.ps1)" }
 if (-not (Test-Path $godot)) { throw "Godot editor not found: $godot" }
