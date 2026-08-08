@@ -1483,12 +1483,20 @@ pub const RecordingHeader = struct {
 /// Deliberately lives in the native deterministic stack rather than the host:
 /// the encoder and the verifier then share one definition of the wire format,
 /// so a recording cannot drift from what `replay verify` expects.
+/// `events` MUST carry the perk traffic, ascending by tick. A recording without
+/// it decodes and runs, and then diverges from the moment the player first
+/// levels up: `perk_menu_open` is what makes the re-simulation generate the same
+/// three choices (it draws from the RNG), and `perk_pick` is what applies the
+/// one the player took. Omitting them produced replays whose tick count matched
+/// exactly while every other claimed stat drifted — which is precisely how this
+/// was found.
 pub fn encodeRecording(
     allocator: std.mem.Allocator,
     cfg: RecordingHeader,
     inputs: []const []const ReplayPlayerInput,
     dt: []const f32,
     claimed: ReplayClaimedStats,
+    events: []const ReplayEvent,
 ) ![]u8 {
     // ReplayPlayerInput and ReplayInputWire are field-identical; the wire type
     // stays file-scope so encoding does not widen the public surface.
@@ -1518,6 +1526,32 @@ pub fn encodeRecording(
         }
         rows[idx] = row;
         built = idx + 1;
+    }
+
+    // Only the perk kinds are convertible: the capture_* variants belong to
+    // native full-state captures, which a host recording never produces.
+    var wire_events = try allocator.alloc(ReplayEventWire, events.len);
+    defer allocator.free(wire_events);
+    var event_count: usize = 0;
+    for (events) |event| {
+        switch (event) {
+            .perk_menu_open => |open| {
+                wire_events[event_count] = .{ .perk_menu_open = .{
+                    .tick_index = @intCast(open.tick_index),
+                    .player_index = open.player_index,
+                } };
+                event_count += 1;
+            },
+            .perk_pick => |pick| {
+                wire_events[event_count] = .{ .perk_pick = .{
+                    .tick_index = @intCast(pick.tick_index),
+                    .player_index = pick.player_index,
+                    .choice_index = pick.choice_index,
+                } };
+                event_count += 1;
+            },
+            else => return error.UnsupportedRecordingEvent,
+        }
     }
 
     const usage_fallback = [_]u32{0} ** weapon_usage_count;
@@ -1562,7 +1596,7 @@ pub fn encodeRecording(
         },
         .inputs = rows,
         .dt = dt,
-        .events = &.{},
+        .events = wire_events[0..event_count],
     };
 
     var writer: std.Io.Writer.Allocating = .init(allocator);

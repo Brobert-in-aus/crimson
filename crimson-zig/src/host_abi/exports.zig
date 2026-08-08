@@ -436,6 +436,8 @@ const SessionBox = struct {
     record_ticks: std.ArrayList(RecordedTick) = .empty,
     record_overflow: bool = false,
     record_stats: RecordedStats = .{},
+    record_events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
+    record_menu_was_active: bool = false,
 };
 
 /// The seven figures the verifier compares, harvested from the live run.
@@ -711,6 +713,45 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
     return frame;
 }
 
+/// Record the perk traffic for player 0.
+///
+/// The replay runner needs BOTH halves. `perk_menu_open` is what makes it draw
+/// the same three choices as the live run (the selection comes off the RNG, so
+/// missing the open means a different offer entirely), and `perk_pick` applies
+/// the one taken. Without them a recording still decodes and runs, and diverges
+/// from the player's first level-up onward — tick count intact, every other stat
+/// wrong, which is exactly how the omission was found.
+///
+/// Both are derived from host input transitions, because that is what the live
+/// sim itself reacts to: the frontend owns when the menu is up and which card
+/// was poked.
+fn recordPerkEvents(box: *SessionBox, inputs: []const CrimsonHostInput, tick_index: u64) void {
+    if (box.record_overflow or inputs.len == 0) return;
+    const input = inputs[0];
+
+    const menu_active = input.perk_menu_active != 0;
+    if (menu_active and !box.record_menu_was_active) {
+        box.record_events.append(gpa, .{ .perk_menu_open = .{
+            .tick_index = @intCast(tick_index),
+            .player_index = 0,
+        } }) catch {
+            box.record_overflow = true;
+            return;
+        };
+    }
+    box.record_menu_was_active = menu_active;
+
+    if (input.perk_choice_index >= 0) {
+        box.record_events.append(gpa, .{ .perk_pick = .{
+            .tick_index = @intCast(tick_index),
+            .player_index = 0,
+            .choice_index = input.perk_choice_index,
+        } }) catch {
+            box.record_overflow = true;
+        };
+    }
+}
+
 /// Append one row per tick the frame actually advanced.
 ///
 /// The VR loop drives a fixed 60 Hz accumulator so this is normally 1:1, but
@@ -783,6 +824,13 @@ pub export fn crimson_host_session_tick(
 
     const frame = frameInputFromHost(input_ptr[0..input_count]);
     const dt_nominal = box.runner.session.dt_nominal;
+    // Captured BEFORE the step: perk events are applied by the replay runner at
+    // the tick they are stamped with, which is the tick this call is about to
+    // simulate, not the one it leaves behind.
+    const tick_before = box.runner.session.tick_index;
+    if (box.recording) {
+        recordPerkEvents(box, input_ptr[0..input_count], tick_before);
+    }
     const update = box.runner.stepFrame(dt_nominal, frame) catch |err| {
         setErrorFmt("tick failed: {s}", .{@errorName(err)});
         return err_generic;
@@ -1280,6 +1328,8 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
         return err_invalid_handle;
     };
     box.record_ticks.clearRetainingCapacity();
+    box.record_events.clearRetainingCapacity();
+    box.record_menu_was_active = false;
     box.record_overflow = false;
     box.record_stats = .{};
     box.recording = true;
@@ -1313,6 +1363,23 @@ pub export fn crimson_host_replay_finish(handle: u64, buf: ?[*]u8, len: ?*u32) i
     }
     if (box.record_ticks.items.len == 0) {
         setError("no recorded ticks (was crimson_host_replay_begin called?)");
+        return err_generic;
+    }
+
+    // FAIL CLOSED on a short recording. The claimed stats come from the live
+    // counters, which cover every tick the SESSION ran; the replay only replays
+    // the rows captured. If the session advanced ticks that were not recorded --
+    // begin called late, ticks taken while recording was off -- the stats
+    // describe a longer run than the replay contains, and every cumulative
+    // field reads high while the tick count still looks right (it is taken from
+    // the row count). That is exactly the shape of a real VR session that failed
+    // verification while scripted runs of the same length passed, so refuse and
+    // name both numbers rather than emit a file that cannot verify.
+    if (box.record_ticks.items.len != box.runner.session.tick_index) {
+        setErrorFmt(
+            "recording covers {d} ticks but the session ran {d}; stats would not match the replay",
+            .{ box.record_ticks.items.len, box.runner.session.tick_index },
+        );
         return err_generic;
     }
 
@@ -1380,7 +1447,7 @@ fn encodeSessionReplay(box: *SessionBox, out: *?[]u8) !void {
         .most_used_weapon_id = stats.most_used_weapon_id,
         .shots_fired = stats.shots_fired,
         .shots_hit = stats.shots_hit,
-    });
+    }, box.record_events.items);
 }
 
 /// The ruleset version recordings are stamped with. Must keep a prefix in
