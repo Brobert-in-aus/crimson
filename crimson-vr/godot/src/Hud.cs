@@ -741,16 +741,20 @@ public sealed partial class Hud : Node3D
         }
         _fade = fade;
         _fadeApplied = true;
-        // RECURSIVE, and applied to the health group explicitly: this used to
+        // RECURSIVE, and applied to the detached groups explicitly: this used to
         // walk only direct children, which silently stopped covering the health
         // readout the moment it was grouped into its own node — and covers it
         // not at all once Cabinet mode reparents that node onto the board. A
         // health bar that stayed opaque through the perk-menu fade would be the
-        // only thing left lit on the table.
+        // only thing left lit on the table. XP is now in the same position, on
+        // the opposite edge, so it needs the same treatment.
         ApplyFade(this, 1.0f - fade);
-        if (_healthRoot.GetParent() != this)
+        foreach (Node3D group in new[] { _healthRoot, _xpRoot })
         {
-            ApplyFade(_healthRoot, 1.0f - fade);
+            if (group.GetParent() != this)
+            {
+                ApplyFade(group, 1.0f - fade);
+            }
         }
     }
 
