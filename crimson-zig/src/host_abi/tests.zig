@@ -184,6 +184,74 @@ test "recorded replay verifies over a realistic run length" {
     try std.testing.expect(parsed.value.header_claim.match);
 }
 
+test "recorded replay verifies with weapon usage history" {
+    // The case every previous gate missed. Persisted usage counts reroll weapon
+    // drops, so a session started with history takes a different weapon stream
+    // than one started fresh -- and the encoder used to substitute an all-zero
+    // array for the header whenever the runtime's 54-slot status array failed an
+    // equality check against the wire's 53. Every recording therefore claimed a
+    // fresh save, and real VR replays diverged on exactly the weapon-shaped
+    // fields (kills, shots, xp, most_used_weapon_id) while ticks stayed exact.
+    //
+    // Scripted gates all passed because their config had no usage history.
+    const config_with_usage =
+        \\{"seed": 1234, "game_mode": 1, "player_count": 1, "world_size": 1024.0,
+        \\ "status_weapon_usage_counts": [0,0,1,0,0,1,1,0,0,0,1,2,1,0,1,0,0,2,0,0,
+        \\ 0,0,3,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+    ;
+    var handle: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_session_create(
+        config_with_usage.ptr,
+        @intCast(config_with_usage.len),
+        &handle,
+    ));
+    defer exports.crimson_host_session_destroy(handle);
+
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_begin(handle));
+    for (0..600) |tick| {
+        var inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(
+            exports.ok,
+            exports.crimson_host_session_tick(handle, &inputs, 1, null),
+        );
+    }
+
+    var size: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_finish(handle, null, &size));
+    const bytes = try std.testing.allocator.alloc(u8, size);
+    defer std.testing.allocator.free(bytes);
+    var len: u32 = size;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_finish(handle, bytes.ptr, &len));
+
+    var json_len: u32 = 0;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, null, &json_len),
+    );
+    const json = try std.testing.allocator.alloc(u8, json_len);
+    defer std.testing.allocator.free(json);
+    var json_out: u32 = json_len;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_verify_replay_json(bytes.ptr, len, json.ptr, &json_out),
+    );
+
+    const Verdict = struct {
+        header_claim: struct { match: bool = false } = .{},
+    };
+    const parsed = try std.json.parseFromSlice(
+        Verdict,
+        std.testing.allocator,
+        json[0..json_out],
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    if (!parsed.value.header_claim.match) {
+        std.debug.print("usage-history recording rejected:\n{s}\n", .{json[0..json_out]});
+    }
+    try std.testing.expect(parsed.value.header_claim.match);
+}
+
 test "replay finish refuses a session that was never recording" {
     const handle = try createTestSession();
     defer exports.crimson_host_session_destroy(handle);
