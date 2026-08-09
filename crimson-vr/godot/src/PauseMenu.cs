@@ -81,13 +81,17 @@ public sealed partial class PauseMenu : Node3D
         float proud = s * 0.03f;
         _edgeRoot = new Node3D { Name = "PauseEdgeButtons" };
         AddChild(_edgeRoot);
-        ButtonWidth = s * 0.18f;
-        ButtonHeight = s * 0.12f;
+        // Headset-authored layout, regularised into an exact mirror pair. The
+        // buttons are a touch wider/taller than the first pass and yaw 75°
+        // rather than sitting square on the side walls, so both faces turn
+        // naturally toward the seated player's hands.
+        ButtonWidth = s * 0.20f;
+        ButtonHeight = s * 0.13f;
         _toggle = new VrButton();
         _edgeRoot.AddChild(_toggle);
-        _toggle.Build(s * 0.18f, s * 0.12f, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: proud, plate: true);
-        _toggle.Position = new Vector3(edge + proud, s * 0.16f, -s * 0.32f);
-        _toggle.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
+        _toggle.Build(ButtonWidth, ButtonHeight, "Pause", new Color(0.6f, 0.6f, 0.66f), proud: proud, plate: true);
+        _toggle.Position = new Vector3(edge + proud, s * 0.24f, -s * 0.30f);
+        _toggle.RotationDegrees = new Vector3(0.0f, -75.0f, 0.0f);
         _toggle.OnPress += TogglePause;
 
         // Level-up button above the pause toggle on the same face. Shown only
@@ -95,9 +99,9 @@ public sealed partial class PauseMenu : Node3D
         // than the cards auto-appearing).
         _levelUp = new VrButton();
         _edgeRoot.AddChild(_levelUp);
-        _levelUp.Build(s * 0.18f, s * 0.12f, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: proud, plate: true);
-        _levelUp.Position = new Vector3(edge + proud, s * 0.34f, -s * 0.32f);
-        _levelUp.RotationDegrees = new Vector3(0.0f, -90.0f, 0.0f);
+        _levelUp.Build(ButtonWidth, ButtonHeight, "Level Up!", new Color(0.9f, 0.8f, 0.35f), proud: proud, plate: true);
+        _levelUp.Position = new Vector3(-(edge + proud), s * 0.24f, -s * 0.30f);
+        _levelUp.RotationDegrees = new Vector3(0.0f, 75.0f, 0.0f);
         _levelUp.OnPress += () => OnLevelUp?.Invoke();
         _levelUp.Visible = false;
 
@@ -159,6 +163,7 @@ public sealed partial class PauseMenu : Node3D
 
     private bool _editMode;
     private bool _levelUpPending;
+    private int _levelUpCount;
     private bool _menuVisible;
 
     /// <summary>Enter/leave UI edit mode. Both action buttons are forced VISIBLE
@@ -174,6 +179,11 @@ public sealed partial class PauseMenu : Node3D
             _edgeRoot.Visible = true;
             _toggle.Visible = true;
             _levelUp.Visible = true;
+            // Exercise the widest normal interaction state while arranging the
+            // buttons: accumulated picks and the perk-card preview are exactly
+            // where accidental overlap matters.
+            _levelUpBadge.Visible = true;
+            _levelUpBadge.Text = "x3";
         }
         else
         {
@@ -182,6 +192,8 @@ public sealed partial class PauseMenu : Node3D
             // on left the pause button hanging in the main menu.
             _edgeRoot.Visible = _menuVisible;
             _levelUp.Visible = _levelUpPending;
+            _levelUpBadge.Visible = _levelUpPending && _levelUpCount > 1;
+            _levelUpBadge.Text = _levelUpCount > 1 ? $"x{_levelUpCount}" : string.Empty;
             _toggle.ResetPress();
             _levelUp.ResetPress();
         }
@@ -236,13 +248,17 @@ public sealed partial class PauseMenu : Node3D
         // Tracked even while editing, so leaving edit mode restores the state
         // the game actually wants rather than whatever it was forced to.
         _levelUpPending = visible;
+        _levelUpCount = count;
         if (!_editMode && _levelUp.Visible != visible)
         {
             _levelUp.Visible = visible;
             _levelUp.ResetPress();
         }
-        _levelUpBadge.Visible = visible && count > 1;
-        _levelUpBadge.Text = count > 1 ? $"x{count}" : string.Empty;
+        if (!_editMode)
+        {
+            _levelUpBadge.Visible = visible && count > 1;
+            _levelUpBadge.Text = count > 1 ? $"x{count}" : string.Empty;
+        }
     }
 
     /// <summary>Show/hide the pause panel without changing the paused state — used

@@ -67,8 +67,8 @@ atomic swap ensures a failed import preserves the last working installation.
 - [x] All frontend PNG/Ogg/manifest callers support the writable asset root.
 - [x] Deterministic local pack builder (`tools/pack_assets.py`).
 - [x] Traversal-safe, integrity-checked, atomic installer with unit tests.
-- [ ] **PARTIAL:** Desktop has automatic and manually selected pack inboxes plus
-  a persistent diagnostic; a polished non-XR bootstrap screen remains.
+- [x] Desktop has automatic and manually selected pack inboxes plus a polished,
+  asset-independent first-run recovery screen.
 - [x] Quest ADB inbox import needs no Android storage permission or plugin.
 - [x] The checkout helper auto-discovers Classic, diagnoses the HD
   remake and ADB authorization/device ambiguity, prepares PCVR, and can install
@@ -78,8 +78,11 @@ atomic swap ensures a failed import preserves the last working installation.
   prerequisite and is the supported release flow.
 - [ ] **PARTIAL:** Disk-space and archive-size preflights plus atomic retry are
   implemented; progress/cancel and schema-migration UI remain.
-- [ ] **PARTIAL:** Source and APK-output asset-free gates are integrated into
-  CI/local builds; clean PCVR import passes and on-headset import remains.
+- [x] Source and APK-output asset-free gates are integrated into CI/local builds;
+  clean PCVR and on-headset Quest imports both pass.
+- [x] Asset-free Quest boot has a generated 3D recovery panel with local-only
+  instructions and a pokeable Retry Import action, so a pack transferred while
+  the app is open can be consumed without an ADB launch or manual restart.
 
 ## Verification log
 
@@ -98,8 +101,12 @@ atomic swap ensures a failed import preserves the last working installation.
 - 2026-08-09: Quest's .NET `DriveInfo` reported zero free bytes against the
   wrong filesystem root despite 79 GiB being available. Android now skips that
   unreliable advisory probe; bounded staged extraction remains the authority.
+- 2026-08-09: On-headset import passed. A known-good pack was preserved outside
+  app storage and `clean_install_quest.ps1` now preflights the exact APK, pack,
+  and target before its explicit `-Execute` clean-install mode; it never launches
+  the app.
 
-The foundation can be exercised manually today:
+The supported clone-first implementation can be exercised end to end today:
 
 ```powershell
 crimson extract "C:\Games\Crimsonland Classic" artifacts/assets

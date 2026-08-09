@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Godot;
 
 namespace CrimsonVR;
@@ -65,10 +66,12 @@ public partial class Main : Node3D
     // is by near edge again, but now measured against the head rather than
     // reach: at 3x/40 deg the board's centre lands near eye level instead of
     // ~60 deg down. All four are first-pass values to dial in-headset.
-    private const float PlayfieldScale = 3.0f;
-    private const float PlayfieldPitchDegrees = 40.0f;
-    private const float PlayfieldNearEdgeMeters = 0.6f;
-    private const float PlayfieldNearDropMeters = 0.45f;
+    // Promoted from the 2026-08-09 headset layout log. These are the clean-
+    // profile Cabinet defaults; existing players' saved placement still wins.
+    private const float PlayfieldScale = 3.75f;
+    private const float PlayfieldPitchDegrees = 55.0f;
+    private const float PlayfieldNearEdgeMeters = 1.40f;
+    private const float PlayfieldNearDropMeters = 0.95f;
 
     // Live values behind the Layout panel's sliders; seeded from the constants
     // above. Placement is recomputed against the LAST RECENTER pose rather than
@@ -178,6 +181,9 @@ public partial class Main : Node3D
     private Node3D _leftGuide = null!;
     private Node3D _rightGuide = null!;
     private Label3D _status = null!;
+    private bool _assetBootstrapActive;
+    private bool _assetBootstrapPlaced;
+    private AssetBootstrapPanel? _assetBootstrapPanel;
 
     // Reticle textures projected onto the play plane: ui_aim = aim-hand crosshair,
     // ui_cursor = move-hand pointer (staged by bake_assets.py; null -> plain quad).
@@ -342,25 +348,16 @@ public partial class Main : Node3D
         BuildReticles();
         BuildStatusLabel();
 
-        // Desktop import must happen before StartSession: several UI classes
-        // cache textures statically, so building the fallback UI first would
-        // leave those caches empty even after a scene reload.
-        if (!AssetStore.HasCompleteAssets && OS.GetName() != "Android")
+        // Import must happen before StartSession: several UI classes cache
+        // textures statically, so building gameplay first would leave those
+        // caches empty even after a successful late import. Both desktop and
+        // Quest therefore stop at an asset-independent recovery screen.
+        if (!AssetStore.HasCompleteAssets)
         {
-            _status.Text = assetImportError
-                ?? "GAME ASSETS REQUIRED | select crimson-assets.pack on the desktop";
-            _status.Visible = true;
-            SetProcess(false);
-            SetPhysicsProcess(false);
-            ShowMissingAssetsBootstrap();
+            ShowMissingAssetsBootstrap(assetImportError);
             return;
         }
         StartSession();
-
-        if (!AssetStore.HasCompleteAssets)
-        {
-            ShowMissingAssetsBootstrap();
-        }
 
         // Surface the REAL failure in-headset: the old fixed "native lib
         // missing" line hid version-guard and config errors behind one message.
@@ -376,15 +373,122 @@ public partial class Main : Node3D
         _status.Visible = !AssetStore.HasCompleteAssets || _sim == null || _settings.Debug;
     }
 
-    private void ShowMissingAssetsBootstrap()
+    private void ShowMissingAssetsBootstrap(string? error)
     {
         GD.PushWarning("CrimsonVR: no complete game assets. See notes/asset-import.md.");
+        _assetBootstrapActive = true;
+        _status.Visible = false;
         if (OS.GetName() == "Android")
         {
-            // The preparation helper normally fills the app-owned ADB inbox
-            // before launch. Keep this diagnostic visible if no pack arrived.
+            _assetBootstrapPanel = new AssetBootstrapPanel();
+            _arenaRoot.AddChild(_assetBootstrapPanel);
+            _assetBootstrapPanel.Build(ArenaSideMeters, error);
+            _assetBootstrapPanel.OnRetry += RetryQuestAssetImport;
             return;
         }
+
+        ShowDesktopAssetBootstrap(error);
+    }
+
+    private void RetryQuestAssetImport()
+    {
+        AssetPackInstaller.Result? result = AssetStore.ImportPendingPack();
+        if (result == null)
+        {
+            _assetBootstrapPanel?.SetDetail(
+                "No crimson-assets.pack is in the Quest inbox yet.\nRun prepare_assets.ps1 -Quest, then retry.",
+                error: true);
+            return;
+        }
+        if (!result.Success)
+        {
+            GD.PushError($"CrimsonVR: {result.Message}");
+            _assetBootstrapPanel?.SetDetail(result.Message, error: true);
+            return;
+        }
+        _assetBootstrapPanel?.SetDetail("Import complete. Starting CrimsonVR...", error: false);
+        GetTree().ReloadCurrentScene();
+    }
+
+    private void PlaceAssetBootstrap()
+    {
+        if (_assetBootstrapPlaced || !_xrActive || ++_framesSinceStart < 15)
+        {
+            return;
+        }
+        Vector3 head = _camera.GlobalPosition;
+        Vector3 forward = -_camera.GlobalBasis.Z;
+        forward.Y = 0.0f;
+        if (forward.LengthSquared() < 1e-5f)
+        {
+            forward = Vector3.Forward;
+        }
+        forward = forward.Normalized();
+        float yaw = Mathf.Atan2(forward.X, forward.Z);
+        _arenaRoot.GlobalTransform = new Transform3D(
+            Basis.FromEuler(new Vector3(0.0f, yaw, 0.0f)),
+            head + forward * 0.72f);
+        _assetBootstrapPlaced = true;
+    }
+
+    private void ShowDesktopAssetBootstrap(string? error)
+    {
+        var backdrop = new ColorRect
+        {
+            Color = new Color(0.02f, 0.025f, 0.04f),
+            AnchorRight = 1.0f,
+            AnchorBottom = 1.0f,
+        };
+        AddChild(backdrop);
+
+        var content = new VBoxContainer
+        {
+            CustomMinimumSize = new Vector2(680.0f, 360.0f),
+            AnchorLeft = 0.5f,
+            AnchorTop = 0.5f,
+            AnchorRight = 0.5f,
+            AnchorBottom = 0.5f,
+            OffsetLeft = -340.0f,
+            OffsetTop = -180.0f,
+            OffsetRight = 340.0f,
+            OffsetBottom = 180.0f,
+        };
+        content.AddThemeConstantOverride("separation", 22);
+        backdrop.AddChild(content);
+        var title = new Label
+        {
+            Text = "CRIMSONLAND CLASSIC ASSETS REQUIRED",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Modulate = new Color(1.0f, 0.72f, 0.25f),
+        };
+        title.AddThemeFontSizeOverride("font_size", 30);
+        content.AddChild(title);
+        var instructions = new Label
+        {
+            Text = "CrimsonVR does not distribute the original game's art or audio.\n"
+                + "Choose a crimson-assets.pack made locally from the GOG bonus 'Crimsonland Classic'.\n"
+                + "The 2014 HD remake is not compatible, and no game data is uploaded.",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        instructions.AddThemeFontSizeOverride("font_size", 20);
+        content.AddChild(instructions);
+        var detail = new Label
+        {
+            Text = error ?? "Select your pack to finish first-run setup.",
+            HorizontalAlignment = HorizontalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            Modulate = error == null ? new Color(0.55f, 0.82f, 1.0f) : new Color(1.0f, 0.5f, 0.42f),
+        };
+        content.AddChild(detail);
+
+        var select = new Button
+        {
+            Text = "Select crimson-assets.pack",
+            CustomMinimumSize = new Vector2(0.0f, 58.0f),
+        };
+        select.AddThemeFontSizeOverride("font_size", 20);
+        content.AddChild(select);
 
         var dialog = new FileDialog
         {
@@ -401,13 +505,15 @@ public partial class Main : Node3D
             if (!result.Success)
             {
                 GD.PushError($"CrimsonVR: {result.Message}");
-                _status.Text = result.Message;
+                detail.Text = result.Message;
+                detail.Modulate = new Color(1.0f, 0.5f, 0.42f);
                 return;
             }
             GD.Print($"CrimsonVR: {result.Message}");
             GetTree().ReloadCurrentScene();
         };
         AddChild(dialog);
+        select.Pressed += () => dialog.PopupCenteredRatio(0.75f);
         dialog.PopupCenteredRatio(0.75f);
     }
 
@@ -599,6 +705,7 @@ public partial class Main : Node3D
             _playfieldPitch, v => { _playfieldPitch = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
             _playfieldNearEdge, v => { _playfieldNearEdge = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
             _playfieldNearDrop, v => { _playfieldNearDrop = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            _spriteHeightScale, v => { _spriteHeightScale = v; _diorama.SetHeightScale(v); },
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _arenaLayout.OnBack += CloseArenaLayout;
         _arenaLayout.OnReset += ResetUiLayout;
@@ -1151,6 +1258,11 @@ public partial class Main : Node3D
         _settingsMenu.SetShown(false);
         _arenaLayoutOpen = true;
         _arenaLayout.SetShown(true);
+        // Edit owns the workspace. Hide the three dev walls while it is open so
+        // the side-mounted layout controls and centre perk preview stay legible.
+        _checklist.SetShown(false);
+        _debugMenu.SetShown(false);
+        _layoutMenu.SetShown(false);
         SetUiEditMode(true);
     }
 
@@ -1159,6 +1271,9 @@ public partial class Main : Node3D
         _arenaLayoutOpen = false;
         SetUiEditMode(false);
         _arenaLayout.SetShown(false);
+        _checklist.SetShown(_settings.Debug);
+        _debugMenu.SetShown(_settings.Debug);
+        _layoutMenu.SetShown(_settings.Debug);
         _vrSettingsOpen = true;
         _settingsMenu.SetShown(true);
     }
@@ -1388,7 +1503,8 @@ public partial class Main : Node3D
 
     private void UpdateHandMarkers()
     {
-        bool pokeUi = MenuOwnsScreen
+        bool pokeUi = _assetBootstrapActive
+            || MenuOwnsScreen
             || _pauseMenu.IsPaused
             || _perkMenu.Active
             || _startPrompt.Pending
@@ -2077,6 +2193,20 @@ public partial class Main : Node3D
 
     public override void _Process(double delta)
     {
+        if (_assetBootstrapActive)
+        {
+            PlaceAssetBootstrap();
+            if (_assetBootstrapPanel != null)
+            {
+                Span<HandProbe> probes = stackalloc HandProbe[2];
+                probes[0] = MakeProbe(_leftHand);
+                probes[1] = MakeProbe(_rightHand);
+                _assetBootstrapPanel.PollPoke(probes);
+                UpdateHandMarkers();
+            }
+            return;
+        }
+
         HandleRecenter();
 
         // While the main menu (or settings opened from it) owns the screen, the
@@ -2107,6 +2237,10 @@ public partial class Main : Node3D
         if (_sim != null)
         {
             _diorama.Interpolate((float)Engine.GetPhysicsInterpolationFraction());
+            if (_uiEditMode)
+            {
+                _diorama.RenderLayoutPreview(Time.GetTicksMsec() / 1000.0);
+            }
         }
         // Level-up button shows beside the arena while a perk pick is pending and
         // the cards aren't already open (and we're in play, not a menu/pause); the
@@ -2670,6 +2804,52 @@ public partial class Main : Node3D
     private readonly System.Collections.Generic.Dictionary<string, Node3D> _uiEditTargets = new();
     private bool _uiEditMode;
 
+    /// <summary>Headset-authored clean-profile placements from the durable
+    /// 2026-08-09 layout log. The paired button positions are regularised about
+    /// x=0 so Pause and Level Up are true mirrors; only their noisy rotations
+    /// and scales are rounded. Cabinet's hand rectangle retains the measured
+    /// offset, with its 10.8-degree pitch and 0.664 scale tidied to 10 and 0.65.</summary>
+    private bool TryGetPromotedUiDefault(string id, out Transform3D value)
+    {
+        static Transform3D Button(Vector3 position, Vector3 rotationDegrees, float scale)
+        {
+            Basis basis = Basis.FromEuler(new Vector3(
+                Mathf.DegToRad(rotationDegrees.X),
+                Mathf.DegToRad(rotationDegrees.Y),
+                Mathf.DegToRad(rotationDegrees.Z)));
+            return new Transform3D(basis.Scaled(Vector3.One * scale), position);
+        }
+
+        if (_controlMode == ControlMode.Cabinet)
+        {
+            value = id switch
+            {
+                "pause" => Button(new Vector3(0.278f, 0.003f, -0.003f),
+                    new Vector3(-90.0f, -155.0f, 0.0f), 1.70f),
+                "levelup" => Button(new Vector3(-0.278f, 0.003f, -0.003f),
+                    new Vector3(-90.0f, 155.0f, 0.0f), 1.70f),
+                "controlrect" => new Transform3D(
+                    Basis.FromEuler(new Vector3(Mathf.DegToRad(-10.0f), 0.0f, 0.0f))
+                        .Scaled(Vector3.One * 0.65f),
+                    new Vector3(0.022f, 0.096f, -0.016f)),
+                _ => default,
+            };
+            return id is "pause" or "levelup" or "controlrect";
+        }
+
+        // Tabletop was logged in the same pass. It has no separate hand
+        // rectangle, but its button pair is still kept as a symmetric fallback.
+        value = id switch
+        {
+            "pause" => Button(new Vector3(0.325f, 0.087f, -0.067f),
+                new Vector3(-40.0f, -135.0f, -7.5f), 1.30f),
+            "levelup" => Button(new Vector3(-0.325f, 0.087f, -0.067f),
+                new Vector3(-40.0f, 135.0f, 7.5f), 1.30f),
+            _ => default,
+        };
+        return id is "pause" or "levelup";
+    }
+
     /// <summary>Storage key for a widget's placement, scoped to the control mode
     /// it was dialled in for.
     ///
@@ -2704,6 +2884,19 @@ public partial class Main : Node3D
                 else
                 {
                     kv.Value.Transform = saved;
+                }
+            }
+            else if (TryGetPromotedUiDefault(kv.Key, out Transform3D promoted))
+            {
+                if (isControlRect)
+                {
+                    _controlRectOffset = promoted.Origin;
+                    _controlRectEditedBasis = promoted.Basis;
+                    _controlRectEdited = true;
+                }
+                else
+                {
+                    kv.Value.Transform = promoted;
                 }
             }
             else if (isControlRect)
@@ -2821,19 +3014,19 @@ public partial class Main : Node3D
                 : Basis.FromEuler(new Vector3(Mathf.DegToRad(-ControlRectPitchDegrees), 0.0f, 0.0f));
             Vector3 le = local.GetEuler();
             float lScale = local.Scale.X;
-            GD.Print($"[layout] {id}  pitch={-Mathf.RadToDeg(le.X):0.0} deg" +
-                     $"  scale={lScale:0.000}x" +
-                     $"  effective side={ControlRectSideMeters * lScale:0.000} m" +
-                     $"  offset=({_controlRectOffset.X:0.000}, {_controlRectOffset.Y:0.000}, {_controlRectOffset.Z:0.000}) m" +
-                     $"  -> drop={ControlRectDropMeters - _controlRectOffset.Y:0.000} m" +
-                     $"  near edge={ControlRectNearEdgeMeters + _controlRectOffset.Z:0.000} m");
+            RecordLayout($"[layout] {_controlMode}/{id}  pitch={-Mathf.RadToDeg(le.X):0.0} deg" +
+                         $"  scale={lScale:0.000}x" +
+                         $"  effective side={ControlRectSideMeters * lScale:0.000} m" +
+                         $"  offset=({_controlRectOffset.X:0.000}, {_controlRectOffset.Y:0.000}, {_controlRectOffset.Z:0.000}) m" +
+                         $"  -> drop={ControlRectDropMeters - _controlRectOffset.Y:0.000} m" +
+                         $"  near edge={ControlRectNearEdgeMeters + _controlRectOffset.Z:0.000} m");
             return;
         }
 
-        GD.Print($"[layout] {id}  pos=({t.Origin.X:0.000}, {t.Origin.Y:0.000}, {t.Origin.Z:0.000}) m" +
-                 $"  = s*({t.Origin.X / s:0.000}, {t.Origin.Y / s:0.000}, {t.Origin.Z / s:0.000})" +
-                 $"  rot=({Mathf.RadToDeg(euler.X):0.0}, {Mathf.RadToDeg(euler.Y):0.0}, {Mathf.RadToDeg(euler.Z):0.0}) deg" +
-                 $"  scale={scale.X:0.000}x");
+        RecordLayout($"[layout] {_controlMode}/{id}  pos=({t.Origin.X:0.000}, {t.Origin.Y:0.000}, {t.Origin.Z:0.000}) m" +
+                     $"  = s*({t.Origin.X / s:0.000}, {t.Origin.Y / s:0.000}, {t.Origin.Z / s:0.000})" +
+                     $"  rot=({Mathf.RadToDeg(euler.X):0.0}, {Mathf.RadToDeg(euler.Y):0.0}, {Mathf.RadToDeg(euler.Z):0.0}) deg" +
+                     $"  scale={scale.X:0.000}x");
     }
 
     /// <summary>Print the board and presentation values driven by the Layout
@@ -2841,14 +3034,60 @@ public partial class Main : Node3D
     /// rather than on a grabbable widget.</summary>
     private void LogArenaPlacement()
     {
-        GD.Print($"[layout] arena  scale={_playfieldScale:0.00}x" +
-                 $"  tilt={_playfieldPitch:0.0} deg" +
-                 $"  distance={_playfieldNearEdge:0.000} m" +
-                 $"  drop={_playfieldNearDrop:0.000} m" +
-                 $"  -> side={PlayfieldSideMeters:0.000} m");
-        GD.Print($"[layout] presentation  sprite height={_spriteHeightScale:0.00}x" +
-                 $"  aim line={_aimLineFraction * 100.0f:0}% ({_aimLineFraction * ArenaSideMeters:0.000} m)" +
-                 $"  mode={_controlMode}");
+        RecordLayout($"[layout] arena  scale={_playfieldScale:0.00}x" +
+                     $"  tilt={_playfieldPitch:0.0} deg" +
+                     $"  distance={_playfieldNearEdge:0.000} m" +
+                     $"  drop={_playfieldNearDrop:0.000} m" +
+                     $"  -> side={PlayfieldSideMeters:0.000} m");
+        RecordLayout($"[layout] presentation  sprite height={_spriteHeightScale:0.00}x" +
+                     $"  aim line={_aimLineFraction * 100.0f:0}% ({_aimLineFraction * ArenaSideMeters:0.000} m)" +
+                     $"  mode={_controlMode}");
+    }
+
+    /// <summary>Mirror every layout dump into a durable, ADB-readable file. The
+    /// release APK is intentionally not debuggable, so user:// cannot be pulled
+    /// with run-as; the app-owned external files directory needs no permission
+    /// and survives normal APK updates.</summary>
+    private static void RecordLayout(string line)
+    {
+        GD.Print(line);
+        try
+        {
+            string path;
+            if (OS.GetName() == "Android")
+            {
+                string external = OS.GetEnvironment("EXTERNAL_STORAGE");
+                if (string.IsNullOrWhiteSpace(external))
+                {
+                    external = "/sdcard";
+                }
+                path = Path.Combine(external, "Android", "data", "xyz.crimsonvr.app",
+                    "files", "crimsonvr-layout.log");
+            }
+            else
+            {
+                path = ProjectSettings.GlobalizePath("user://crimsonvr-layout.log");
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path,
+                $"{DateTimeOffset.UtcNow:O} {line}{System.Environment.NewLine}");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            GD.PushWarning($"CrimsonVR: could not persist layout log: {e.Message}");
+        }
+    }
+
+    private void RecordAllLayoutPlacements()
+    {
+        foreach (KeyValuePair<string, Node3D> kv in _uiEditTargets)
+        {
+            UiEditable.Mode mode = ReferenceEquals(kv.Value, _controlRect)
+                ? UiEditable.Mode.ScaleTilt
+                : UiEditable.Mode.Free;
+            LogWidgetPlacement(kv.Key, kv.Value, mode);
+        }
+        LogArenaPlacement();
     }
 
     private bool _uiLayoutDirty;
@@ -2874,6 +3113,13 @@ public partial class Main : Node3D
         }
         // Show the action buttons for placement and make them inert while held.
         _pauseMenu.SetEditMode(on);
+        _perkMenu.SetLayoutPreview(on);
+        if (!on)
+        {
+            // Record the final state on every edit exit, even if the player did
+            // not remember to poke the individual Log buttons.
+            RecordAllLayoutPlacements();
+        }
         if (!on && _uiLayoutDirty)
         {
             // Save on EXIT rather than per-frame: a drag fires every frame and

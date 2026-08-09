@@ -38,6 +38,7 @@ public sealed partial class PerkMenu : Node3D
     public int Chosen = -1;
 
     private bool _opened; // cards revealed (via the level-up button)
+    private bool _layoutPreview;
 
     // Cross-fade: each new candidate set (first open, or the next accumulated pick)
     // eases in over FadeMs so the swap reads clearly instead of popping.
@@ -50,10 +51,63 @@ public sealed partial class PerkMenu : Node3D
     public bool Pending { get; private set; }
 
     /// <summary>True while the cards are shown and pollable (Pending AND opened).</summary>
-    public bool Active => Pending && _opened;
+    public bool Active => _layoutPreview || (Pending && _opened);
 
     /// <summary>Reveal the cards (from the level-up button).</summary>
     public void Open() => _opened = true;
+
+    /// <summary>Show a representative, inert three-card offer while UI Edit is
+    /// open. The perk menu is deliberately not an editable target: it is the
+    /// clearance envelope the movable Pause/Level Up controls must respect.</summary>
+    public void SetLayoutPreview(bool visible)
+    {
+        _layoutPreview = visible;
+        _descPanel.Visible = false;
+        if (!visible)
+        {
+            Visible = Pending && _opened;
+            if (!Visible)
+            {
+                for (int i = 0; i < _cards.Length; i++)
+                {
+                    _cards[i].Visible = false;
+                    _help[i].Visible = false;
+                    _cards[i].ResetPress();
+                    _help[i].ResetPress();
+                }
+            }
+            return;
+        }
+
+        // Maximum live offer: base 5, Perk Expert 6, Perk Master 7. Use seven
+        // realistic labels so Edit mode exposes the true worst-case width.
+        string[] names =
+        {
+            "Fastloader", "Regeneration", "Long Distance Runner", "Fastshot",
+            "Sharpshooter", "Bonus Economist", "Perk Master",
+        };
+        _count = names.Length;
+        float total = _count * _cardW + (_count - 1) * _cardGap;
+        float x0 = -total * 0.5f + _cardW * 0.5f;
+        float cardH = _arenaSide * 0.34f;
+        for (int i = 0; i < _cards.Length; i++)
+        {
+            bool shown = i < _count;
+            _cards[i].Visible = shown;
+            _help[i].Visible = shown;
+            if (!shown)
+            {
+                continue;
+            }
+            float x = x0 + i * (_cardW + _cardGap);
+            _cards[i].Position = new Vector3(x, 0.0f, 0.0f);
+            _cards[i].SetText(names[i]);
+            _cards[i].SetFade(1.0f);
+            _help[i].Position = new Vector3(x, -(cardH * 0.5f + _arenaSide * 0.12f), 0.0f);
+            _help[i].SetFade(1.0f);
+        }
+        Visible = true;
+    }
 
     /// <summary>Force the whole perk pick hidden + reset. Needed when quitting a
     /// mission with a pick open: the sim tick that would clear it via Update() stops
@@ -239,7 +293,7 @@ public sealed partial class PerkMenu : Node3D
     /// cards each rendered frame.</summary>
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
-        if (!Active)
+        if (!Active || _layoutPreview)
         {
             return;
         }

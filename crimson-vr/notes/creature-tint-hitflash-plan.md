@@ -1,4 +1,4 @@
-# Creature base tint + hit-flash — implementation plan (deferred runtime change)
+# Creature base tint + hit-flash — implementation plan (implemented)
 
 > **IMPLEMENTED 2026-07-09 (ABI v4).** This landed simpler than the plan below
 > assumed: `CreatureInit.tint` was **already computed** per spawn template (incl.

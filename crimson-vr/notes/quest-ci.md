@@ -46,5 +46,9 @@ ReleaseSafe arm64 host library, installs a fresh Gradle Android template,
 exports a release APK, injects the host library, aligns native libraries for
 Quest's 16 KiB pages, signs it, and verifies the managed/native/OpenXR payload.
 
-This is preparation, not the M6 release gate. M6 still needs the on-device
-first-run importer and a hash-based audit for derived asset content.
+The M6 runtime half is now implemented and tested: the asset-free APK presents
+an asset-independent recovery panel, imports a locally created pack atomically,
+and has completed a clean on-headset Quest import. Source and APK payload gates
+reject bundled original assets. Remaining release work is operational/legal:
+exercise the private-copy workflow end to end, complete the derived-content
+audit, and settle what upstream-linked binaries/code may be redistributed.

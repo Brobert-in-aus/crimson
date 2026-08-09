@@ -47,12 +47,14 @@ public sealed partial class ArenaLayoutMenu : Node3D
         float pitch, Action<float> onPitch,
         float distance, Action<float> onDistance,
         float drop, Action<float> onDrop,
+        float spriteHeight, Action<float> onSpriteHeight,
         Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
-        // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
-        Position = new Vector3(0.0f, s * 0.9f, s * 0.25f);
-        RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
+        // Edit controls live on the left wall, leaving the centre clear for the
+        // fixed perk-card preview and the mirrored action buttons being placed.
+        Position = new Vector3(-s * 1.25f, s * 0.9f, 0.0f);
+        RotationDegrees = new Vector3(0.0f, 90.0f, 0.0f);
 
         float y = s * 0.5f;
         AddTitle(s, y);
@@ -64,8 +66,9 @@ public sealed partial class ArenaLayoutMenu : Node3D
             new Row { Name = "Arena tilt", Steps = 18, Min = 0.0f, Step = 5.0f, Unit = "deg", Apply = onPitch },
             new Row { Name = "Arena distance", Steps = 20, Min = 0.2f, Step = 0.1f, Unit = "m", Apply = onDistance },
             new Row { Name = "Arena height", Steps = 20, Min = 0.0f, Step = 0.05f, Unit = "m", Apply = onDrop },
+            new Row { Name = "Sprite height", Steps = 20, Min = 0.0f, Step = 0.1f, Unit = "x", Apply = onSpriteHeight },
         };
-        float[] current = { scale, pitch, distance, drop };
+        float[] current = { scale, pitch, distance, drop, spriteHeight };
 
         for (int i = 0; i < _rows.Length; i++)
         {

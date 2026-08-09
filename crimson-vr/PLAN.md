@@ -397,9 +397,10 @@ player set it by hand, which is a weaker form of the same thing.
 > game's camera crops that margin so it's never seen; the VR diorama shows the
 > whole world plane, so clusters visibly popped in *outside* the table and ran
 > onto it. **2026-08-09:** creature sprites, shadows, auras, and freeze overlays
-> now use a fragment-level playfield clip. This reproduces the flat viewport crop
-> while retaining exact simulation spawn positions: enemies scroll through the
-> boundary pixel-by-pixel at full opacity, and the temporary alpha fade is gone.
+> briefly used a fragment-level playfield clip, but headset testing showed that
+> the original margin fade looks substantially better in the diorama. Creature
+> sprites, shadows, auras, and freeze overlays therefore use that soft fade again,
+> while retaining exact simulation spawn positions.
 > The thin playfield border remains as a useful boundary marker.
 
 - **Terrain**: flat quad with the generated terrain texture; decals (blood,
@@ -909,7 +910,7 @@ screen-space overlays:
 7. **Haptics — BUILT (2026-07-09).** Fire pulse (aim hand, from shot audio
    events), strong both-hand pulse on damage, reload-complete tick, via the OpenXR
    "haptic" action. On-device feel + action binding need eyes.
-8. **Replay recording — BUILT (2026-08-09), one confirmation outstanding.** The
+8. **Replay recording — BUILT + QUEST-CONFIRMED (2026-08-09).** The
    invasive-ABI slice (ABI 19 -> 21). Every run records to `user://replays/
    <stamp>.crd` in the standard format, produced by the same native encoder the
    desktop tooling verifies, so a VR run checks out under `crimson-zig replay
@@ -937,12 +938,13 @@ screen-space overlays:
    what the replay is re-simulated FROM, so the bad value lands on both sides of
    the comparison.
 
-   **Outstanding:** a real VR run recorded on ABI v21 that passes `replay verify`.
-   Everything before v21 was recorded with the corrupt usage header, so no
-   earlier VR replay counts as confirmation.
+   **Confirmed:** the real Quest recording `20260809-190628.crd` verifies all
+   6,256 ticks exactly after aligning replay perk-offer refresh with the live
+   path (160 kills, 8,620 XP, final RNG 1127891099).
 9. **Settings persistence — BUILT (2026-07-09).** `UserSettings` (Godot ConfigFile
-   under user://): hand-swap, dead-zone, first-run-done, highscores; loaded at
-   startup, saved on change. Arena scale/height not stored (deferred slices).
+   under user://): hand-swap, dead-zone, first-run state, highscores, display/
+   comfort settings, arena placement, per-mode UI layout and validation results;
+   loaded at startup and saved on change/edit exit.
 
 **M4 in-headset validation backlog (all slices 1-9 are headless-verified only):**
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
@@ -964,7 +966,7 @@ reach-envelope calibration (§5) and the player-centered follow-mode toggle (§5
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
   without touching desktop; recorded `.crd` verifies; settings persist.
 
-### M5 — Shell + builds
+### M5 — Shell + builds (Quest personal-build path implemented)
 - VR-native minimal menu (start survival, settings, quit), version/about.
 - CI builds: Windows x64, Quest APK, Linux x64 (GitHub Actions; Zig cross-
   compile + Godot headless export). Builds remain private until M6 clears.
@@ -974,8 +976,9 @@ reach-envelope calibration (§5) and the player-centered follow-mode toggle (§5
 - ✅ *Verify*: clean-machine install test on PCVR and Quest; CI produces all
   artifacts from one tag.
 
-### M6 — Asset removal + licensing decoupling (public-release gate)
-Nothing ships publicly until this milestone is done.
+### M6 — Asset removal + licensing decoupling (runtime flow implemented;
+public-release gate remains)
+Nothing ships publicly until the remaining audit and legal scope are resolved.
 
 - **Remove all original-asset acquisition from distributed builds**: no
   bundled PAQs, no automatic download from the upstream project's channel
@@ -1200,34 +1203,37 @@ verify itself*. Rules to keep it that way:
 
 ## 12. Immediate next steps
 
-**Updated 2026-08-09.** M0-M4 are built. M4 slice 8 (replay recording) landed
-2026-08-08/09 and needs one confirming VR run on ABI v21.
+**Updated 2026-08-09.** M0-M4 are built. M4 slice 8 replay recording is now
+confirmed by a real 6,256-tick ABI v21 Quest recording.
 
 **In flight: control modes (§4/§5).** Tabletop/Cabinet, the Arena & Layout
 screen, and UI edit mode all landed 2026-08-08 and are being validated
-in-headset. The new checklist batch (`cabsteer` … `hudfade`) tracks it. Nothing
-in that batch has a confirmed pass yet, and several pieces were written against
-a screenshot rather than a headset, so expect another round.
+in-headset. The 2026-08-09 pass confirmed 27 items, identified the MR vignette's
+seam coverage as incorrect, and left four unselected. Completed rows have been
+removed; the revised seam mask (starts just inside the arena, reaches 70% darkness
+one-third across the outer margin) and restored creature fade have fresh retest
+keys alongside the untested cases and new paged-settings/edit-preview/default-layout checks.
 
 Remaining, in rough order:
 
-1. **Finish validating the control-mode work**, then promote the dialled-in
-   Layout values into the constants they were measured for. The debug Layout
-   panel is session-only precisely so those numbers get baked rather than
-   silently persisted per-install.
-2. **Confirm slice 8** — one VR run recorded on ABI v21 that passes `replay
-   verify`. Everything recorded before v21 carried a corrupt usage header, so
-   no earlier VR replay counts. The five bugs behind that are in the M4 slice 8
-   entry above; the standing lesson is that every one of them was found by a
-   real replay and none by a gate, so the confirming run is the gate.
-3. **M5 — shell + CI builds.** The VR-native menu exists. Quest personal-build
+1. **Finish validating the control-mode work.** The headset-authored Cabinet
+   layout is now the clean-profile default (3.75x, 55 degrees, 1.40 m distance,
+   0.95 m drop). Both logged Pause/Level Up layouts are baked as exact rounded
+   mirror pairs; Cabinet's logged hand rectangle defaults to a 10-degree pitch,
+   0.65x scale and its measured offset. Edit mode shows moving real sprites, a
+   fixed perk offer and an x3 badge for clearance.
+2. **Clean-install asset rehearsal.** The asset-free Quest/PCVR bootstrap,
+   integrity-checked atomic importer, local helper, and no-launch ADB transfer
+   are built. Run the prepared destructive rehearsal once current headset
+   results have been collected; validate first launch, import, relaunch reuse,
+   and actionable failure recovery.
+3. **Finish M5 shell + CI builds.** The VR-native menu exists. Quest personal-build
    CI is now specified as a manually dispatched, secret-free clean build with
    an auto-generated keystore. Public repositories validate without uploading;
    the downloadable APK/key bundle is restricted to a private standalone copy
    (see `crimson-vr/notes/quest-ci.md`). Windows/Linux artifacts remain.
 4. **Seated reach calibration (§5).** Now partly served by the Arena & Layout
    sliders; a measured calibration is still the stronger version.
-5. **M6 — asset removal + licensing decoupling.** The hard gate before anything
-   ships publicly. Development continues privately against upstream's asset
-   flow until then; the banteg/10tons conversations happen with a finished
-   build in hand (per §10).
+5. **Release/fork rehearsal.** Asset removal and licensing decoupling are built;
+   after the clean-install gate, exercise the documented fork/rebase and private
+   personal-build workflow end to end.

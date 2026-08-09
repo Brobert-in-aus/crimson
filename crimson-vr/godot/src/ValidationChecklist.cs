@@ -15,41 +15,23 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class ValidationChecklist : Node3D
 {
-    // (id, label). Ids are stable keys for persistence; edit freely as the
-    // validation surface changes. Cleared 2026-07-26 (v18 flicker fix, death
-    // anim round 3, frame drops all validated). New batch: the death-screen
-    // milling + Breathing Room fixes, the ground-RT sleep/resume restore, and
-    // the four-feature round (edge fade / hardcore + end note / bonus HUD +
-    // weapon popup / Controls).
+    // (id, label). Ids are stable keys for persistence. Items already persisted
+    // as PASS are filtered out when the panel is built, so a headset keeps only
+    // failures and work that genuinely still needs testing after an update.
     private static readonly (string Id, string Label)[] Items =
     {
-        ("millname", "Death: swarm mills during name entry"),
-        ("breathe", "Breathing Room: clears the screen"),
-        ("resumebake", "Ground blood survives sleep + resume"),
-        ("edgefade", "Spawns fade in at the rim, no pop-in"),
-        ("hardcore", "Quest select: hardcore checkbox + run"),
-        ("hcunlock", "Hardcore clear: Splitter progression"),
-        ("endnote", "Quest 5.10: Show End Note panel"),
-        ("bonushud", "Bonus rows: icon + name + timer bar"),
-        ("weaponpopup", "Weapon pickup: name popup flashes"),
-        ("controls", "Options: Controls card reads right"),
-        // Batch added 2026-08-08 — the control-rectangle split and everything
-        // that followed it. All of this is either brand new or was changed
-        // blind against a screenshot, so none of it has a confirmed pass.
-        ("cabsteer", "Cabinet: steering feel off the control rect"),
-        ("modeswap", "Settings: Tabletop <-> Cabinet switch"),
-        ("arenaslid", "Arena & Layout: all four sliders move the board"),
-        ("arenasave", "Arena placement survives a relaunch"),
-        ("editmove", "UI edit: one corner moves a button"),
-        ("edit6dof", "UI edit: two corners scale + rotate + PITCH"),
-        ("editrect", "UI edit: rect scales, tilts and moves"),
-        ("editreset", "Reset layout restores built-in placements"),
-        ("editscope", "Edit mode ends on leaving the screen"),
-        ("lvlbadge", "Level-up xN badge follows its button"),
-        ("aimpillar", "Aim lines: gameplay only, normal to board"),
+        // The 2026-08-09 headset pass selected every previous row except these
+        // four. Keep only genuinely untested work, the revised vignette seam
+        // mask, and the fresh UI/layout changes below.
         ("spriteht", "Sprite height slider seats the entities"),
-        ("hudcab", "Cabinet HUD: health edge, ammo wide, XP above"),
-        ("hudfade", "HUD incl. health fades on the perk pick"),
+        ("mrvignseam", "MR: seam fades to 70% dark by 1/3 margin"),
+        ("mrproject", "Projectiles leave diorama, fly on, then despawn"),
+        ("mrfadeback", "Enemies fade smoothly through the outer margin"),
+        ("assetboot", "No-assets boot: clear recovery screen + Retry"),
+        ("vrpages", "VR Settings: both pages fit and navigate cleanly"),
+        ("editpreview", "Edit: moving sprites + all 7 perk cards are visible"),
+        ("editclear", "Edit: mirrored buttons and xN clear perk cards"),
+        ("layoutdefaults", "Clean profile starts at the tuned arena layout"),
     };
 
     private const int PerPage = 4;
@@ -71,6 +53,7 @@ public sealed partial class ValidationChecklist : Node3D
     private int _page;
 
     private Dictionary<string, int> _results = new();
+    private (string Id, string Label)[] _activeItems = Array.Empty<(string, string)>();
 
     /// <summary>Raised when an item's state changes (id, newState) so the owner
     /// can persist it.</summary>
@@ -79,6 +62,8 @@ public sealed partial class ValidationChecklist : Node3D
     public void Build(float arenaSideMeters, Dictionary<string, int> results)
     {
         _results = results;
+        _activeItems = Array.FindAll(Items, item =>
+            !_results.TryGetValue(item.Id, out int state) || state != 1);
         float s = arenaSideMeters;
         // Stand off to the player's RIGHT (arena-local +x), turned 90 deg so it
         // faces the player when they look right — always visible, out of the way of
@@ -187,7 +172,7 @@ public sealed partial class ValidationChecklist : Node3D
         return b;
     }
 
-    private int PageCount => (Items.Length + PerPage - 1) / PerPage;
+    private int PageCount => Math.Max(1, (_activeItems.Length + PerPage - 1) / PerPage);
 
     private void ChangePage(int delta)
     {
@@ -201,7 +186,7 @@ public sealed partial class ValidationChecklist : Node3D
         for (int i = 0; i < PerPage; i++)
         {
             int idx = _page * PerPage + i;
-            if (idx < Items.Length)
+            if (idx < _activeItems.Length)
             {
                 _rows[i].Visible = true;
                 ApplyRow(i, idx);
@@ -215,7 +200,7 @@ public sealed partial class ValidationChecklist : Node3D
 
     private void ApplyRow(int row, int itemIndex)
     {
-        (string id, string label) = Items[itemIndex];
+        (string id, string label) = _activeItems[itemIndex];
         int state = _results.TryGetValue(id, out int v) ? Mathf.Clamp(v, 0, 2) : 0;
         _rows[row].SetText(StatePrefix[state] + label);
         _rows[row].SetColor(StateColors[state]);
@@ -224,11 +209,11 @@ public sealed partial class ValidationChecklist : Node3D
     private void CycleItem(int row)
     {
         int idx = _page * PerPage + row;
-        if (idx >= Items.Length)
+        if (idx >= _activeItems.Length)
         {
             return;
         }
-        string id = Items[idx].Id;
+        string id = _activeItems[idx].Id;
         int state = (_results.TryGetValue(id, out int v) ? v : 0) + 1;
         if (state > 2)
         {

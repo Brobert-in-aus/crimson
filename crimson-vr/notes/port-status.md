@@ -6,10 +6,9 @@ and what's still missing to reach faithful parity with the base game. The
 work is almost entirely the **presentation + interaction** layer, so most gaps
 below are "not surfaced in VR yet", not "not simulated".
 
-_Last updated: 2026-07-09 (full-game feature audit: six-way sweep of screens/flow,
-HUD, render pipeline, audio, gameplay/meta, and VR-claim verification. This pass
-found the doc had been tracking parity at feature/asset granularity; it now also
-tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
+_Last updated: 2026-08-09. The original full-game parity audit remains below;
+the current pass additionally records Quest MR, hands, replay, layout editing,
+and the user-supplied asset/bootstrap workflow._
 
 ## Implemented in VR
 
@@ -70,7 +69,18 @@ tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
 - **Arena recenter** — left `menu_button` / right `ax_button` reposition + re-yaw
   the tabletop, plus initial auto-place (`Main.cs:1076-1122`). **[audit]**
   (was undocumented).
-- **Validation checklist** (dev tool) standing to the right of the arena.
+- **Validation checklist** (dev tool) is a paged poke panel whose pass/fail state
+  persists. Passed rows are retired between test batches; current untested and
+  changed behavior receives fresh persistence keys.
+- **Controller and optical-hand input**: menus use fingertip poke rather than a
+  laser; left hand moves, right hand aims/fires with pinch, and the weapon-swap
+  perk has a reload gesture. Controller poke markers sit at the controller tip.
+- **Arena & Layout editor**: Tabletop/Cabinet placement, arena scale/tilt/
+  distance/drop, sprite height, aim-line length, and grab-editable Pause,
+  Level-Up and hand-control rectangle. Edit mode previews moving real creature
+  sprites, the maximum seven perk cards and an x3 level-up badge. Layout dumps
+  are durable and ADB-readable; the 2026-08-09 headset layout is baked into clean
+  profile defaults with exactly mirrored action buttons.
 
 **Presentation (diorama)**
 - Creatures (animated sheets, per-type tint, energizer/freeze/hit-flash, death →
@@ -78,16 +88,19 @@ tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
   secondaries (glow streaks — see per-type variants gap), bonuses/powerup icons,
   blood/scorch decals, muzzle flash (see approximation note), explosions,
   drop-shadows, terrain floor + surrounding world floor, grey-fog skybox.
-- Stopped-projectile cull (ABI v9): projectiles with `LifeTimer < 0.4` are
-  dropped except gauss/ion linger beams (`Diorama.cs:1278-1335`). **[audit]**
-  Side effect: the base game's *fade-stage* visuals (plasma/pulse/beam-core
-  end-of-life flashes) are culled with them.
+- Projectile presentation is not cropped to the arena or diorama. Projectiles
+  preserve their simulated travel, continue into the surrounding world, and
+  naturally disappear at their runtime lifetime/travel limit; fade-stage
+  visuals remain visible.
 - Per-type projectile glow tints (ION blue / FIRE_BULLETS orange / SHRINKIFIER
   green / BLADE_GUN magenta, `Diorama.cs:301-313`). **[audit]** (undocumented).
-- **MR passthrough** path (Quest 3 ALPHA_BLEND) — built but **compile-time only**.
-  **[audit]** `_displayMode` is hardcoded to Skybox with no runtime toggle
-  (`Main.cs:114`); "opt-in" overstated user-reachability. The ValidationChecklist
-  "passthrough" item cannot currently be exercised. Settings toggle is M4.
+- **MR passthrough** is a runtime VR Settings option shown only when the OpenXR
+  device reports support. It keeps the diorama floor, removes the large world
+  floor and fog, and uses MR-safe premultiplied/composited transparency for
+  particles and effects. The terrain seam is hidden by a floor vignette that
+  begins slightly inside the arena, reaches 70% darkness one-third across the
+  outer margin, then holds. Creatures/shadows/auras/freeze overlays retain the
+  preferred soft off-arena fade; the rejected hard playfield clip is gone.
 
 **Systems**
 - Audio: SFX routed from the sim's per-tick audio events; menu music
@@ -98,6 +111,13 @@ tracks behavioral fidelity. Corrections and new gaps are marked **[audit]**.)_
 - Fire-Bullets shot audio plays the base game's dual-sample substitution
   (`FIRE_BULLETS` + `PLASMA_MINIGUN`, `AudioBank.cs:165-170`). **[audit]**
   (undocumented faithful detail).
+- Native `.crd` replay recording is on by default and Quest-confirmed through a
+  6,256-tick exact replay on ABI v21.
+- Asset-free builds recover through a generated first-run panel. A local helper
+  turns a user-owned Crimsonland Classic install into an integrity-checked pack
+  for PCVR or the Quest app inbox; import is traversal-safe and atomic, and a
+  failed replacement preserves the working asset tree. Clean PCVR and Quest
+  imports have both passed.
 
 ## Provided by the sim already (just needs surfacing)
 
@@ -139,7 +159,7 @@ them. Revisit only if the interaction model changes.
 | **Menu hover-fade / ready-glow / TAB-keyboard nav** (`menu.py:467-523,253-273`) | **N/A** | Hover and keyboard focus don't exist in poke UI. Panel/menu **slide-in timelines** are portable cosmetics — optional polish, not required parity. |
 | **Full-screen fade transitions** (`transitions.py`) | **Substitute (optional)** | 2D-screen concept. At most a brief world-fade for comfort when entering/leaving gameplay; not parity work. |
 | **Aim cursor (`ui_iconAim`) + direction arrows** (`overlays.py:108-138`) | **N/A** | Replaced by hand reticles (different affordance, already shipped). |
-| **World aim spread circle** (`overlays.py:22-50`) | **Adapt** | Don't port as a world overlay; surface `spread_heat` as a **reticle spread ring**. Still needs `spread_heat` added to the ABI. |
+| **World aim spread circle** (`overlays.py:22-50`) | **Adapted** | `spread_heat` crosses ABI v11 and drives a reticle spread ring rather than a world-space overlay. |
 | **Attract / demo mode** (`demo.py`) | **Skip (default)** | Storefront feature; idle headsets get removed, not watched. Optional novelty (diorama plays itself behind the menu) if ever cheap. |
 | **Boot publisher-logo sequence** (`boot.py` 10tons/Reflexive splashes) | **Skip logos** | Desktop launch convention + third-party logo rights. A custom VR boot may still use the `intro` track. |
 | **RTX beam mode** (`render/rtx/`) | **Skip** | Alternate desktop renderer path, not classic parity. |
@@ -169,8 +189,8 @@ them. Revisit only if the interaction model changes.
 | **Mods** | `mods.py` | **Skip v1** (see VR-inapplicable table) |
 | **Network / co-op** | `network_lobby.py`, `network_session.py` | Missing (out of scope for v1) |
 | **Demo-trial gating** **[audit]** | `demo_trial.py`, `ui/demo_trial_overlay.py` | **Skip** (see VR-inapplicable table — shareware-build-only). |
-| **Replay playback mode** | `modes/replay_playback_mode.py` | Missing (desktop tool); native **.crd recorder** deferred (`notes/replay-recording-plan.md`). |
-| First-run seated **calibration** + **arena scale** UI | (VR-specific) | Deferred slices (StartPrompt built, always `Skip()`s). |
+| **Replay playback mode** | `modes/replay_playback_mode.py` | Playback remains missing; native **.crd recording is implemented and Quest-confirmed** (`notes/replay-recording-plan.md`). |
+| First-run seated **calibration** + **arena scale** UI | (VR-specific) | Arena & Layout editing is implemented and persisted; measured reach calibration remains deferred. |
 
 **Flow behaviors (cross-screen) not in VR [audit]:**
 - **Screen-fade transitions** — global black fade in/out entering gameplay

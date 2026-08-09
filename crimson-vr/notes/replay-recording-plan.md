@@ -1,6 +1,13 @@
-# M4 slice 8 - native .crd replay recorder (deferred)
+# M4 slice 8 - native .crd replay recorder (implemented)
 
-Status: **not started** (deferred from the 2026-07-09 M4 run as the one
+> **IMPLEMENTED AND QUEST-CONFIRMED 2026-08-09 (ABI v21).** Recording is on by
+> default and writes standard `.crd` files under `user://replays`. The real Quest
+> recording `20260809-190628.crd` replayed all 6,256 ticks exactly after the live
+> and replay perk-offer refresh paths were aligned (160 kills, 8,620 XP, final
+> RNG 1127891099). The plan below is retained as the design record; its original
+> ABI estimate and “not started” status are historical.
+
+Original status: **not started** (deferred from the 2026-07-09 M4 run as the one
 mini-milestone-sized, invasive-ABI slice). Everything below is fully mapped from
 the existing `crimson-zig` replay machinery; the hard parts (a msgpack encoder,
 the stat computation) already exist and are reused.

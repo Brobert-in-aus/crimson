@@ -34,6 +34,10 @@ public sealed partial class SettingsMenu : Node3D
     private VrButton _pokeMarkers = null!;
     private VrButton _debug = null!;
     private VrButton _back = null!;
+    private VrButton _pageButton = null!;
+    private Label3D _title = null!;
+    private int _page;
+    private float _arenaSide;
 
     private bool _swapState;
     private bool _debugState;
@@ -59,6 +63,7 @@ public sealed partial class SettingsMenu : Node3D
         bool mixedRealitySupported, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
+        _arenaSide = s;
         _swapState = handSwap;
         _debugState = debug;
         _pokeMarkersState = pokeMarkers;
@@ -78,7 +83,7 @@ public sealed partial class SettingsMenu : Node3D
         float y = s * 0.5f;       // top-down cursor
 
         AddTitleBacking(y, "VR Settings", 120.0f, s / 1000.0f);
-        var title = new Label3D
+        _title = new Label3D
         {
             Text = "VR Settings",
             FontSize = 120,
@@ -89,7 +94,7 @@ public sealed partial class SettingsMenu : Node3D
             Position = new Vector3(0.0f, y, 0.002f),
             NoDepthTest = true,
         };
-        AddChild(title);
+        AddChild(_title);
         y -= pitch;
 
         // Control mode: the most consequential setting on this panel, so it
@@ -197,6 +202,13 @@ public sealed partial class SettingsMenu : Node3D
         _back.Position = new Vector3(0.0f, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
+        _pageButton = new VrButton();
+        AddChild(_pageButton);
+        _pageButton.Build(bw * 0.5f, bh, "Next", new Color(0.45f, 0.62f, 0.82f), plate: true);
+        _pageButton.OnPress += () => SetPage(1 - _page);
+
+        ApplyPageLayout();
+
         Visible = false;
     }
 
@@ -204,7 +216,6 @@ public sealed partial class SettingsMenu : Node3D
     private Label3D MakeSliderLabel(float s, string text, float rowY)
     {
         float ty = rowY + s * 0.06f;
-        AddTitleBacking(ty, text, 90.0f, s / 1200.0f);
         var label = new Label3D
         {
             Text = text,
@@ -237,6 +248,10 @@ public sealed partial class SettingsMenu : Node3D
     public void SetShown(bool visible)
     {
         Visible = visible;
+        if (visible)
+        {
+            SetPage(0);
+        }
         // Re-arm + start the settle window on show AND hide, so a lingering finger
         // where a button appears can't instant-fire.
         _handSwap.ResetPress();
@@ -249,6 +264,7 @@ public sealed partial class SettingsMenu : Node3D
         _mixedReality.ResetPress();
         _deadZone.ResetPress();
         _renderScale.ResetPress();
+        _pageButton.ResetPress();
     }
 
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
@@ -257,19 +273,75 @@ public sealed partial class SettingsMenu : Node3D
         {
             return;
         }
-        _handSwap.PollPoke(probes);
-        _controlMode.PollPoke(probes);
-        _uiEdit.PollPoke(probes);
-        _debug.PollPoke(probes);
-        _pokeMarkers.PollPoke(probes);
-        _back.PollPoke(probes);
-        _aa.PollPoke(probes);
-        if (_mixedRealitySupported)
+        if (_page == 0)
         {
-            _mixedReality.PollPoke(probes);
+            _handSwap.PollPoke(probes);
+            _controlMode.PollPoke(probes);
+            _uiEdit.PollPoke(probes);
+            _pokeMarkers.PollPoke(probes);
+            _deadZone.PollPoke(probes);
         }
-        _deadZone.PollPoke(probes);
-        _renderScale.PollPoke(probes);
+        else
+        {
+            _debug.PollPoke(probes);
+            _aa.PollPoke(probes);
+            if (_mixedRealitySupported)
+            {
+                _mixedReality.PollPoke(probes);
+            }
+            _renderScale.PollPoke(probes);
+        }
+        _back.PollPoke(probes);
+        _pageButton.PollPoke(probes);
+    }
+
+    private void SetPage(int page)
+    {
+        _page = Mathf.Clamp(page, 0, 1);
+        ApplyPageLayout();
+        _pageButton.ResetPress();
+    }
+
+    private void ApplyPageLayout()
+    {
+        float s = _arenaSide;
+        bool controls = _page == 0;
+        _title.Text = controls ? "VR Controls" : "VR Display";
+
+        _controlMode.Visible = controls;
+        _uiEdit.Visible = controls;
+        _handSwap.Visible = controls;
+        _deadZone.Visible = controls;
+        _deadZoneLabel.Visible = controls;
+        _pokeMarkers.Visible = controls;
+
+        _renderScale.Visible = !controls;
+        _renderScaleLabel.Visible = !controls;
+        _aa.Visible = !controls;
+        _mixedReality.Visible = !controls;
+        _debug.Visible = !controls;
+
+        if (controls)
+        {
+            _controlMode.Position = new Vector3(0.0f, s * 0.32f, 0.0f);
+            _uiEdit.Position = new Vector3(0.0f, s * 0.19f, 0.0f);
+            _handSwap.Position = new Vector3(0.0f, s * 0.06f, 0.0f);
+            _deadZoneLabel.Position = new Vector3(0.0f, -s * 0.08f, 0.002f);
+            _deadZone.Position = new Vector3(0.0f, -s * 0.14f, 0.0f);
+            _pokeMarkers.Position = new Vector3(0.0f, -s * 0.28f, 0.0f);
+        }
+        else
+        {
+            _renderScaleLabel.Position = new Vector3(0.0f, s * 0.32f, 0.002f);
+            _renderScale.Position = new Vector3(0.0f, s * 0.26f, 0.0f);
+            _aa.Position = new Vector3(0.0f, s * 0.10f, 0.0f);
+            _mixedReality.Position = new Vector3(0.0f, -s * 0.04f, 0.0f);
+            _debug.Position = new Vector3(0.0f, -s * 0.18f, 0.0f);
+        }
+
+        _pageButton.SetText(controls ? "Display >" : "< Controls");
+        _pageButton.Position = new Vector3(-s * 0.19f, -s * 0.43f, 0.0f);
+        _back.Position = new Vector3(s * 0.19f, -s * 0.43f, 0.0f);
     }
 
     private void ToggleHandSwap()

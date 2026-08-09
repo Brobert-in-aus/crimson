@@ -206,6 +206,61 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Set the proportional lift multiplier for every entity layer.</summary>
     public void SetHeightScale(float scale) => _heightScale = Mathf.Max(scale, 0.0f);
+
+    /// <summary>Replace the frozen menu-time creature snapshot with a small,
+    /// deterministic parade for the layout editor. These use the real creature
+    /// sheets, tilt, physical size, and height multiplier, so the Sprite Height
+    /// slider can be judged in motion rather than against whichever enemies
+    /// happened to be frozen when Settings opened.</summary>
+    public void RenderLayoutPreview(double seconds)
+    {
+        foreach (Layer layer in _creatureLayers.Values)
+        {
+            layer.Mesh.VisibleInstanceCount = 0;
+        }
+        _creatureFallback.Mesh.VisibleInstanceCount = 0;
+
+        int lane = 0;
+        foreach (Layer layer in _creatureLayers.Values)
+        {
+            if (lane >= 4)
+            {
+                break;
+            }
+            const int count = 2;
+            for (int i = 0; i < count; i++)
+            {
+                double phase = seconds * (0.55 + lane * 0.08) + i * Mathf.Pi;
+                float radius = 150.0f + lane * 54.0f;
+                Vector2 game = new(
+                    _worldSize * 0.5f + Mathf.Cos((float)phase) * radius,
+                    _worldSize * 0.5f + Mathf.Sin((float)phase) * radius);
+                float heading = (float)phase + Mathf.Pi * 0.5f + layer.HeadingOffset;
+                float sizeUnits = 64.0f;
+                float meters = sizeUnits * (_arenaSideMeters / _worldSize) * layer.SizeScale;
+                Vector3 pos = Mapper.GameToArenaLocal(game, _arenaSideMeters, _worldSize)
+                    + new Vector3(0.0f, layer.Lift * _heightScale, 0.0f);
+                pos.Y += meters * 0.5f * SpriteTiltSin;
+                Basis basis = SpriteTilt * FlatFacingBasis(ForwardFromHeading(heading), meters);
+                layer.Mesh.SetInstanceTransform(i, new Transform3D(basis, pos));
+                if (layer.Animated)
+                {
+                    int cells = layer.Grid * layer.Grid;
+                    int frame = (layer.BaseFrame + (int)(seconds * 9.0 + i * 3 + lane * 5))
+                        % Mathf.Max(cells, 1);
+                    float inv = 1.0f / layer.Grid;
+                    layer.Mesh.SetInstanceCustomData(i, new Color(
+                        (frame % layer.Grid) * inv, (frame / layer.Grid) * inv, inv, 0.0f));
+                }
+                if (layer.Tinted)
+                {
+                    layer.Mesh.SetInstanceColor(i, Colors.White);
+                }
+            }
+            layer.Mesh.VisibleInstanceCount = count;
+            lane++;
+        }
+    }
     private float _worldSize;
     private float _energizerTimer; // global energizer bonus timer (snapshot header)
 
@@ -420,7 +475,7 @@ public sealed partial class Diorama : Node3D
             }
         }
         // Fallback for unmapped creature types (e.g. bosses) so nothing vanishes.
-        _creatureFallback = BuildArenaClippedColorLayer(CreatureCapPerType,
+        _creatureFallback = BuildColorLayer(CreatureCapPerType,
             new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
         _creatureFallback.ClampRefSize = true;
         _creatureFallback.HasStableIdentity = true;
@@ -473,18 +528,6 @@ public sealed partial class Diorama : Node3D
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
             RenderPriority = renderPriority,
         };
-        return BuildLayer(capacity, material, lift, sizeScale);
-    }
-
-    /// <summary>Fallback creature layer with the same playfield clipping as the
-    /// textured creature shader. This is used only when a creature sheet is
-    /// absent, but it must not reintroduce whole-quad pop-in at the boundary.</summary>
-    private Layer BuildArenaClippedColorLayer(int capacity, Color color, float lift,
-        float sizeScale, int renderPriority)
-    {
-        var material = new ShaderMaterial { Shader = ArenaClippedColorShader, RenderPriority = renderPriority };
-        material.SetShaderParameter("albedo", color);
-        TrackArenaClip(material);
         return BuildLayer(capacity, material, lift, sizeScale);
     }
 
@@ -562,9 +605,8 @@ public sealed partial class Diorama : Node3D
         // TintedSpriteShader (not SpriteShader) so the per-instance energizer +
         // lifecycle tint (MultiMesh COLOR) modulates the sprite; instances default
         // to white (no tint) when neither effect is active.
-        var material = new ShaderMaterial { Shader = ArenaClippedTintedSpriteShader, RenderPriority = desc.priority };
+        var material = new ShaderMaterial { Shader = TintedSpriteShader, RenderPriority = desc.priority };
         material.SetShaderParameter("sheet", tex);
-        TrackArenaClip(material);
         Layer layer = BuildLayer(capacity, material, lift, sizeScale, useCustomData: true, useColors: true);
         layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
         layer.Animated = true;
@@ -653,28 +695,7 @@ public sealed partial class Diorama : Node3D
     // MultiMeshInstances and there is no single node to walk.
     private readonly System.Collections.Generic.List<ShaderMaterial> _mrCompositeMats = new();
     private readonly System.Collections.Generic.List<(GeometryInstance3D Node, Material Vr, Material Mr)> _mrMaterialSwaps = new();
-    private readonly System.Collections.Generic.List<ShaderMaterial> _arenaClipMats = new();
     private bool _mrComposite;
-
-    /// <summary>Register a material that reproduces the original viewport's
-    /// hard playfield clip. Its fragment position is transformed back into this
-    /// Diorama's local space, so clipping remains correct while ArenaRoot is
-    /// scaled, tilted, yawed, or recentered.</summary>
-    private void TrackArenaClip(ShaderMaterial mat)
-    {
-        _arenaClipMats.Add(mat);
-        mat.SetShaderParameter("playfield_half", _arenaSideMeters * 0.5f);
-        mat.SetShaderParameter("world_to_arena", GlobalTransform.AffineInverse());
-    }
-
-    private void UpdateArenaClipMaterials()
-    {
-        Transform3D worldToArena = GlobalTransform.AffineInverse();
-        foreach (ShaderMaterial mat in _arenaClipMats)
-        {
-            mat.SetShaderParameter("world_to_arena", worldToArena);
-        }
-    }
 
     private void TrackMrComposite(ShaderMaterial mat)
     {
@@ -761,48 +782,6 @@ public sealed partial class Diorama : Node3D
                     // Store a premultiplied coloured contribution plus only the
                     // coverage needed to carry it. Dark atlas pixels therefore
                     // become transparent instead of masking passthrough black.
-                    vec3 contribution = clamp(s * a, vec3(0.0), vec3(1.0));
-                    float coverage = max(contribution.r, max(contribution.g, contribution.b));
-                    ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
-                    ALPHA = coverage;
-                } else {
-                    ALBEDO = pow(s, vec3(2.2));
-                    ALPHA = pow(a, mix(0.6, 1.6, lum));
-                }
-            }
-            """,
-    };
-
-    // Creature-bound particle overlays use the same blend treatment as
-    // ParticleShader, plus the playfield crop that the original viewport
-    // applied while an enemy crossed in from its offscreen spawn position.
-    private Shader? _arenaClippedParticleShader;
-    private Shader ArenaClippedParticleShader => _arenaClippedParticleShader ??= new Shader
-    {
-        Code = """
-            shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
-            uniform sampler2D sheet : filter_linear;
-            uniform float mr_composite = 0.0;
-            uniform mat4 world_to_arena;
-            uniform float playfield_half;
-            varying vec4 inst;
-            varying vec4 col;
-            varying vec2 arena_xz;
-            void vertex() {
-                inst = INSTANCE_CUSTOM;
-                col = COLOR;
-                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
-            }
-            void fragment() {
-                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
-                vec2 cell = UV * inst.z + inst.xy;
-                vec4 c = texture(sheet, cell);
-                vec3 s = c.rgb * col.rgb;
-                float a = clamp(c.a * col.a, 0.0, 1.0);
-                float lum = dot(min(s, vec3(1.0)), vec3(0.299, 0.587, 0.114));
-                if (mr_composite > 0.5) {
                     vec3 contribution = clamp(s * a, vec3(0.0), vec3(1.0));
                     float coverage = max(contribution.r, max(contribution.g, contribution.b));
                     ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
@@ -935,9 +914,8 @@ public sealed partial class Diorama : Node3D
 
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
-        var freezeMat = new ShaderMaterial { Shader = ArenaClippedParticleShader, RenderPriority = 24 };
+        var freezeMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 24 };
         TrackMrComposite(freezeMat);
-        TrackArenaClip(freezeMat);
         freezeMat.SetShaderParameter("sheet", tex);
         _freezeMesh = new MultiMesh
         {
@@ -953,9 +931,8 @@ public sealed partial class Diorama : Node3D
         // Creature auras (draw_creature_overlays): alpha-blended, priority 4 so
         // they sit under the creature sprites (creatures start at priority 6) but
         // over the ground/decals.
-        var overlayMat = new ShaderMaterial { Shader = ArenaClippedParticleShader, RenderPriority = 4 };
+        var overlayMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 4 };
         TrackMrComposite(overlayMat);
-        TrackArenaClip(overlayMat);
         overlayMat.SetShaderParameter("sheet", tex);
         _overlays = new MultiMesh
         {
@@ -1036,6 +1013,10 @@ public sealed partial class Diorama : Node3D
                 continue;
             }
             var game = new Vector2(c.X, c.Y);
+            if (EdgeFadeAlpha(game) <= 0.01f)
+            {
+                continue;
+            }
             if (monsterVision)
             {
                 Emit(game, 90.0f, new Color(1.0f, 1.0f, 0.0f, fade));
@@ -1164,7 +1145,13 @@ public sealed partial class Diorama : Node3D
             {
                 break;
             }
-            Vector2 viewGame = ViewGame(new Vector2(c.X, c.Y));
+            var game = new Vector2(c.X, c.Y);
+            if (EdgeFadeAlpha(game) <= 0.01f)
+            {
+                idx++;
+                continue;
+            }
+            Vector2 viewGame = ViewGame(game);
             if (_viewZoom > 1.0f && OutsideDrawBounds(viewGame))
             {
                 idx++;
@@ -1457,59 +1444,6 @@ public sealed partial class Diorama : Node3D
         }
     }
 
-    // Reproduce the original flat viewport crop in world space. Survival
-    // creatures spawn outside the playfield, so their quads must be clipped at
-    // the boundary as they walk in rather than appearing as whole atlas tiles.
-    private Shader? _arenaClippedColorShader;
-    private Shader ArenaClippedColorShader => _arenaClippedColorShader ??= new Shader
-    {
-        Code = """
-            shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never;
-            uniform vec4 albedo : source_color = vec4(1.0);
-            uniform mat4 world_to_arena;
-            uniform float playfield_half;
-            varying vec2 arena_xz;
-            void vertex() {
-                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
-            }
-            void fragment() {
-                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
-                ALBEDO = albedo.rgb;
-                ALPHA = albedo.a;
-            }
-            """,
-    };
-
-    private Shader? _arenaClippedTintedSpriteShader;
-    private Shader ArenaClippedTintedSpriteShader => _arenaClippedTintedSpriteShader ??= new Shader
-    {
-        Code = """
-            shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never;
-            uniform sampler2D sheet : source_color, filter_nearest;
-            uniform mat4 world_to_arena;
-            uniform float playfield_half;
-            varying vec4 inst;
-            varying vec4 col;
-            varying vec2 arena_xz;
-            void vertex() {
-                inst = INSTANCE_CUSTOM;
-                col = COLOR;
-                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
-            }
-            void fragment() {
-                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
-                vec2 cell = UV * inst.z + inst.xy;
-                vec4 c = texture(sheet, cell);
-                ALBEDO = c.rgb * col.rgb + vec3(inst.w) * c.a;
-                ALPHA = c.a * col.a;
-            }
-            """,
-    };
-
     // Tinted sprite shader (corpses): per-instance UV cell (INSTANCE_CUSTOM) and
     // per-instance rgba tint (COLOR), nearest-filtered (bodyset frames have no
     // cell inset, so linear would bleed adjacent frames). Alpha-blended,
@@ -1717,14 +1651,13 @@ public sealed partial class Diorama : Node3D
             // playfield and walk in, which the flat game's camera cropped
             // entirely.
             //
-            // Start just inside the playable square, then reach black two thirds
-            // of the way across the margin to the diorama edge. The outer third
-            // stays black, cleanly separating the board from the real room in MR.
-            // Deriving the distance from margin_scale keeps that 2/3 proportion
-            // stable if the floor margin changes.
-            uniform float vignette_span = 0.6666667;
+            // Seam mask: start just inside the playable texture, reach the
+            // maximum darkening one third across the surrounding floor margin,
+            // then hold it to the diorama edge. This hides the baked-ground /
+            // repeated-ground transition without turning the margin fully black.
+            uniform float vignette_span = 0.3333333;
             uniform float vignette_inset = 0.02;
-            uniform float vignette_strength = 1.0;
+            uniform float vignette_strength = 0.70;
             void fragment() {
                 vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
                 uv = view_center + (uv - view_center) / view_zoom;
@@ -1735,6 +1668,9 @@ public sealed partial class Diorama : Node3D
                 float margin = (margin_scale - 1.0) * 0.5;
                 float band = max(margin * vignette_span + vignette_inset, 0.0001);
                 float v = clamp((outside + vignette_inset) / band, 0.0, 1.0);
+                // Smoothly establish enough darkening at the texture seam to
+                // disguise it, while preserving the exact onset and 1/3 endpoint.
+                v = smoothstep(0.0, 1.0, v);
                 ALBEDO = c * (1.0 - v * vignette_strength);
             }
             """,
@@ -1790,33 +1726,18 @@ public sealed partial class Diorama : Node3D
     /// <summary>One shared MultiMesh of soft round blobs drawn flat on the plane
     /// under the creature/player sprites to ground them (PLAN §6). Drawn first
     /// (lowest RenderPriority) so every sprite sits on top.</summary>
-    private Shader? _arenaClippedShadowShader;
-    private Shader ArenaClippedShadowShader => _arenaClippedShadowShader ??= new Shader
-    {
-        Code = """
-            shader_type spatial;
-            render_mode unshaded, cull_disabled, depth_draw_never;
-            uniform sampler2D sheet : source_color, filter_linear;
-            uniform mat4 world_to_arena;
-            uniform float playfield_half;
-            varying vec2 arena_xz;
-            void vertex() {
-                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
-            }
-            void fragment() {
-                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
-                ALBEDO = vec3(0.0);
-                ALPHA = texture(sheet, UV).a * 0.55;
-            }
-            """,
-    };
-
     private void BuildShadows()
     {
-        var material = new ShaderMaterial { Shader = ArenaClippedShadowShader, RenderPriority = 1 };
-        material.SetShaderParameter("sheet", MakeSoftCircleTexture(64));
-        TrackArenaClip(material);
+        var material = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.0f, 0.0f, 0.0f, 0.55f),
+            AlbedoTexture = MakeSoftCircleTexture(64),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
+            RenderPriority = 1,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        };
         _shadows = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
@@ -2050,7 +1971,6 @@ public sealed partial class Diorama : Node3D
     public void Interpolate(float frac)
     {
         frac = Mathf.Clamp(frac, 0.0f, 1.0f);
-        UpdateArenaClipMaterials();
         _needleCount = 0;
         _shadowCount = 0;
         // Legs cast the ground shadow (they're the part standing on it); the
@@ -2154,9 +2074,14 @@ public sealed partial class Diorama : Node3D
                 : sizeGame;
             float meters = Mathf.Max(sizeUnits * k * layer.SizeScale, 0.002f);
 
+            // Restore the original presentation workaround: creatures fade
+            // across their 40-unit off-playfield spawn margin instead of being
+            // shader-clipped at the arena boundary.
+            float edgeFade = layer.HasStableIdentity ? EdgeFadeAlpha(game) : 1.0f;
+
             if (castShadow)
             {
-                AddShadow(arena, meters);
+                AddShadow(arena, meters * edgeFade);
             }
 
             Basis basis;
@@ -2246,6 +2171,7 @@ public sealed partial class Diorama : Node3D
             if (layer.Tinted)
             {
                 Color tint = CreatureTint(cur);
+                tint.A *= edgeFade;
                 layer.Mesh.SetInstanceColor(i, tint);
             }
 
@@ -2255,6 +2181,20 @@ public sealed partial class Diorama : Node3D
             }
         }
         layer.Mesh.VisibleInstanceCount = layer.CurrCount;
+    }
+
+    // Survival creatures spawn up to 40 game units outside the playfield. The
+    // flat camera cropped this region; in the diorama, fade across that outside
+    // band so sprites arrive fully formed at the arena seam.
+    private const float SpawnMarginGame = 40.0f;
+    private const float EdgeFadeBandGame = SpawnMarginGame;
+
+    private float EdgeFadeAlpha(Vector2 game)
+    {
+        float edge = Mathf.Min(
+            Mathf.Min(game.X, _worldSize - game.X),
+            Mathf.Min(game.Y, _worldSize - game.Y));
+        return Mathf.Clamp((edge + SpawnMarginGame) / EdgeFadeBandGame, 0.0f, 1.0f);
     }
 
     /// <summary>Per-creature draw tint (draw.py draw_creatures): the spawn-template

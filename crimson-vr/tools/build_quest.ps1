@@ -257,7 +257,16 @@ function Stop-ProcessTree {
     # -safe equivalent of .NET Process.Kill($true) (which is PS7-only). The gradle
     # daemon detaches, so it is not a child and build caching is unaffected.
     param([int]$Id)
-    & taskkill.exe /PID $Id /T /F 2>$null | Out-Null
+    # Godot can exit between the poll above and this cleanup. taskkill reports
+    # that normal race as an error; it must not turn a successful export into a
+    # failed build.
+    try {
+        & taskkill.exe /PID $Id /T /F 2>$null | Out-Null
+    }
+    catch {
+        # Already stopped is the desired end state.
+    }
+    $global:LASTEXITCODE = 0
 }
 
 # Poll for the export-complete marker; Godot won't exit on its own (see header).
