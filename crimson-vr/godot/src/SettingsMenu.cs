@@ -30,6 +30,7 @@ public sealed partial class SettingsMenu : Node3D
     private VrButton _controlMode = null!;
     private VrButton _uiEdit = null!;
     private VrButton _aa = null!;
+    private VrButton _mixedReality = null!;
     private VrButton _pokeMarkers = null!;
     private VrButton _debug = null!;
     private VrButton _back = null!;
@@ -37,6 +38,8 @@ public sealed partial class SettingsMenu : Node3D
     private bool _swapState;
     private bool _debugState;
     private bool _pokeMarkersState;
+    private bool _mixedRealityState;
+    private bool _mixedRealitySupported;
     private int _msaaState;
     private ControlMode _controlModeState;
 
@@ -49,13 +52,18 @@ public sealed partial class SettingsMenu : Node3D
     public event Action? OnArenaLayout;
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
+    public event Action<bool>? OnMixedRealityChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers, ControlMode controlMode, float renderScale, int msaa, Texture2D? rectOn, Texture2D? rectOff)
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers,
+        ControlMode controlMode, float renderScale, int msaa, bool mixedReality,
+        bool mixedRealitySupported, Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
         _swapState = handSwap;
         _debugState = debug;
         _pokeMarkersState = pokeMarkers;
+        _mixedRealityState = mixedReality && mixedRealitySupported;
+        _mixedRealitySupported = mixedRealitySupported;
         _msaaState = msaa;
         _controlModeState = controlMode;
 
@@ -150,6 +158,18 @@ public sealed partial class SettingsMenu : Node3D
         _aa.OnPress += CycleAa;
         y -= pitch;
 
+        // Passthrough is packaged as an optional Quest capability. The button is
+        // present on every headset so the setting layout stays stable, but it is
+        // inert and explicitly labelled when the runtime lacks alpha blending.
+        _mixedReality = new VrButton();
+        AddChild(_mixedReality);
+        _mixedReality.Build(bw, bh, MixedRealityText(),
+            _mixedRealitySupported ? new Color(0.45f, 0.72f, 1.0f) : new Color(0.38f, 0.38f, 0.42f),
+            plate: true);
+        _mixedReality.Position = new Vector3(0.0f, y, 0.0f);
+        _mixedReality.OnPress += ToggleMixedReality;
+        y -= pitch;
+
         // Poke-tip markers, standalone. Sits above Debug because it is a normal
         // comfort/visibility option now, not a dev switch: the tips hover over
         // the control rectangle rather than the playfield, so leaving them on
@@ -226,6 +246,7 @@ public sealed partial class SettingsMenu : Node3D
         _pokeMarkers.ResetPress();
         _back.ResetPress();
         _aa.ResetPress();
+        _mixedReality.ResetPress();
         _deadZone.ResetPress();
         _renderScale.ResetPress();
     }
@@ -243,6 +264,10 @@ public sealed partial class SettingsMenu : Node3D
         _pokeMarkers.PollPoke(probes);
         _back.PollPoke(probes);
         _aa.PollPoke(probes);
+        if (_mixedRealitySupported)
+        {
+            _mixedReality.PollPoke(probes);
+        }
         _deadZone.PollPoke(probes);
         _renderScale.PollPoke(probes);
     }
@@ -259,6 +284,21 @@ public sealed partial class SettingsMenu : Node3D
         _debugState = !_debugState;
         _debug.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
+    }
+
+    private string MixedRealityText() => !_mixedRealitySupported
+        ? "Mixed reality: unavailable"
+        : _mixedRealityState ? "Mixed reality: On" : "Mixed reality: Off";
+
+    private void ToggleMixedReality()
+    {
+        if (!_mixedRealitySupported)
+        {
+            return;
+        }
+        _mixedRealityState = !_mixedRealityState;
+        _mixedReality.SetText(MixedRealityText());
+        OnMixedRealityChanged?.Invoke(_mixedRealityState);
     }
 
     private string ControlModeText() =>

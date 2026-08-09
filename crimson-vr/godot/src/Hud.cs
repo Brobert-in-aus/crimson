@@ -120,14 +120,12 @@ public sealed partial class Hud : Node3D
     /// upright and is turned to face the player instead.</summary>
     public Node3D BonusRoot => _bonusRoot;
 
-    /// <summary>Centre of the FIRST bonus row, in group-local metres, so the
-    /// caller can anchor the stack by the row that is always there and let the
-    /// rest grow upward from it. Anchoring by the group origin instead would
-    /// hang the rows off by half a board (they are laid out from native x -68,
-    /// rising from y -63), and centring on all eight would float the one or two
-    /// live rows high above the anchor.</summary>
-    public Vector3 BonusFirstRowLocal
-        => new(LocalX(BonusRowX + 182.0f * 0.5f), LocalY(BonusRowY0 + 15.0f), 0.0f);
+    /// <summary>Centre of the RIGHT EDGE of the first bonus row, in group-local
+    /// metres. Cabinet anchors this edge to the arena boundary so the panel is
+    /// wholly outboard instead of straddling the playfield. The stack still uses
+    /// the first row vertically because it is the one row that is always live.</summary>
+    public Vector3 BonusFirstRowRightEdgeLocal
+        => new(LocalX(BonusRowX + 182.0f), LocalY(BonusRowY0 + 15.0f), 0.0f);
 
     // Draw-order bands: the world runs -8..27 (border, decals, then sprites from
     // 6), the HUD panel 40..44, menus 58..67.

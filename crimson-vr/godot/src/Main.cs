@@ -264,21 +264,10 @@ public partial class Main : Node3D
 
     private bool _xrActive;
 
-    // Display mode (PLAN §6 / MR): Auto uses passthrough when the headset supports
-    // it (Quest 3 etc. report ALPHA_BLEND as a supported environment blend mode),
-    // else a skybox. The tabletop diorama is a natural MR fit — in passthrough it
-    // sits in the player's real room. Forcing Skybox keeps the VR void; forcing
-    // Passthrough warns and falls back if unsupported. (A settings toggle is M4.)
-    public enum DisplayMode { Auto, Skybox, Passthrough }
-    // Default to Skybox for now. Auto-passthrough on Quest 3 (ALPHA_BLEND +
-    // transparent viewport) currently leaves the app compositing transparent —
-    // the shell/room and system controllers stay visible and the scene never
-    // presents, so it's opt-in only until the export-side passthrough feature is
-    // verified end-to-end on-device. Skybox is the known-good opaque path.
-    private DisplayMode _displayMode = DisplayMode.Skybox;
     private XRInterface? _xrInterface;
     private WorldEnvironment _worldEnv = null!;
     private bool _passthroughActive;
+    private bool _mixedRealitySupported;
 
     // Skybox-mode grey fog. THEMING ONLY: depth-mode fog with an onset distance
     // so nothing near the player is tinted — the diorama and menus (< ~1.5 m)
@@ -413,7 +402,8 @@ public partial class Main : Node3D
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
             _settings.PokeMarkers, (ControlMode)_settings.ControlMode,
-            _settings.RenderScale, _settings.Msaa,
+            _settings.RenderScale, _settings.Msaa, _settings.MixedReality,
+            _mixedRealitySupported,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _settingsMenu.OnBack += CloseVrSettings;
         _settingsMenu.OnHandSwapChanged += v =>
@@ -440,6 +430,14 @@ public partial class Main : Node3D
         };
         _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
         _settingsMenu.OnMsaaChanged += v => { _settings.Msaa = v; ApplyRenderQuality(); _settings.Save(); };
+        _settingsMenu.OnMixedRealityChanged += enabled =>
+        {
+            if (SetMixedReality(enabled))
+            {
+                _settings.MixedReality = enabled;
+                _settings.Save();
+            }
+        };
 
         // Controls reference card (the base Options screen's Controls button):
         // read-only VR mapping, honouring hand-swap.
@@ -671,6 +669,13 @@ public partial class Main : Node3D
         _audio.SetMusicVolume(_settings.MusicVolume);
         _diorama.SetGraphicsDetail(_settings.GraphicsDetail);
         ApplyRenderQuality();
+        if (_settings.MixedReality && !SetMixedReality(true))
+        {
+            // A saved preference may be copied to a headset/runtime without MR.
+            // Stay in VR and avoid retrying an unsupported mode every launch.
+            _settings.MixedReality = false;
+            _settings.Save();
+        }
 
         // Boot into the main menu: show it, hide the gameplay chrome until PLAY,
         // and play the menu theme (like the base game).
@@ -1165,7 +1170,8 @@ public partial class Main : Node3D
         light.RotationDegrees = new Vector3(-55.0f, 30.0f, 0.0f);
         AddChild(light);
 
-        TrySetupPassthrough();
+        _mixedRealitySupported = SupportsMixedReality();
+        SetMixedReality(false); // Always launch opaque; passthrough is user opt-in.
     }
 
     private static Sky MakeVrSky()
@@ -1182,45 +1188,67 @@ public partial class Main : Node3D
         return new Sky { SkyMaterial = mat };
     }
 
-    /// <summary>Enable MR passthrough when the headset supports it (or when forced).
-    /// Composites the transparent app over the real world via the OpenXR ALPHA_BLEND
-    /// environment blend mode, so the tabletop diorama sits in the player's room.
-    /// No-ops (keeps the skybox) when XR is flat or passthrough is unsupported.
-    /// NOTE: the Quest APK also needs the passthrough feature enabled in the export
-    /// preset (meta plugin) for this to composite on-device.</summary>
-    private void TrySetupPassthrough()
+    private bool SupportsMixedReality()
     {
-        if (_displayMode == DisplayMode.Skybox || !_xrActive || _xrInterface == null)
+        if (!_xrActive || _xrInterface == null)
         {
-            return;
+            return false;
         }
         Godot.Collections.Array modes = _xrInterface.GetSupportedEnvironmentBlendModes();
-        bool alphaBlend = false;
         foreach (Variant m in modes)
         {
             if (m.As<long>() == (long)XRInterface.EnvironmentBlendModeEnum.AlphaBlend)
             {
-                alphaBlend = true;
-                break;
+                return true;
             }
         }
-        if (!alphaBlend)
+        return false;
+    }
+
+    /// <summary>Switch between the opaque VR presentation and Quest passthrough.
+    /// The tabletop diorama remains rendered in both modes; only the distant world
+    /// floor and sky fog are suppressed in MR so the real room shows around it.</summary>
+    private bool SetMixedReality(bool enabled)
+    {
+        if (!_xrActive || _xrInterface == null)
         {
-            if (_displayMode == DisplayMode.Passthrough)
-            {
-                GD.PushWarning("CrimsonVR: passthrough requested but ALPHA_BLEND unsupported; using skybox");
-            }
-            return; // Auto: no passthrough hardware -> keep the skybox
+            return !enabled;
         }
 
-        _xrInterface.EnvironmentBlendMode = XRInterface.EnvironmentBlendModeEnum.AlphaBlend;
-        GetViewport().TransparentBg = true;
         Godot.Environment env = _worldEnv.Environment;
-        env.BackgroundMode = Godot.Environment.BGMode.Color;
-        env.BackgroundColor = new Color(0.0f, 0.0f, 0.0f, 0.0f); // transparent -> passthrough shows through
-        env.FogEnabled = false; // no grey fog in MR — show the real room
-        _passthroughActive = true;
-        GD.Print("CrimsonVR: MR passthrough enabled (ALPHA_BLEND)");
+        if (enabled)
+        {
+            if (!_mixedRealitySupported)
+            {
+                GD.PushWarning("CrimsonVR: mixed reality requested but ALPHA_BLEND is unsupported; using VR");
+                return false;
+            }
+            _xrInterface.EnvironmentBlendMode = XRInterface.EnvironmentBlendModeEnum.AlphaBlend;
+            GetViewport().TransparentBg = true;
+            env.BackgroundMode = Godot.Environment.BGMode.Color;
+            env.BackgroundColor = new Color(0.0f, 0.0f, 0.0f, 0.0f);
+            env.FogEnabled = false;
+            if (_worldFloor != null)
+            {
+                _worldFloor.Visible = false;
+            }
+            _passthroughActive = true;
+            GD.Print("CrimsonVR: mixed reality enabled (ALPHA_BLEND)");
+            return true;
+        }
+
+        _xrInterface.EnvironmentBlendMode = XRInterface.EnvironmentBlendModeEnum.Opaque;
+        GetViewport().TransparentBg = false;
+        env.BackgroundMode = Godot.Environment.BGMode.Sky;
+        env.Sky = MakeVrSky();
+        env.FogEnabled = true;
+        if (_worldFloor != null)
+        {
+            _worldFloor.Visible = true;
+        }
+        _passthroughActive = false;
+        GD.Print("CrimsonVR: opaque VR enabled");
+        return true;
     }
 
     private void BuildRig()
@@ -1391,6 +1419,7 @@ public partial class Main : Node3D
             Mesh = new PlaneMesh { Size = new Vector2(WorldFloorSize, WorldFloorSize) },
             MaterialOverride = mat,
             Position = new Vector3(0.0f, WorldFloorY, 0.0f),
+            Visible = !_passthroughActive,
         };
         AddChild(_worldFloor);
     }
@@ -2754,12 +2783,11 @@ public partial class Main : Node3D
     }
 
     // Where the FIRST bonus row sits in Cabinet, in playfield-local multiples of
-    // the board's reference half-side. Outboard of the XP strip (1.15) but
-    // inside the floor edge (FloorMarginScale/2 = 0.65 of the side, i.e. 1.3
-    // half-sides) so the stack stands on the visible margin; forward of centre
-    // so it reads low in view rather than off at the far edge; lifted just clear
-    // of the plane, with the remaining rows growing upward from there.
-    private const float BonusOutwardFactor = 1.22f;
+    // the board's reference half-side. Internal +X is the arena's "right" edge,
+    // but it appears on the player's left. The bonus panel's RIGHT edge is
+    // anchored exactly there (factor 1.0), leaving the whole panel outboard and
+    // tangent to the playable square. Forward of centre keeps it low in view;
+    // the remaining rows grow upward.
     private const float BonusForwardFactor = -0.30f;
     private const float BonusLiftFactor = 0.06f;
 
@@ -2782,9 +2810,10 @@ public partial class Main : Node3D
         }
         Node3D bonus = _hud.BonusRoot;
         float half = ArenaSideMeters * 0.5f;
-        // Where the first row should LAND, in playfield-local space.
+        // The boundary point where the first row's right edge should land.
+        // Internal +X is visually the arena's left edge from the player's seat.
         var anchor = new Vector3(
-            half * BonusOutwardFactor,
+            half,
             half * BonusLiftFactor,
             half * BonusForwardFactor);
 
@@ -2802,10 +2831,11 @@ public partial class Main : Node3D
         // group standing world-vertical however far the board is tilted. Uniform
         // scale commutes through, so the rows still grow with the board.
         Basis local = boardRot.Inverse() * Basis.FromEuler(new Vector3(0.0f, _bonusYaw, 0.0f));
-        // Offset in the group's OWN frame, not the board's: the content sits up
-        // and to the left of its origin in panel coordinates, and that offset
-        // has to be rotated by the same yaw before it means anything here.
-        bonus.Transform = new Transform3D(local, anchor - local * _hud.BonusFirstRowLocal);
+        // Offset in the group's OWN frame, not the board's. Anchoring the row
+        // centre here was the bug: half the panel then crossed into the arena.
+        // The right-edge offset is rotated by the same yaw, making that vertical
+        // edge tangent to the boundary while the complete panel stays outboard.
+        bonus.Transform = new Transform3D(local, anchor - local * _hud.BonusFirstRowRightEdgeLocal);
     }
 
     private float _bonusYaw;

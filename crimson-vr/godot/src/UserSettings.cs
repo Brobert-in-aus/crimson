@@ -110,6 +110,9 @@ public sealed class UserSettings
     // level (0 = off, 2, 4). The flat-sprite scene is cheap, so default high.
     public float RenderScale = 1.4f;
     public int Msaa = 4;
+    // Start in opaque VR. Passthrough is opt-in and applied only when the active
+    // OpenXR runtime reports alpha-blend support.
+    public bool MixedReality;
 
     // Quest unlock progression (base game_status quest_unlock_index): the
     // 0-based global index of the FIRST still-locked quest. 0 = only 1.1
@@ -166,6 +169,7 @@ public sealed class UserSettings
         ArenaDrop = cf.GetValue("arena", "drop", ArenaDrop).AsSingle();
         RenderScale = cf.GetValue("video", "render_scale", RenderScale).AsSingle();
         Msaa = cf.GetValue("video", "msaa", Msaa).AsInt32();
+        MixedReality = cf.GetValue("video", "mixed_reality", MixedReality).AsBool();
 
         QuestUnlockIndex = cf.GetValue("game", "quest_unlock_index", QuestUnlockIndex).AsInt32();
         QuestUnlockIndexFull = cf.GetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull).AsInt32();
@@ -297,6 +301,7 @@ public sealed class UserSettings
         cf.SetValue("video", "graphics_detail", GraphicsDetail);
         cf.SetValue("video", "render_scale", RenderScale);
         cf.SetValue("video", "msaa", Msaa);
+        cf.SetValue("video", "mixed_reality", MixedReality);
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "weapon_showcase", WeaponShowcase);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
