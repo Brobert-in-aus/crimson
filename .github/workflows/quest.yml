@@ -1,0 +1,123 @@
+name: Quest personal build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_artifact:
+        description: Upload the APK and signing key (private repositories only)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  QUEST_CACHE: ${{ github.workspace }}/.quest-ci-cache
+
+jobs:
+  quest:
+    name: Build asset-free Quest APK
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Refuse public binary publication
+        if: ${{ inputs.publish_artifact && !github.event.repository.private }}
+        shell: pwsh
+        run: |
+          throw @'
+          This repository is public. GitHub artifacts from public repositories
+          are downloadable by every signed-in GitHub user, so publishing this
+          upstream-linked APK would defeat the no-binary-redistribution model.
+          Run with publish_artifact=false to validate the build, or import the
+          repository into a private standalone repository and run it there.
+          '@
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Assert asset-free checkout
+        shell: pwsh
+        run: ./crimson-vr/tools/assert_quest_asset_free.ps1
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      - name: Cache pinned Quest downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.QUEST_CACHE }}
+          key: quest-tools-godot-4.7-vendors-5.1.0
+
+      - name: Restore Quest toolchain
+        id: quest-tools
+        shell: pwsh
+        run: ./crimson-vr/tools/bootstrap_quest_ci.ps1 -CacheDir $env:QUEST_CACHE
+
+      - name: Test VR frontend
+        shell: pwsh
+        run: dotnet test crimson-vr/tests/CrimsonVR.Tests/CrimsonVR.Tests.csproj
+
+      - name: Build native Quest library
+        shell: pwsh
+        run: ./crimson-vr/tools/build_libcrimson.ps1 -android
+
+      - name: Export signed Quest APK
+        shell: pwsh
+        run: |
+          ./crimson-vr/tools/build_quest.ps1 `
+            -Release `
+            -InstallAndroidBuildTemplate `
+            -Godot '${{ steps.quest-tools.outputs.godot }}' `
+            -AndroidSdk '${{ steps.quest-tools.outputs.android_sdk }}' `
+            -Jdk '${{ steps.quest-tools.outputs.jdk }}' `
+            -Keystore '${{ steps.quest-tools.outputs.keystore }}'
+
+      - name: Write personal-build manifest
+        shell: pwsh
+        run: |
+          $apk = Resolve-Path artifacts/CrimsonVR.quest.apk
+          @(
+            'CrimsonVR personal Quest build'
+            "repository=${{ github.repository }}"
+            "commit=${{ github.sha }}"
+            "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            "apk_sha256=$((Get-FileHash $apk -Algorithm SHA256).Hash.ToLowerInvariant())"
+            'keystore_alias=androiddebugkey'
+            'keystore_password=android'
+            'Keep the keystore: Android requires the same key for in-place updates.'
+          ) | Set-Content artifacts/QUEST-PERSONAL-BUILD.txt
+
+      - name: Upload private personal-build bundle
+        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrimsonVR-Quest-${{ github.run_number }}
+          path: |
+            artifacts/CrimsonVR.quest.apk
+            artifacts/crimsonvr-ci.keystore
+            artifacts/QUEST-PERSONAL-BUILD.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Public validation summary
+        if: ${{ !inputs.publish_artifact }}
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY @'
+          The asset-free Quest APK built and verified successfully. No binary
+          artifact was uploaded. Use a private standalone repository and set
+          `publish_artifact=true` to receive the personal-build bundle.
+          '@

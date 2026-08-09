@@ -26,10 +26,19 @@
 param(
     [switch]$Install,
     [switch]$InstallOnly,
+    [switch]$Release,
+    [switch]$InstallAndroidBuildTemplate,
     [string]$Device = '192.168.8.100:5555',
     [int]$ExportTimeoutSec = 600,
     [int]$WaitDeviceSec = 300,
-    [string]$Godot = 'D:\Projects\games-xr\_tools\godot\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe'
+    [string]$Godot = 'D:\Projects\games-xr\_tools\godot\Godot_v4.7-stable_mono_win64\Godot_v4.7-stable_mono_win64_console.exe',
+    [string]$AndroidSdk,
+    [string]$AndroidNdk,
+    [string]$Jdk,
+    [string]$Keystore,
+    [string]$KeyAlias = 'androiddebugkey',
+    [string]$StorePassword = 'android',
+    [string]$KeyPassword = 'android'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +47,22 @@ $proj = Join-Path $repoRoot 'crimson-vr\godot'
 $apk = Join-Path $repoRoot 'artifacts\CrimsonVR.apk'
 $questApk = Join-Path $repoRoot 'artifacts\CrimsonVR.quest.apk'
 $inject = Join-Path $PSScriptRoot 'inject_native_and_sign.ps1'
+
+$AndroidSdk = if ($AndroidSdk) { $AndroidSdk } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
+$AndroidNdk = if ($AndroidNdk) { $AndroidNdk } elseif ($env:ANDROID_NDK_ROOT) { $env:ANDROID_NDK_ROOT } elseif ($env:ANDROID_NDK_HOME) { $env:ANDROID_NDK_HOME } else {
+    Get-ChildItem (Join-Path $AndroidSdk 'ndk') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { [version]$_.Name } -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+$Jdk = if ($Jdk) { $Jdk } elseif ($env:JAVA_HOME_17_X64) { $env:JAVA_HOME_17_X64 } elseif ($env:JAVA_HOME) { $env:JAVA_HOME } else {
+    Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+$Keystore = if ($Keystore) { $Keystore } else { Join-Path $env:USERPROFILE '.android\debug.keystore' }
+$buildTools = Get-ChildItem (Join-Path $AndroidSdk 'build-tools') -Directory -ErrorAction SilentlyContinue |
+    Sort-Object { [version]$_.Name } -Descending |
+    Where-Object { Test-Path (Join-Path $_.FullName 'apksigner.bat') } |
+    Select-Object -First 1 -ExpandProperty FullName
 
 if (-not (Test-Path $Godot)) { throw "Godot not found: $Godot" }
 if (-not (Test-Path $inject)) { throw "inject script not found: $inject" }
@@ -71,7 +96,7 @@ function Install-QuestApk {
     # disk and the caller prints the follow-up.
     param([string]$Apk)
     $adb = (Get-Command adb -ErrorAction SilentlyContinue).Source
-    if (-not $adb) { $adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
+    if (-not $adb) { $adb = Join-Path $AndroidSdk 'platform-tools\adb.exe' }
     if (-not (Test-Path $adb)) { throw "adb not found (install to $Device manually)" }
 
     Write-Host "==> Installing (wireless $Device, falling back to USB)..." -ForegroundColor Cyan
@@ -128,14 +153,14 @@ if ($InstallOnly) {
 
 # Preflight everything the post-export steps need, so a missing keystore / tool /
 # native lib / vendors plugin fails now instead of after the multi-minute export.
-$jdk = Get-ChildItem 'C:\Program Files\Eclipse Adoptium' -Directory -Filter 'jdk-17*' -ErrorAction SilentlyContinue |
-    Select-Object -First 1 -ExpandProperty FullName
 $preflight = [ordered]@{
     'arm64 native lib (build_libcrimson.ps1 -android)' = (Join-Path $proj 'native\android-arm64\libcrimson_host.so')
     'OpenXR Vendors plugin (fetch_vendors_plugin.ps1)' = (Join-Path $proj 'addons\godotopenxrvendors')
-    'JDK 17'                                           = $jdk
-    'Android build-tools 35 (zipalign/apksigner)'      = (Join-Path $env:LOCALAPPDATA 'Android\Sdk\build-tools\35.0.0')
-    'debug keystore'                                   = (Join-Path $env:USERPROFILE '.android\debug.keystore')
+    'JDK 17'                                           = $Jdk
+    'Android SDK'                                      = $AndroidSdk
+    'Android NDK'                                      = $AndroidNdk
+    'Android build-tools (zipalign/apksigner)'         = $buildTools
+    'signing keystore'                                 = $Keystore
 }
 foreach ($item in $preflight.GetEnumerator()) {
     if (-not $item.Value -or -not (Test-Path $item.Value)) {
@@ -155,7 +180,7 @@ if (Test-Path $simCs) {
     $abiMatch = Select-String -Path $simCs -Pattern 'ExpectedAbiVersion\s*=\s*(\d+)' | Select-Object -First 1
     if ($abiMatch) { $abiExpected = [int]$abiMatch.Matches[0].Groups[1].Value }
 }
-$objdump = Get-ChildItem "$env:LOCALAPPDATA\Android\Sdk\ndk\*\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-objdump.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+$objdump = Get-ChildItem (Join-Path $AndroidNdk 'toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-objdump.exe') -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $abiExpected) {
     throw "preflight failed: could not read ExpectedAbiVersion from $simCs"
 }
@@ -178,7 +203,7 @@ if ($libVer -ne $abiExpected) {
 Write-Host "    arm64 lib ABI v$libVer matches Sim.cs" -ForegroundColor DarkGray
 if ($Install) {
     $adbPre = (Get-Command adb -ErrorAction SilentlyContinue).Source
-    if (-not $adbPre) { $adbPre = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe' }
+    if (-not $adbPre) { $adbPre = Join-Path $AndroidSdk 'platform-tools\adb.exe' }
     if (-not (Test-Path $adbPre)) { throw "preflight failed: -Install requested but adb not found (Android platform-tools)" }
 }
 
@@ -199,8 +224,22 @@ if (Test-Path $apk) { Remove-Item $apk -Force }
 Write-Host "==> Exporting Android APK (headless gradle build)..." -ForegroundColor Cyan
 # --xr-mode off keeps this local export process from trying to start XR (a
 # flat-fallback popup); it does NOT disable XR in the export preset / the APK.
+$env:JAVA_HOME = $Jdk
+$env:ANDROID_HOME = $AndroidSdk
+$env:ANDROID_SDK_ROOT = $AndroidSdk
+$env:ANDROID_NDK_ROOT = $AndroidNdk
+$env:GODOT_ANDROID_KEYSTORE_DEBUG_PATH = $Keystore
+$env:GODOT_ANDROID_KEYSTORE_DEBUG_USER = $KeyAlias
+$env:GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD = $StorePassword
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PATH = $Keystore
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_USER = $KeyAlias
+$env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = $StorePassword
+$exportMode = if ($Release) { '--export-release' } else { '--export-debug' }
+$godotArgs = @('--headless', '--xr-mode', 'off', '--path', $proj)
+if ($InstallAndroidBuildTemplate) { $godotArgs += '--install-android-build-template' }
+$godotArgs += @($exportMode, 'Android', $apk)
 $p = Start-Process -FilePath $Godot `
-    -ArgumentList @('--headless', '--xr-mode', 'off', '--path', $proj, '--export-debug', 'Android', $apk) `
+    -ArgumentList $godotArgs `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
 
 function Get-ExportLog {
@@ -274,7 +313,8 @@ $apkMb = [math]::Round((Get-Item $apk).Length / 1MB, 1)
 Write-Host ("==> Exported {0} ({1} MB)" -f (Split-Path $apk -Leaf), $apkMb) -ForegroundColor Green
 
 Write-Host "==> Injecting native lib + signing..." -ForegroundColor Cyan
-& $inject -InputApk $apk -OutputApk $questApk
+& $inject -InputApk $apk -OutputApk $questApk -AndroidSdk $AndroidSdk -BuildTools $buildTools `
+    -Jdk $Jdk -Keystore $Keystore -KeyAlias $KeyAlias -StorePassword $StorePassword -KeyPassword $KeyPassword
 if ($LASTEXITCODE -ne 0) { throw "inject/sign failed ($LASTEXITCODE)" }
 
 # Fail-closed payload check before a headset trip (learning from the Untitled VR
@@ -282,7 +322,7 @@ if ($LASTEXITCODE -ne 0) { throw "inject/sign failed ($LASTEXITCODE)" }
 # a flat app (missing OpenXR loader/vendor) or a dlopen failure (missing native
 # lib). A cheap "jar tf" listing vs the required VR + native entries.
 Write-Host "==> Verifying APK payload..." -ForegroundColor Cyan
-$jar = Join-Path $jdk 'bin\jar.exe'   # $jdk resolved + preflighted above
+$jar = Join-Path $Jdk 'bin\jar.exe'   # JDK resolved + preflighted above
 $entries = & $jar tf $questApk 2>$null
 $required = @(
     'classes.dex',                               # .NET/managed runtime present

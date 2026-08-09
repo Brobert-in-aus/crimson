@@ -1150,9 +1150,13 @@ Confirmed findings (2026-07):
   clonable repo. Overlay/patch packaging is only needed if we ever distribute
   source outside GitHub.
 - **Worst-case user build flow (no code grant)**: primary path is
-  **fork-and-CI** — the user forks the repo on GitHub and runs the release
-  workflow in their own fork; cloud CI produces their APK / desktop build
-  (auto-generated signing keystore included) with zero local toolchain. The
+  **private-copy-and-CI** — the user imports/mirrors the repo into a private
+  standalone GitHub repository and runs the release workflow there; cloud CI
+  produces their APK / desktop build (auto-generated signing keystore included)
+  with zero local toolchain. A public fork is insufficient: GitHub requires all
+  forks of a public repository to remain public, and its workflow artifacts are
+  downloadable by every signed-in user with read access. Public CI may validate
+  the build but must never upload the upstream-linked binary. The
   local build script (bootstraps Zig, Android SDK/NDK, JDK, Godot + export
   templates, .NET) is the fallback. Either way the resulting APK is
   asset-free; assets are imported on-device afterward (M6 flow), so even
@@ -1217,10 +1221,11 @@ Remaining, in rough order:
    no earlier VR replay counts. The five bugs behind that are in the M4 slice 8
    entry above; the standing lesson is that every one of them was found by a
    real replay and none by a gate, so the confirming run is the gate.
-3. **M5 — shell + CI builds.** The VR-native menu exists; what is missing is
-   the fork-runnable GitHub Actions workflow (workflow_dispatch, no repo
-   secrets, auto-generated keystore). That is the §10 worst-case distribution
-   path, so it is a requirement rather than a nicety, and it needs no headset.
+3. **M5 — shell + CI builds.** The VR-native menu exists. Quest personal-build
+   CI is now specified as a manually dispatched, secret-free clean build with
+   an auto-generated keystore. Public repositories validate without uploading;
+   the downloadable APK/key bundle is restricted to a private standalone copy
+   (see `crimson-vr/notes/quest-ci.md`). Windows/Linux artifacts remain.
 4. **Seated reach calibration (§5).** Now partly served by the Arena & Layout
    sliders; a measured calibration is still the stronger version.
 5. **M6 — asset removal + licensing decoupling.** The hard gate before anything
