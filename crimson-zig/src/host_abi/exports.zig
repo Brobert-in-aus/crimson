@@ -455,10 +455,8 @@ const SessionBox = struct {
     // so far cost several build-play-pull cycles to locate; this makes the first
     // failing run name the tick.
     record_rng: std.ArrayList(u32) = .empty,
-    // Perk-menu edge state. NOT recording-only: the rising edge is what rolls
-    // the offer, so it has to be tracked on every session or a recorded run and
-    // an unrecorded one would play differently.
-    menu_was_active: bool = false,
+    // Perk traffic seen but not yet stamped with a tick; see PendingPerkEvent.
+    record_pending: std.ArrayList(PendingPerkEvent) = .empty,
     // Perk traffic seen but not yet stamped. The menu PAUSES the sim, so the
     // frames carrying a menu-open or a card poke usually advance zero ticks --
     // stamping those with the current tick index can place an event on an index
@@ -466,8 +464,6 @@ const SessionBox = struct {
     // only when it reaches their tick, then silently never applies them. Held
     // here until a frame actually advances, then stamped with the first tick it
     // advances, which is by construction a tick the replay will run.
-    record_pending_menu_open: bool = false,
-    record_pending_pick: ?i32 = null,
 };
 
 /// The seven figures the verifier compares, harvested from the live run.
@@ -824,6 +820,13 @@ pub export fn crimson_host_session_destroy(handle: u64) void {
     const box = session_slots[index] orelse return;
     if (box.generation != @as(u32, @intCast(handle >> 32))) return;
     session_slots[index] = null;
+    // The capture buffers are heap allocations the box does not own by value;
+    // destroying the box alone leaked every recorded row of any session torn
+    // down without detaching first, which is the normal path on quit.
+    box.record_ticks.deinit(gpa);
+    box.record_events.deinit(gpa);
+    box.record_rng.deinit(gpa);
+    box.record_pending.deinit(gpa);
     gpa.destroy(box);
 }
 
@@ -884,56 +887,78 @@ fn notePerkInput(box: *SessionBox, inputs: []const CrimsonHostInput) void {
     if (inputs.len == 0) return;
     const input = inputs[0];
 
-    const menu_active = input.perk_menu_active != 0;
-    const opened = menu_active and !box.menu_was_active;
-    box.menu_was_active = menu_active;
-
-    // Guarded on a pick actually being owed, and the event is recorded only when
-    // the roll really happened, so the replay's open lands on an offer rather
-    // than on nothing.
-    if (opened and box.runner.perkPendingCount() > 0) {
+    // Roll whenever the menu is up, a pick is owed, and no offer is prepared --
+    // NOT merely on the rising edge. Levelling up twice before opening the menu
+    // leaves two picks owed, and taking the first dirties the offer without
+    // closing the menu, so an edge-triggered roll left the player staring at a
+    // blank menu unable to spend the rest. A real 13640-tick run came back with
+    // five level-ups and three picks because of it.
+    //
+    // "No prepared offer" is exactly the condition preparedPerkChoices reports
+    // by returning empty, so the roll and the read cannot disagree about
+    // whether one is needed.
+    if (input.perk_menu_active != 0 and
+        box.runner.perkPendingCount() > 0 and
+        box.runner.preparedPerkChoices().len == 0)
+    {
         _ = box.runner.openPerkMenu();
-        if (box.recording and !box.record_overflow) {
-            box.record_pending_menu_open = true;
-        }
+        recordPerkEvent(box, .menu_open);
     }
 
-    if (input.perk_choice_index >= 0 and box.recording and !box.record_overflow) {
-        box.record_pending_pick = input.perk_choice_index;
+    if (input.perk_choice_index >= 0) {
+        recordPerkEvent(box, .{ .pick = input.perk_choice_index });
     }
+}
+
+/// Perk traffic seen but not yet stamped with a tick.
+///
+/// A QUEUE, not one slot each. The menu pauses the sim, so a whole
+/// open-pick-open-pick sequence can happen across frames that advance zero
+/// ticks; single slots silently kept only the last of each and dropped the rest.
+/// They all belong to the same tick anyway -- the one the sim next runs -- and
+/// the replay applies several events on a tick in order, which is exactly what
+/// the live path did.
+const PendingPerkEvent = union(enum) {
+    menu_open,
+    pick: i32,
+};
+
+fn recordPerkEvent(box: *SessionBox, event: PendingPerkEvent) void {
+    if (!box.recording or box.record_overflow) return;
+    box.record_pending.append(gpa, event) catch {
+        box.record_overflow = true;
+    };
 }
 
 /// Stamp any pending perk traffic onto the first tick this frame advanced.
 ///
 /// Called only when ticks_advanced > 0, so the stamped index always names a
-/// tick the recording contains and the replay will therefore reach. Order
-/// matters: the open must precede the pick, because opening is what makes the
-/// re-simulation draw the choice list the index then selects from.
+/// tick the recording contains and the replay will therefore reach. The queue
+/// is emitted IN ORDER: an open must precede the pick it offered, because
+/// opening is what makes the re-simulation draw the list the index selects
+/// from, and with several picks owed the sequence can be open, pick, open, pick
+/// all before a single tick runs.
 fn flushPerkEvents(box: *SessionBox, tick_index: u64) void {
     if (box.record_overflow) return;
 
-    if (box.record_pending_menu_open) {
-        box.record_events.append(gpa, .{ .perk_menu_open = .{
-            .tick_index = @intCast(tick_index),
-            .player_index = 0,
-        } }) catch {
+    for (box.record_pending.items) |pending| {
+        const event: replay_codec.ReplayEvent = switch (pending) {
+            .menu_open => .{ .perk_menu_open = .{
+                .tick_index = @intCast(tick_index),
+                .player_index = 0,
+            } },
+            .pick => |choice| .{ .perk_pick = .{
+                .tick_index = @intCast(tick_index),
+                .player_index = 0,
+                .choice_index = choice,
+            } },
+        };
+        box.record_events.append(gpa, event) catch {
             box.record_overflow = true;
             return;
         };
-        box.record_pending_menu_open = false;
     }
-
-    if (box.record_pending_pick) |choice| {
-        box.record_events.append(gpa, .{ .perk_pick = .{
-            .tick_index = @intCast(tick_index),
-            .player_index = 0,
-            .choice_index = choice,
-        } }) catch {
-            box.record_overflow = true;
-            return;
-        };
-        box.record_pending_pick = null;
-    }
+    box.record_pending.clearRetainingCapacity();
 }
 
 /// The shot counts a recording should CLAIM, sourced exactly as the replay
@@ -1581,12 +1606,11 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
     box.record_ticks.clearRetainingCapacity();
     box.record_events.clearRetainingCapacity();
     box.record_rng.clearRetainingCapacity();
-    // menu_was_active is deliberately NOT reset: it is sim state now, not
-    // capture state. begin is safe to call mid-run, and clearing the edge there
-    // would make an already-open menu read as newly opened on the next tick and
-    // roll a second offer over the one the player is looking at.
-    box.record_pending_menu_open = false;
-    box.record_pending_pick = null;
+    // Only capture state is cleared here. Whether an offer is currently rolled
+    // lives in the SIM (perk_selection), which begin must not touch: it is safe
+    // to call mid-run, and discarding the offer the player is looking at would
+    // re-roll it under them.
+    box.record_pending.clearRetainingCapacity();
     box.record_overflow = false;
     box.record_stats = .{};
     box.recording = true;

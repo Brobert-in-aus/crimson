@@ -7,6 +7,7 @@ const creatures_mod = @import("../creatures.zig");
 const perks = @import("../perks.zig");
 const spawn_mod = @import("../spawn.zig");
 const state_mod = @import("../state.zig");
+const survival_progression = @import("../survival_progression.zig");
 const typo_runtime = @import("../../typo/runtime.zig");
 
 const GameModeId = game_ids.GameModeId;
@@ -91,6 +92,20 @@ pub fn applyReplayEvent(
             if (pick.player_index < 0 or pick.player_index >= @as(i32, @intCast(players.len))) {
                 return error.UnsupportedEventPlayerIndex;
             }
+            // TIME-SCALED, like the live path. LiveRunner.pickPerk applies the
+            // reflex-boost/time-scale factor to the frame dt before handing it
+            // to the perk, and replaying with the raw tick dt made the two
+            // disagree by up to 3.3x whenever a pick happened under a Reflex
+            // Boost. Breathing Room reads dt_frame to nudge every creature's
+            // lifecycle_stage below the alive sentinel, so the scale decides how
+            // many creatures the perk kills -- one real VR run parted company
+            // with its replay on exactly this, at the last pick of a 13640-tick
+            // match, and came out 54 kills and 4550 xp apart.
+            const dt_pick = survival_progression.timeScaleReflexBoostBonus(
+                state.bonuses.reflex_boost,
+                state.time_scale_active,
+                dt_frame,
+            );
             const applied = perks.perkSelectionPickWithContext(
                 state,
                 players,
@@ -100,7 +115,7 @@ pub fn applyReplayEvent(
                 options.quest_unlock_index,
                 .{
                     .creatures = creatures,
-                    .dt_frame = dt_frame,
+                    .dt_frame = dt_pick,
                 },
             ) catch unreachable;
             if (applied == null) {
