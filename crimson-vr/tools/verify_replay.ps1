@@ -31,6 +31,38 @@ if (-not (Test-Path $verifier)) {
     throw "verifier not built: $verifier (run: zig build -Doptimize=ReleaseFast in crimson-zig)"
 }
 
+# Pull one app-private file as RAW BYTES.
+#
+# Three things here are load-bearing, each learned the hard way:
+#   * `adb pull` cannot read app-private storage at all; it has to go through
+#     `run-as`, which only cats to stdout.
+#   * that stdout must never touch the PowerShell pipeline, which decodes it as
+#     text and corrupts every byte above 0x7F. Reading BaseStream keeps it raw.
+#   * `exec-out` hands argv straight to the device with no shell, so quoting the
+#     remote path in single quotes makes the quotes PART OF THE FILENAME. The
+#     double quotes below are consumed by adb's own Windows arg parsing, which
+#     is what actually delivers a name containing a space as one argument.
+function Copy-DeviceFile {
+    param([string]$Target, [string]$Package, [string]$Name, [string]$Dest)
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'adb'
+    $psi.Arguments = "-s $Target exec-out run-as $Package cat `"files/replays/$Name`""
+    $psi.RedirectStandardOutput = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $out = [System.IO.File]::Create($Dest)
+    try {
+        $proc.StandardOutput.BaseStream.CopyTo($out)
+    }
+    finally {
+        $out.Close()
+        $proc.WaitForExit()
+    }
+}
+
 function Invoke-Verify([string]$path) {
     $name = Split-Path $path -Leaf
     $json = & $verifier replay verify $path --format json | Out-String
@@ -80,21 +112,30 @@ if (-not ($devices -match [regex]::Escape($Device))) {
     Write-Host "wireless $Device unreachable; using $target"
 }
 
-# -t sorts newest first; the app's replay dir may not exist yet on a fresh install.
-$listing = & adb -s $target exec-out run-as $Package ls -t files/replays 2>&1
+# -1t: newest first, ONE PER LINE. Without -1, Android's ls packs several names
+# onto a line and escapes spaces as "\ ", which turns two filenames into one
+# unusable string -- and the early recordings really do have spaces in their
+# names, from before the stamp format was fixed.
+$listing = & adb -s $target exec-out run-as $Package ls -1t files/replays 2>&1
 if ($LASTEXITCODE -ne 0 -or $listing -match 'No such file') {
     throw "no replays on device ($Package files/replays). Play a run to the death screen first."
 }
-$names = @($listing -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like '*.crd' })
+# ls ESCAPES the space in the legacy names as "\ ". Left as-is that backslash
+# ends up in the local path and File::Create fails on a directory that does not
+# exist, which reads as a pull failure rather than a parsing one.
+$names = @($listing -split "`n" |
+    ForEach-Object { ($_.Trim() -replace '\\ ', ' ') } |
+    Where-Object { $_ -like '*.crd' })
 if ($names.Count -eq 0) { throw "no .crd files in $Package files/replays" }
 if (-not $All) { $names = @($names[0]) } else { [array]::Reverse($names) }
 
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $failed = 0
 foreach ($name in $names) {
-    $dest = Join-Path $outDir $name
-    # cmd does the redirect so the bytes land raw; see the header note.
-    & cmd /c "adb -s $target exec-out run-as $Package cat files/replays/$name > `"$dest`""
+    # Older recordings have a space in the name (from before the stamp format
+    # was fixed); the local copy drops it so nothing downstream needs quoting.
+    $dest = Join-Path $outDir ($name -replace ' ', '-')
+    Copy-DeviceFile -Target $target -Package $Package -Name $name -Dest $dest
     if (-not (Test-Path $dest) -or (Get-Item $dest).Length -eq 0) {
         Write-Host "$name : pull produced an empty file" -ForegroundColor Red
         $failed++

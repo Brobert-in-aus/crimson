@@ -445,7 +445,10 @@ const SessionBox = struct {
     record_overflow: bool = false,
     record_stats: RecordedStats = .{},
     record_events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
-    record_menu_was_active: bool = false,
+    // Perk-menu edge state. NOT recording-only: the rising edge is what rolls
+    // the offer, so it has to be tracked on every session or a recorded run and
+    // an unrecorded one would play differently.
+    menu_was_active: bool = false,
     // Perk traffic seen but not yet stamped. The menu PAUSES the sim, so the
     // frames carrying a menu-open or a card poke usually advance zero ticks --
     // stamping those with the current tick index can place an event on an index
@@ -854,17 +857,34 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
 /// Both are derived from host input transitions, because that is what the live
 /// sim itself reacts to: the frontend owns when the menu is up and which card
 /// was poked.
+/// ALSO rolls the offer, and that is the point: opening the menu is the moment
+/// the choices are drawn, so it has to happen at a place the recording can name.
+/// It used to happen wherever the offer was first READ — which was
+/// crimson_host_snapshot, polled every frame — so the draw landed between ticks,
+/// at a position no replay could reproduce.
+///
+/// Runs whether or not the session is recording. The roll is sim state, not
+/// bookkeeping: making it conditional on recording would give recorded and
+/// unrecorded runs different games.
 fn notePerkInput(box: *SessionBox, inputs: []const CrimsonHostInput) void {
-    if (box.record_overflow or inputs.len == 0) return;
+    if (inputs.len == 0) return;
     const input = inputs[0];
 
     const menu_active = input.perk_menu_active != 0;
-    if (menu_active and !box.record_menu_was_active) {
-        box.record_pending_menu_open = true;
-    }
-    box.record_menu_was_active = menu_active;
+    const opened = menu_active and !box.menu_was_active;
+    box.menu_was_active = menu_active;
 
-    if (input.perk_choice_index >= 0) {
+    // Guarded on a pick actually being owed, and the event is recorded only when
+    // the roll really happened, so the replay's open lands on an offer rather
+    // than on nothing.
+    if (opened and box.runner.perkPendingCount() > 0) {
+        _ = box.runner.openPerkMenu();
+        if (box.recording and !box.record_overflow) {
+            box.record_pending_menu_open = true;
+        }
+    }
+
+    if (input.perk_choice_index >= 0 and box.recording and !box.record_overflow) {
         box.record_pending_pick = input.perk_choice_index;
     }
 }
@@ -978,9 +998,12 @@ pub export fn crimson_host_session_tick(
     // the tick they are stamped with, which is the tick this call is about to
     // simulate, not the one it leaves behind.
     const tick_before = box.runner.session.tick_index;
-    if (box.recording) {
-        notePerkInput(box, input_ptr[0..input_count]);
-    }
+    // Unconditional: this both rolls the perk offer and notes the event. The
+    // roll belongs to the simulation, so it cannot depend on whether anyone is
+    // recording. Placed before the step so the draw sits immediately ahead of
+    // tick_before -- the same position the replay draws at when it applies the
+    // perk_menu_open event stamped with that index.
+    notePerkInput(box, input_ptr[0..input_count]);
     const update = box.runner.stepFrame(dt_nominal, frame) catch |err| {
         setErrorFmt("tick failed: {s}", .{@errorName(err)});
         return err_generic;
@@ -1102,7 +1125,13 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     }
 
     if (header.perk_pending_count > 0) {
-        const choices = box.runner.currentPerkChoices();
+        // PREPARED, never "current": the current accessor GENERATES when the
+        // offer has not been rolled yet, and this snapshot is polled every
+        // frame. That made a read advance the sim rng between ticks, so replays
+        // diverged from the player's first level-up. Reporting an empty offer
+        // until the menu is opened is the correct answer here -- the roll
+        // belongs to the open, which is a recorded moment.
+        const choices = box.runner.preparedPerkChoices();
         header.perk_choice_count = @intCast(@min(choices.len, header.perk_choices.len));
         for (choices[0..header.perk_choice_count], 0..) |choice, idx| {
             header.perk_choices[idx] = @intFromEnum(choice);
@@ -1495,7 +1524,10 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
 
     box.record_ticks.clearRetainingCapacity();
     box.record_events.clearRetainingCapacity();
-    box.record_menu_was_active = false;
+    // menu_was_active is deliberately NOT reset: it is sim state now, not
+    // capture state. begin is safe to call mid-run, and clearing the edge there
+    // would make an already-open menu read as newly opened on the next tick and
+    // roll a second offer over the one the player is looking at.
     box.record_pending_menu_open = false;
     box.record_pending_pick = null;
     box.record_overflow = false;

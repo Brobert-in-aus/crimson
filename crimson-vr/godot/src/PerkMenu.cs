@@ -159,7 +159,13 @@ public sealed partial class PerkMenu : Node3D
     public void Update(in SnapshotView snap)
     {
         int count = Mathf.Min((int)snap.Header.PerkChoiceCount, _cards.Length);
-        Pending = snap.Header.PerkPendingCount > 0 && count > 0;
+        // Pending tracks the PICK being owed, not the cards existing. Those are
+        // now two different moments: the offer is rolled when the menu opens,
+        // because that roll draws from the sim rng and has to happen somewhere a
+        // replay can reproduce. Requiring count > 0 here deadlocked it — Active
+        // gates perk_menu_active, which is what triggers the roll, so the cards
+        // could never arrive and the Level Up! button would never stick.
+        Pending = snap.Header.PerkPendingCount > 0;
         if (!Pending)
         {
             _opened = false; // pick consumed -> reset for the next level-up

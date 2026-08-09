@@ -140,6 +140,15 @@ test "recorded replay verifies over a realistic run length" {
     // Keep it long. A recorder can be perfectly faithful about inputs (this one
     // is, bit for bit) and still produce replays that diverge, and the gap only
     // opens once the run is long enough for one rerolled decision to land.
+    //
+    // KNOW WHAT THIS DOES NOT COVER. The scripted player dies around tick 1100
+    // and the remaining ~2900 ticks simulate a corpse, so "4000 ticks" is not
+    // 4000 ticks of gameplay. It finishes on 144 xp against a level-2 threshold
+    // of 2000, which means no level-up, no perk offer and no pick -- the entire
+    // perk path is untested here, and that is exactly where a query was found
+    // rolling the offer between ticks. Attempts to script a bot that survives
+    // to level 2 all died inside ~1150 ticks; until one exists, the perk flow is
+    // covered by the invariant test above and by real in-headset runs.
     const handle = try createTestSession();
     defer exports.crimson_host_session_destroy(handle);
 
@@ -275,6 +284,44 @@ test "recorded replay verifies with weapon usage history" {
     try std.testing.expectEqual(@as(u32, 1234), replay.header.seed);
     try std.testing.expectEqual(@as(i32, 5), replay.header.detail_preset);
     try std.testing.expectEqual(@as(f32, 1024.0), replay.header.world_size);
+}
+
+test "reading perk choices must not advance the rng" {
+    // The snapshot the frontend polls EVERY FRAME reports the pending perk
+    // offer. Generating that offer draws from the sim rng, so if the read is
+    // what triggers generation, a query has just moved the deterministic stream
+    // -- outside the tick sequence a replay reproduces. The replay generates its
+    // offer when it reaches the recorded perk_menu_open event instead, so the
+    // two streams part company at the player's first level-up and never rejoin.
+    //
+    // This is invisible to every scripted gate here because none of them ever
+    // levels up: the 4000-tick run finishes on 144 xp against a 2000 threshold,
+    // so pending_count stays 0 and the offer is never read.
+    const staging = try std.testing.allocator.create(live_runner.LiveRunnerSnapshot);
+    defer std.testing.allocator.destroy(staging);
+    staging.runner = try live_runner.LiveRunner.init(.{
+        .seed = 1234,
+        .game_mode = .survival,
+        .player_count = 1,
+        .world_size = 1024.0,
+    });
+    const runner = try std.testing.allocator.create(live_runner.LiveRunner);
+    defer std.testing.allocator.destroy(runner);
+    runner.restoreSnapshot(staging);
+
+    // Stand in for a level-up: an offer is owed and has not been rolled yet.
+    runner.session.state.perk_selection.pending_count = 1;
+    runner.session.state.perk_selection.choices_dirty = true;
+    runner.session.state.perk_selection.choice_count = 0;
+
+    const before = runner.session.state.rng.state;
+    _ = runner.preparedPerkChoices();
+    try std.testing.expectEqual(before, runner.session.state.rng.state);
+
+    // The accessor the snapshot path uses; this is the one that generates.
+    _ = runner.currentPerkChoices();
+    const after = runner.session.state.rng.state;
+    try std.testing.expect(after != before);
 }
 
 test "a detached recording outlives its session and still verifies" {
