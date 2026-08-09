@@ -28,7 +28,10 @@ const replay_codec = crimson_zig.replay_codec;
 // v22: replay_detach / recording_encode / recording_destroy — lift a capture
 // out of its session in O(1) so the encode, whose cost grows with match length,
 // can run off the main thread. last_error is thread-local to suit.
-pub const abi_version: u32 = 22;
+// v23: recording_rng exposes per-tick live rng samples for divergence bisects,
+// and the perk offer is rolled on the menu-open edge instead of by whoever
+// reads it first — a snapshot poll used to move the stream between ticks.
+pub const abi_version: u32 = 23;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -445,6 +448,13 @@ const SessionBox = struct {
     record_overflow: bool = false,
     record_stats: RecordedStats = .{},
     record_events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
+    // Live rng state, one entry per recorded tick. NOT part of the .crd -- it is
+    // written beside it as a sidecar, purely so a run that fails verification
+    // can be bisected to the exact tick it parted company with its replay
+    // instead of being reasoned about from end-of-run totals. Every recorder bug
+    // so far cost several build-play-pull cycles to locate; this makes the first
+    // failing run name the tick.
+    record_rng: std.ArrayList(u32) = .empty,
     // Perk-menu edge state. NOT recording-only: the rising edge is what rolls
     // the offer, so it has to be tracked on every session or a recorded run and
     // an unrecorded one would play differently.
@@ -504,11 +514,13 @@ const RecordingBox = struct {
     config: HostSessionConfig = .{},
     ticks: std.ArrayList(RecordedTick) = .empty,
     events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
+    rng: std.ArrayList(u32) = .empty,
     stats: RecordedStats = .{},
 
     fn deinit(self: *RecordingBox) void {
         self.ticks.deinit(gpa);
         self.events.deinit(gpa);
+        self.rng.deinit(gpa);
     }
 };
 
@@ -654,10 +666,12 @@ fn takeRecording(box: *SessionBox) RecordingBox {
         .config = box.config,
         .ticks = box.record_ticks,
         .events = box.record_events,
+        .rng = box.record_rng,
         .stats = box.record_stats,
     };
     box.record_ticks = .empty;
     box.record_events = .empty;
+    box.record_rng = .empty;
     box.recording = false;
     return rec;
 }
@@ -940,6 +954,20 @@ fn recordFrame(
     dt: f32,
 ) void {
     if (ticks_advanced == 0 or box.record_overflow) return;
+
+    // One rng sample per row, so the sidecar indexes the same way the replay's
+    // tick stream does. On a frame that advanced several ticks every row gets
+    // the POST-FRAME value, which makes those rows uninformative rather than
+    // wrong -- the bisect only ever needs the first row that disagrees, and at
+    // a fixed 60 Hz these are 1:1 anyway.
+    const rng_now = box.runner.session.state.rng.state;
+    var rng_left = ticks_advanced;
+    while (rng_left > 0) : (rng_left -= 1) {
+        box.record_rng.append(gpa, rng_now) catch {
+            box.record_overflow = true;
+            return;
+        };
+    }
 
     var row: RecordedTick = .{
         .players = undefined,
@@ -1524,6 +1552,7 @@ pub export fn crimson_host_replay_begin(handle: u64) i32 {
 
     box.record_ticks.clearRetainingCapacity();
     box.record_events.clearRetainingCapacity();
+    box.record_rng.clearRetainingCapacity();
     // menu_was_active is deliberately NOT reset: it is sim state now, not
     // capture state. begin is safe to call mid-run, and clearing the edge there
     // would make an already-open menu read as newly opened on the next tick and
@@ -1753,6 +1782,39 @@ pub export fn crimson_host_recording_encode(recording: u64, buf: ?[*]u8, len: ?*
     if (len_ptr.* < bytes.len) {
         len_ptr.* = @intCast(bytes.len);
         setError("replay buffer too small");
+        return err_buffer_too_small;
+    }
+    @memcpy(out_ptr[0..bytes.len], bytes);
+    len_ptr.* = @intCast(bytes.len);
+    return ok;
+}
+
+/// Copy the recording's per-tick live rng samples out as raw little-endian u32,
+/// one per recorded tick. Same size-then-fill protocol as the encoders.
+///
+/// DIAGNOSTIC, not part of the replay. The host writes it beside the .crd so a
+/// run that fails verification can be bisected against
+/// `replay verify --max-ticks N`, which reports the re-simulation's rng at the
+/// same point. That turns "the totals disagree" into "they parted company at
+/// tick N", which is the difference between reading the code and guessing at it.
+pub export fn crimson_host_recording_rng(recording: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const rec = recordingForHandle(recording) orelse {
+        setError("invalid recording handle");
+        return err_invalid_handle;
+    };
+    const len_ptr = len orelse {
+        setError("len is null");
+        return err_invalid_input;
+    };
+    const bytes = std.mem.sliceAsBytes(rec.rng.items);
+    const out_ptr = buf orelse {
+        len_ptr.* = @intCast(bytes.len);
+        return ok;
+    };
+    if (len_ptr.* < bytes.len) {
+        len_ptr.* = @intCast(bytes.len);
+        setError("rng buffer too small");
         return err_buffer_too_small;
     }
     @memcpy(out_ptr[0..bytes.len], bytes);

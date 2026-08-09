@@ -95,7 +95,44 @@ function Invoke-Verify([string]$path) {
                 $f, $claim.expected.$f, $claim.simulated.$f)
         }
     }
+    Find-DivergenceTick -Path $path
     return $false
+}
+
+# Bisect the first tick where the live run and its replay part company.
+#
+# The live rng, sampled per tick, is written beside the .crd by the recorder;
+# `replay verify --max-ticks N` reports the re-simulation's rng at the same
+# point. Comparing end-of-run totals only ever says THAT they disagree — this
+# says WHERE, which is the difference between reading the code at that tick and
+# guessing at the whole run.
+function Find-DivergenceTick([string]$Path) {
+    $rngPath = "$Path.rng"
+    if (-not (Test-Path $rngPath)) {
+        Write-Host "    (no .rng sidecar; recorded before ABI v23 -- cannot bisect)" -ForegroundColor DarkGray
+        return
+    }
+    $raw = [System.IO.File]::ReadAllBytes($rngPath)
+    $count = [int]($raw.Length / 4)
+    if ($count -lt 2) { return }
+
+    function LiveRng([int]$tick) { return [System.BitConverter]::ToUInt32($raw, ($tick - 1) * 4) }
+    function SimRng([int]$tick) {
+        $j = & $verifier replay verify $Path --format json --max-ticks $tick | Out-String | ConvertFrom-Json
+        return [uint32]$j.run_result.rng_state
+    }
+
+    if ((SimRng $count) -eq (LiveRng $count)) {
+        Write-Host "    rng agrees at the final tick; divergence is not in the sim stream" -ForegroundColor Yellow
+        return
+    }
+    $lo = 1
+    $hi = $count
+    while ($lo -lt $hi) {
+        $mid = [int](($lo + $hi) / 2)
+        if ((SimRng $mid) -eq (LiveRng $mid)) { $lo = $mid + 1 } else { $hi = $mid }
+    }
+    Write-Host "    FIRST DIVERGING TICK = $lo (of $count)" -ForegroundColor Yellow
 }
 
 if ($Local) {

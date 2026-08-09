@@ -56,8 +56,8 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v22" {
-    try std.testing.expectEqual(@as(u32, 22), exports.crimson_host_abi_version());
+test "abi version reports v23" {
+    try std.testing.expectEqual(@as(u32, 23), exports.crimson_host_abi_version());
 }
 
 test "recorded replay verifies through the ABI" {
@@ -348,6 +348,16 @@ test "a detached recording outlives its session and still verifies" {
     var recording: u64 = 0;
     try std.testing.expectEqual(exports.ok, exports.crimson_host_replay_detach(handle, &recording));
     try std.testing.expect(recording != 0);
+
+    // One live rng sample per recorded tick, so the sidecar and the replay's
+    // tick stream index the same way. A mismatch here would make every bisect
+    // point at the wrong tick, which is worse than having no bisect at all.
+    var rng_len: u32 = 0;
+    try std.testing.expectEqual(
+        exports.ok,
+        exports.crimson_host_recording_rng(recording, null, &rng_len),
+    );
+    try std.testing.expectEqual(@as(u32, 600 * @sizeOf(u32)), rng_len);
 
     exports.crimson_host_session_destroy(handle);
 

@@ -884,8 +884,18 @@ public partial class Main : Node3D
                 {
                     System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(osPath)!);
                     System.IO.File.WriteAllBytes(osPath, bytes);
+                    // Sidecar, never inside the .crd: the replay format is
+                    // upstream's and has to stay readable by its tooling. This
+                    // is what lets a failing run be bisected to the tick it
+                    // diverged rather than argued about from end-of-run totals.
+                    byte[] rng = SimSession.RecordingRng(recording);
+                    if (rng.Length > 0)
+                    {
+                        System.IO.File.WriteAllBytes(osPath + ".rng", rng);
+                    }
                     message = $"CrimsonVR: replay saved {path} ({bytes.Length} bytes, " +
-                              $"{sw.ElapsedMilliseconds} ms to encode, off-thread) {liveStats}";
+                              $"{sw.ElapsedMilliseconds} ms to encode, off-thread, " +
+                              $"{rng.Length / 4} rng samples) {liveStats}";
                 }
             }
             catch (System.Exception e)

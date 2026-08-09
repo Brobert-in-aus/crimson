@@ -22,7 +22,7 @@ public static partial class Sim
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 22;
+    public const uint ExpectedAbiVersion = 23;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -435,6 +435,13 @@ public static partial class Sim
     /// Same size-then-fill protocol as ReplayFinish.</summary>
     [LibraryImport(LibName, EntryPoint = "crimson_host_recording_encode")]
     public static partial int RecordingEncode(ulong recording, Span<byte> buf, ref uint len);
+
+    /// <summary>Per-tick live rng samples for the recording, raw little-endian
+    /// u32. DIAGNOSTIC ONLY — written beside the .crd, never inside it, so a run
+    /// that fails verification can be bisected against
+    /// `replay verify --max-ticks N` to the exact tick it diverged.</summary>
+    [LibraryImport(LibName, EntryPoint = "crimson_host_recording_rng")]
+    public static partial int RecordingRng(ulong recording, Span<byte> buf, ref uint len);
 
     /// <summary>Release a detached recording. Every handle must reach this,
     /// including after a failed encode — the captured rows are the largest

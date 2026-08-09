@@ -368,6 +368,24 @@ public sealed class SimSession : IDisposable
         return len == buf.Length ? buf : buf.AsSpan(0, (int)len).ToArray();
     }
 
+    /// <summary>Per-tick live rng samples for a detached recording, as raw
+    /// bytes. Empty when the native side has none. Diagnostic only — see
+    /// Sim.RecordingRng.</summary>
+    public static byte[] RecordingRng(ulong recording)
+    {
+        uint len = 0;
+        if (Sim.RecordingRng(recording, Span<byte>.Empty, ref len) != Sim.Ok || len == 0)
+        {
+            return System.Array.Empty<byte>();
+        }
+        var buf = new byte[len];
+        if (Sim.RecordingRng(recording, buf, ref len) != Sim.Ok)
+        {
+            return System.Array.Empty<byte>();
+        }
+        return len == buf.Length ? buf : buf.AsSpan(0, (int)len).ToArray();
+    }
+
     public static void RecordingDestroy(ulong recording) => Sim.RecordingDestroy(recording);
 
     /// <summary>Tear down and recreate the session with the same config.</summary>
