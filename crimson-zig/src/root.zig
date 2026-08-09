@@ -44,6 +44,10 @@ pub const bootstrap = @import("runtime/bootstrap.zig");
 pub const session = @import("runtime/session.zig");
 pub const session_builders = @import("runtime/session_builders.zig");
 pub const live_runner = @import("runtime/live_runner.zig");
+// Exposed for the host ABI: a recording's claimed shot counts must be read
+// through the SAME accessor the replay verifier uses, or the claim and the
+// re-simulation disagree without the simulation having diverged at all.
+pub const survival_progression = @import("runtime/survival_progression.zig");
 pub const tutorial_runtime = @import("tutorial/runtime.zig");
 pub const typo_names = @import("typo/names.zig");
 pub const ui_formatting = @import("ui_formatting.zig");

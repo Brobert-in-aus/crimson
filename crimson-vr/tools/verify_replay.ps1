@@ -160,9 +160,8 @@ if ($LASTEXITCODE -ne 0 -or $listing -match 'No such file') {
 # ls ESCAPES the space in the legacy names as "\ ". Left as-is that backslash
 # ends up in the local path and File::Create fails on a directory that does not
 # exist, which reads as a pull failure rather than a parsing one.
-$names = @($listing -split "`n" |
-    ForEach-Object { ($_.Trim() -replace '\\ ', ' ') } |
-    Where-Object { $_ -like '*.crd' })
+$names_all = @($listing -split "`n" | ForEach-Object { ($_.Trim() -replace '\\ ', ' ') })
+$names = @($names_all | Where-Object { $_ -like '*.crd' })
 if ($names.Count -eq 0) { throw "no .crd files in $Package files/replays" }
 if (-not $All) { $names = @($names[0]) } else { [array]::Reverse($names) }
 
@@ -173,6 +172,12 @@ foreach ($name in $names) {
     # was fixed); the local copy drops it so nothing downstream needs quoting.
     $dest = Join-Path $outDir ($name -replace ' ', '-')
     Copy-DeviceFile -Target $target -Package $Package -Name $name -Dest $dest
+    # The rng sidecar is a separate file and the listing filter above only keeps
+    # .crd, so it has to be fetched explicitly -- without it the bisect silently
+    # reports "cannot bisect" on a run that actually carries one.
+    if ($names_all -contains "$name.rng") {
+        Copy-DeviceFile -Target $target -Package $Package -Name "$name.rng" -Dest "$dest.rng"
+    }
     if (-not (Test-Path $dest) -or (Get-Item $dest).Length -eq 0) {
         Write-Host "$name : pull produced an empty file" -ForegroundColor Red
         $failed++

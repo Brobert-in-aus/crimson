@@ -286,6 +286,48 @@ test "recorded replay verifies with weapon usage history" {
     try std.testing.expectEqual(@as(f32, 1024.0), replay.header.world_size);
 }
 
+test "claimed shot counts follow the verifier, not the scoreboard" {
+    // The live runner answers "how many projectiles left the barrel, and how
+    // many hits did anyone land" (shots_fired_total, every hit slot summed).
+    // The verifier answers "how many shots did player 0 take, and how many of
+    // THOSE hit" (per-player slots, hits clamped to fired). Both are reasonable;
+    // they are just different questions, and a multi-projectile weapon splits
+    // them wide open -- a real run claimed 4862 shots against 677 re-simulated
+    // while hits matched to within 1%, which looks like a catastrophic
+    // divergence and is nothing of the sort.
+    //
+    // Every scripted gate here misses it: they fire a pistol, where one trigger
+    // pull is one projectile and the two counts coincide.
+    const staging = try std.testing.allocator.create(live_runner.LiveRunnerSnapshot);
+    defer std.testing.allocator.destroy(staging);
+    staging.runner = try live_runner.LiveRunner.init(.{
+        .seed = 1234,
+        .game_mode = .survival,
+        .player_count = 1,
+        .world_size = 1024.0,
+    });
+    const runner = try std.testing.allocator.create(live_runner.LiveRunner);
+    defer std.testing.allocator.destroy(runner);
+    runner.restoreSnapshot(staging);
+
+    // Pull the two apart the way a shotgun does: many projectiles, few pulls.
+    const st = &runner.session.state;
+    st.shots_fired_total = 700;
+    st.shots_fired[0] = 100;
+    st.shots_hit[0] = 40;
+    if (st.shots_hit.len > 1) st.shots_hit[1] = 9; // another slot the sum would swallow
+
+    const claim = exports.claimedShots(&runner.session);
+    try std.testing.expectEqual(@as(i32, 100), claim.fired);
+    try std.testing.expectEqual(@as(i32, 40), claim.hit);
+
+    // And the scoreboard keeps its own answer -- this is not a change to what
+    // the player is shown, only to what the recording claims.
+    const update = try runner.stepFrame(0.0, .{});
+    try std.testing.expectEqual(@as(i32, 700), update.shots_fired);
+    try std.testing.expectEqual(@as(i32, 49), update.shots_hit);
+}
+
 test "reading perk choices must not advance the rng" {
     // The snapshot the frontend polls EVERY FRAME reports the pending perk
     // offer. Generating that offer draws from the sim rng, so if the read is

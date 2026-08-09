@@ -936,6 +936,20 @@ fn flushPerkEvents(box: *SessionBox, tick_index: u64) void {
     }
 }
 
+/// The shot counts a recording should CLAIM, sourced exactly as the replay
+/// verifier sources them (replay_runner.runReplayWithTrace). Kept beside the
+/// recorder rather than reusing the live runner's figures so the two paths
+/// cannot answer different questions about the same run.
+pub fn claimedShots(session: *const crimson_zig.session.DeterministicSession) state_mod.PlayerShots {
+    if (session.game_mode == .typo) {
+        return .{
+            .fired = session.state.typo.typing.submit_count,
+            .hit = session.state.typo.typing.match_count,
+        };
+    }
+    return crimson_zig.survival_progression.player0Shots(session.state);
+}
+
 /// Append one row per tick the frame actually advanced.
 ///
 /// The VR loop drives a fixed 60 Hz accumulator so this is normally 1:1, but
@@ -1044,13 +1058,27 @@ pub export fn crimson_host_session_tick(
             flushPerkEvents(box, tick_before);
         }
         recordFrame(box, input_ptr[0..input_count], update.ticks_advanced, dt_nominal);
+        const shots_claim = claimedShots(&box.runner.session);
         box.record_stats = .{
             .elapsed_ms_sim = update.elapsed_ms_sim,
             .player_experience = update.player_experience,
             .creature_kill_count = update.creature_kill_count,
             .most_used_weapon_id = update.most_used_weapon_id,
-            .shots_fired = update.shots_fired,
-            .shots_hit = update.shots_hit,
+            // Read the way the VERIFIER reads them, not the way the HUD does.
+            // The live runner reports shots_fired_total (every projectile) and
+            // the sum of all per-player hit slots; the verifier reads player 0's
+            // own slots and clamps hits to fired. Those are simply different
+            // questions, and a multi-projectile weapon splits them wide open --
+            // one real run claimed 4862 shots against 677 re-simulated while
+            // hits matched to within 1%, which reads as a catastrophic
+            // divergence and is nothing of the sort.
+            //
+            // The tick result below still reports the live counters, because
+            // that is what the scoreboard has always shown. Only the RECORDING's
+            // claim moves, and it moves onto the verifier's own accessor so the
+            // two cannot answer different questions.
+            .shots_fired = shots_claim.fired,
+            .shots_hit = shots_claim.hit,
         };
     }
 
