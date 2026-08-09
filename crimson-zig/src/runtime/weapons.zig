@@ -29,7 +29,17 @@ const PerkId = perks.PerkId;
 
 pub const WeaponRuntimeError = error{};
 
-const reload_preload_underflow_eps: f32 = 1e-7;
+pub const PlayerDamageRuntime = struct {
+    context: ?*anyopaque = null,
+    on_player_damage: *const fn (
+        context: ?*anyopaque,
+        player_index: i32,
+        health_before: f32,
+        player1_health_before: f32,
+        dt: f32,
+    ) void,
+};
+
 const movement_control_mouse_point_click: i32 = 4;
 
 const MuzzleSpriteSpec = struct {
@@ -71,22 +81,57 @@ fn debugShowcaseNextWeapon(current: WeaponId) WeaponId {
         const id: WeaponId = @enumFromInt(raw);
         switch (id) {
             .none,
-            .unknown_34,
-            .unknown_35,
-            .unknown_36,
-            .unknown_37,
-            .unknown_38,
-            .unknown_39,
-            .unknown_40,
-            .unknown_46,
-            .unknown_47,
-            .unknown_48,
-            .unknown_49,
+            .unused_34,
+            .unused_35,
+            .unused_36,
+            .unused_37,
+            .unused_38,
+            .unused_39,
+            .unused_40,
+            .unused_46,
+            .unused_47,
+            .unused_48,
+            .unused_49,
             => continue,
             else => return id,
         }
     }
     return current;
+}
+
+fn projectileSpawnFireBulletsActive(
+    state: *const state_mod.GameplayState,
+    player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
+) bool {
+    if (!state.preserve_bugs) return player.fire_bullets_timer > 0.0;
+
+    const players = all_players orelse return player.fire_bullets_timer > 0.0;
+    for (players[0..@min(players.len, 2)]) |candidate| {
+        if (candidate.fire_bullets_timer > 0.0) return true;
+    }
+    return false;
+}
+
+inline fn projectileSpawnType(
+    type_id: ProjectileTypeId,
+    fire_bullets_override: bool,
+) ProjectileTypeId {
+    return if (fire_bullets_override and type_id != .fire_bullets)
+        .fire_bullets
+    else
+        type_id;
+}
+
+fn playerUpdatePerkSource(
+    state: *const state_mod.GameplayState,
+    player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
+) *const state_mod.PlayerState {
+    if (!state.preserve_bugs) return player;
+    const players = all_players orelse return player;
+    if (players.len == 0) return player;
+    return &players[0];
 }
 
 pub const TickInputFlags = struct {
@@ -118,8 +163,6 @@ pub fn preprocessPlayerForPerkTicksWithEffects(
 ) bool {
     if (!(dt > 0.0)) return false;
 
-    player.muzzle_flash_alpha = @max(0.0, narrowF32(player.muzzle_flash_alpha - dt * 2.0));
-
     if (player.health <= 0.0) {
         player.death_timer = narrowF32(player.death_timer - dt * 20.0);
         return false;
@@ -129,10 +172,24 @@ pub fn preprocessPlayerForPerkTicksWithEffects(
         const next_low_health_timer = narrowF32(player.low_health_timer - dt);
         player.low_health_timer = next_low_health_timer;
         if (next_low_health_timer < 0.0) {
+            const bleed_dir_angle = native_math.pc24Sub(
+                native_math.pc24Add(player.aim_heading, native_math.native_half_pi),
+                @as(f32, 0.5),
+            );
+            const bleed_pos: state_mod.Vec2 = .{
+                .x = native_math.pc24Add(
+                    native_math.pc24Mul(@cos(@as(f64, bleed_dir_angle)), @as(f32, -6.0)),
+                    player.pos.x,
+                ),
+                .y = native_math.pc24Add(
+                    native_math.pc24Mul(@sin(@as(f64, bleed_dir_angle)), @as(f32, -6.0)),
+                    player.pos.y,
+                ),
+            };
             for (0..3) |_| {
                 effects.spawnBloodSplatter(
                     state,
-                    player.pos,
+                    bleed_pos,
                     player.aim_heading,
                     0.0,
                     detail_preset,
@@ -145,7 +202,71 @@ pub fn preprocessPlayerForPerkTicksWithEffects(
         }
     }
 
+    player.muzzle_flash_alpha = @max(0.0, narrowF32(player.muzzle_flash_alpha - dt * 2.0));
+
     return true;
+}
+
+test "dead player preprocessing only advances death timer" {
+    var state = state_mod.GameplayState.init(1);
+    var player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{},
+        .health = 0.0,
+        .death_timer = 16.0,
+        .low_health_timer = 0.25,
+        .muzzle_flash_alpha = 0.75,
+        .weapon = .{ .weapon_id = .pistol, .shot_cooldown = 0.5 },
+    };
+
+    try std.testing.expect(!preprocessPlayerForPerkTicks(&state, &player, 0.1));
+    try std.testing.expectEqual(narrowF32(16.0 - 0.1 * 20.0), player.death_timer);
+    try std.testing.expectEqual(@as(f32, 0.25), player.low_health_timer);
+    try std.testing.expectEqual(@as(f32, 0.75), player.muzzle_flash_alpha);
+    try std.testing.expectEqual(@as(f32, 0.5), player.weapon.shot_cooldown);
+}
+
+test "low-health preprocessing offsets blood effects from the player" {
+    var state = state_mod.GameplayState.init(1);
+    var effects: effects_mod.EffectPool = .{};
+    var player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{ .x = 100.0, .y = 200.0 },
+        .health = 19.0,
+        .low_health_timer = 0.0,
+        .aim_heading = 1.25,
+        .weapon = .{ .weapon_id = .pistol },
+    };
+
+    try std.testing.expect(preprocessPlayerForPerkTicksWithEffects(
+        &state,
+        &player,
+        &effects,
+        5,
+        0.016,
+    ));
+
+    const bleed_dir_angle = native_math.pc24Sub(
+        native_math.pc24Add(player.aim_heading, native_math.native_half_pi),
+        @as(f32, 0.5),
+    );
+    const expected_pos: state_mod.Vec2 = .{
+        .x = native_math.pc24Add(
+            native_math.pc24Mul(@cos(@as(f64, bleed_dir_angle)), @as(f32, -6.0)),
+            player.pos.x,
+        ),
+        .y = native_math.pc24Add(
+            native_math.pc24Mul(@sin(@as(f64, bleed_dir_angle)), @as(f32, -6.0)),
+            player.pos.y,
+        ),
+    };
+    for (effects.entries[0..6]) |entry| {
+        try std.testing.expectEqual(@intFromEnum(effects_mod.EffectId.blood_splatter), entry.effect_id);
+        try std.testing.expectEqual(expected_pos.x, entry.pos.x);
+        try std.testing.expectEqual(expected_pos.y, entry.pos.y);
+    }
+    try std.testing.expectEqual(@as(f32, 1.0), player.low_health_timer);
+    try std.testing.expectEqual(@as(usize, 1), state.sfx_queue.len);
 }
 
 pub fn stepPlayerForTick(
@@ -163,12 +284,14 @@ pub fn stepPlayerForTick(
     return stepPlayerForTickWithEffects(
         state,
         player,
+        null,
         projectiles,
         secondary_projectiles,
         creatures,
         particles,
         &effects,
         &sprite_effects,
+        null,
         5,
         input_flags,
         dt,
@@ -178,12 +301,14 @@ pub fn stepPlayerForTick(
 pub fn stepPlayerForTickWithEffects(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     secondary_projectiles: *secondary_projectiles_mod.SecondaryProjectilePool,
     creatures: *creatures_mod.CreaturePool,
     particles: *particles_mod.ParticlePool,
     effects: *effects_mod.EffectPool,
     sprite_effects: *effects_mod.SpriteEffectPool,
+    player_damage_runtime: ?PlayerDamageRuntime,
     detail_preset: i32,
     input_flags: TickInputFlags,
     dt: f32,
@@ -196,9 +321,7 @@ pub fn stepPlayerForTickWithEffects(
         return;
     }
 
-    if (input_flags.fire_down) {
-        state.survival_reward_fire_seen = true;
-    }
+    const perk_player = playerUpdatePerkSource(state, player, all_players);
 
     const cooldown_scale: f32 = if (state.bonuses.weapon_power_up > 0.0) 1.5 else 1.0;
     const cooldown_decay = narrowF32(
@@ -208,47 +331,41 @@ pub fn stepPlayerForTickWithEffects(
         @as(f64, @floatCast(player.weapon.shot_cooldown)) - @as(f64, @floatCast(cooldown_decay)),
     );
     player.weapon.shot_cooldown = @max(0.0, next_shot_cooldown);
-    if (player.weapon.shot_cooldown > 0.0 and player.weapon.shot_cooldown < 1e-6) {
-        player.weapon.shot_cooldown = 0.0;
-    }
 
-    const reload_scale: f32 = if (player.reload_stationary_latch and perks.perkActive(player, PerkId.stationary_reloader))
+    const reload_scale: f32 = if (player.reload_stationary_latch and perks.perkActive(perk_player, PerkId.stationary_reloader))
         3.0
     else
         1.0;
-    if (perks.perkActive(player, PerkId.anxious_loader) and input_flags.fire_pressed and player.weapon.reload_timer > 0.0) {
-        const anxious_next = narrowF32(player.weapon.reload_timer - 0.05);
+    if (perks.perkActive(perk_player, PerkId.anxious_loader) and input_flags.fire_pressed and player.weapon.reload_timer > 0.0) {
+        const anxious_next = native_math.pc24Sub(player.weapon.reload_timer, @as(f32, 0.05));
         player.weapon.reload_timer = anxious_next;
         if (anxious_next <= 0.0) {
-            player.weapon.reload_timer = dt * 0.8;
+            player.weapon.reload_timer = native_math.pc24Mul(dt, @as(f32, 0.8));
         }
     }
 
     const reload_timer_now = narrowF32(player.weapon.reload_timer);
+    const reload_step = native_math.pc24Mul(reload_scale, dt);
     var preload_dt = dt;
     if (!state.preserve_bugs) {
-        preload_dt = narrowF32(reload_scale * dt);
+        preload_dt = reload_step;
     }
-    const reload_preload_underflow = narrowF32(reload_timer_now - preload_dt);
-    const preload_crossed = reload_preload_underflow < -reload_preload_underflow_eps;
-    const preload_fire_boundary = input_flags.fire_down and reload_preload_underflow <= reload_preload_underflow_eps;
-    if (player.weapon.reload_active and reload_timer_now > 0.0 and (preload_crossed or preload_fire_boundary)) {
+    const reload_preload_underflow = native_math.pc24Sub(reload_timer_now, preload_dt);
+    if (reload_timer_now > 0.0 and reload_preload_underflow < 0.0) {
         player.weapon.ammo = @floatFromInt(@max(0, player.weapon.clip_size));
     }
 
     if (player.weapon.reload_timer > 0.0) {
-        if (perks.perkActive(player, PerkId.angry_reloader) and
+        if (perks.perkActive(perk_player, PerkId.angry_reloader) and
             player.weapon.reload_timer_max > 0.5 and
-            player.weapon.reload_timer > player.weapon.reload_timer_max * 0.5)
+            player.weapon.reload_timer > native_math.pc24Mul(player.weapon.reload_timer_max, @as(f32, 0.5)))
         {
-            const half_reload = narrowF32(player.weapon.reload_timer_max * 0.5);
-            const next_timer = narrowF32(player.weapon.reload_timer - narrowF32(reload_scale * dt));
+            const half_reload = native_math.pc24Mul(player.weapon.reload_timer_max, @as(f32, 0.5));
+            const next_timer = native_math.pc24Sub(player.weapon.reload_timer, reload_step);
             player.weapon.reload_timer = next_timer;
             if (next_timer <= half_reload) {
                 const count = 7 + @as(i32, @intFromFloat(player.weapon.reload_timer_max * 4.0));
-                const prev_spawn_guard = state.bonus_spawn_guard;
                 state.bonus_spawn_guard = true;
-                defer state.bonus_spawn_guard = prev_spawn_guard;
 
                 const owner = if (!state.friendly_fire_enabled)
                     owner_ref.OwnerRef.fromLocalPlayer(0)
@@ -263,16 +380,17 @@ pub fn stepPlayerForTickWithEffects(
                         _ = projectiles.spawn(player.pos, angle, type_id, owner, meta, false);
                     }
                 }
+                state.bonus_spawn_guard = false;
             }
         } else {
-            player.weapon.reload_timer = narrowF32(player.weapon.reload_timer - narrowF32(reload_scale * dt));
+            player.weapon.reload_timer = native_math.pc24Sub(player.weapon.reload_timer, reload_step);
         }
         if (player.weapon.reload_timer < 0.0) {
             player.weapon.reload_timer = 0.0;
         }
     }
 
-    const has_alt_weapon_perk = perks.perkActive(player, PerkId.alternate_weapon);
+    const has_alt_weapon_perk = perks.perkActive(perk_player, PerkId.alternate_weapon);
     // Native gates on grim_is_key_active (key held), so holding reload chains
     // reloads back-to-back as each one completes.
     const manual_reload_allowed =
@@ -295,13 +413,16 @@ pub fn stepPlayerForTickWithEffects(
     }
 
     if (manual_reload_allowed) {
-        player_runtime.playerStartReload(player, state);
+        player_runtime.playerStartReloadWithPlayers(player, state, all_players);
     }
 
-    if (perks.perkActive(player, PerkId.sharpshooter)) {
+    if (perks.perkActive(perk_player, PerkId.sharpshooter)) {
         player.spread_heat = 0.02;
     } else {
-        player.spread_heat = @max(0.01, player.spread_heat - dt * 0.4);
+        player.spread_heat = @max(
+            @as(f32, 0.01),
+            native_math.pc24Sub(player.spread_heat, native_math.pc24Mul(dt, @as(f32, 0.4))),
+        );
     }
 
     if (player.weapon.shot_cooldown <= 0.0 and player.weapon.reload_timer == 0.0) {
@@ -346,13 +467,16 @@ pub fn stepPlayerForTickWithEffects(
         _ = try tryFireWeaponWithForce(
             state,
             player,
+            all_players,
             projectiles,
             secondary_projectiles,
             creatures,
             particles,
             effects,
             sprite_effects,
+            player_damage_runtime,
             detail_preset,
+            dt,
             force_pre_swap_fire_gate,
         );
     }
@@ -395,13 +519,16 @@ pub fn tryFireWeaponWithEffects(
     return tryFireWeaponWithForce(
         state,
         player,
+        null,
         projectiles,
         secondary_projectiles,
         creatures,
         particles,
         effects,
         sprite_effects,
+        null,
         detail_preset,
+        0.0,
         false,
     );
 }
@@ -409,21 +536,38 @@ pub fn tryFireWeaponWithEffects(
 fn tryFireWeaponWithForce(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     secondary_projectiles: *secondary_projectiles_mod.SecondaryProjectilePool,
     creatures: *creatures_mod.CreaturePool,
     particles: *particles_mod.ParticlePool,
     effects: *effects_mod.EffectPool,
     sprite_effects: *effects_mod.SpriteEffectPool,
+    player_damage_runtime: ?PlayerDamageRuntime,
     detail_preset: i32,
+    dt: f32,
     force_pre_swap_fire_gate: bool,
 ) WeaponRuntimeError!bool {
+    const perk_player = playerUpdatePerkSource(state, player, all_players);
     if (player.weapon.shot_cooldown > 0.0 and !force_pre_swap_fire_gate) return false;
     const weapon_id = player.weapon.weapon_id;
-    if (player.weapon.reload_timer > 0.0 and !force_pre_swap_fire_gate) {
+    const perk_fire_ready = player.weapon.reload_timer > 0.0 and !force_pre_swap_fire_gate;
+    var use_regression_bullets = false;
+    var use_ammunition_within = false;
+    if (perk_fire_ready) {
         if (player.experience <= 0) return false;
 
-        if (perks.perkActive(player, PerkId.regression_bullets)) {
+        use_regression_bullets = perks.perkActive(perk_player, PerkId.regression_bullets);
+        use_ammunition_within = !use_regression_bullets and perks.perkActive(perk_player, PerkId.ammunition_within);
+        if (!use_regression_bullets and !use_ammunition_within) return false;
+    }
+
+    // Native writes this after the ready/input gates, but before charging the
+    // reload-bypass perk and dispatching the shot.
+    state.survival_reward_fire_seen = true;
+
+    if (perk_fire_ready) {
+        if (use_regression_bullets) {
             const reload_time = weapon_data.weapon_stats.get(weapon_id).reload_time;
             const factor: f32 = if (weaponUsesFireAmmoClass(weapon_id)) 4.0 else 200.0;
             const drained = narrowF32(reload_time * factor);
@@ -431,19 +575,32 @@ fn tryFireWeaponWithForce(
             var after: i32 = @intFromFloat(before - drained);
             if (after < 0) after = 0;
             player.experience = after;
-        } else if (perks.perkActive(player, PerkId.ammunition_within)) {
+        } else if (use_ammunition_within) {
             const health_cost: f32 = if (weaponUsesFireAmmoClass(weapon_id))
                 @as(f32, 0.15)
             else
                 @as(f32, 1.0);
-            creatures_mod.applyPlayerContactDamage(
+            const health_before = player.health;
+            const player1_health_before = if (all_players) |players|
+                if (players.len > 0) players[0].health else player.health
+            else
+                player.health;
+            creatures_mod.applyPlayerContactDamageWithPlayers(
                 state,
                 player,
+                all_players,
                 health_cost,
-                0.0,
+                dt,
             );
-        } else {
-            return false;
+            if (player_damage_runtime) |runtime| {
+                runtime.on_player_damage(
+                    runtime.context,
+                    player.index,
+                    health_before,
+                    player1_health_before,
+                    dt,
+                );
+            }
         }
     }
 
@@ -456,6 +613,8 @@ fn tryFireWeaponWithForce(
     var shot_cooldown = shot_cooldown_base;
 
     const is_fire_bullets = player.fire_bullets_timer > 0.0;
+    var projectile_spawn_credit_multiplier: i32 = 1;
+    var uses_primary_projectile_spawn = false;
     var shot_count = computeShotCount(player.weapon.weapon_id);
     // Native increments the accuracy counter only inside projectile_spawn /
     // fx_spawn_secondary_projectile; particle weapons never count toward
@@ -466,28 +625,32 @@ fn tryFireWeaponWithForce(
     }
     if (shot_count <= 0) return false;
 
-    const aim_delta = state_mod.Vec2.sub(player.aim, player.pos);
-    const aim_heading = if (aim_delta.lengthSq() > 1e-9)
-        aim_delta.toHeading()
-    else
-        player.aim_dir.toHeading();
-    const muzzle_dir = rotateVec(directionFromHeading(aim_heading), -0.150915);
-    const muzzle = state_mod.Vec2.add(player.pos, muzzle_dir.mul(16.0));
+    const aim_heading = player.aim_heading;
+    const muzzle_xy = native_math.fireMuzzlePos(player.pos.x, player.pos.y, aim_heading);
+    const muzzle: state_mod.Vec2 = .{
+        .x = muzzle_xy[0],
+        .y = muzzle_xy[1],
+    };
     // Native encodes friendly fire in the owner id (-1 - player_index): with
     // the cvar enabled, primary player shots can hit other players.
     const projectile_owner = if (state.friendly_fire_enabled)
         owner_ref.OwnerRef.fromPlayer(@intCast(player.index))
     else
         owner_ref.OwnerRef.fromLocalPlayer(0);
+    const uses_player_projectile_path = !state.preserve_bugs or
+        projectile_owner.usesNativePlayerProjectilePath();
+    const projectile_spawn_override = uses_player_projectile_path and
+        !state.bonus_spawn_guard and
+        !is_fire_bullets and
+        projectileSpawnFireBulletsActive(state, player, all_players);
     const projectile_hits_players = state.friendly_fire_enabled;
-    const secondary_owner = owner_ref.OwnerRef.fromPlayer(@intCast(player.index));
     if (is_fire_bullets and pellet_count == 1) {
         shot_cooldown = weapon_data.weapon_stats.get(fire_bullets_weapon_id).shot_cooldown;
     }
-    if (perks.perkActive(player, PerkId.fastshot)) {
+    if (perks.perkActive(perk_player, PerkId.fastshot)) {
         shot_cooldown = narrowF32(shot_cooldown * 0.88);
     }
-    if (perks.perkActive(player, PerkId.sharpshooter)) {
+    if (perks.perkActive(perk_player, PerkId.sharpshooter)) {
         shot_cooldown = narrowF32(shot_cooldown * 1.05);
     }
     player.weapon.shot_cooldown = @max(0.0, shot_cooldown);
@@ -510,23 +673,17 @@ fn tryFireWeaponWithForce(
         );
     }
 
-    // Native float sequence: half the f32 aim distance is spilled, the
-    // spread/magnitude product chain stays in extended precision, the jittered
-    // aim x is spilled while y feeds atan2 unspilled, and the heading is
-    // (float)(atan2(pos - jitter) - 1.5707964).
-    const half_len: f32 = aim_delta.length() * 0.5;
     const dir_roll = state.rng.randTagged(rng_callers.player_update_shot_jitter_dir);
     const mag_roll = state.rng.randTagged(rng_callers.player_update_shot_jitter_mag);
-    const offset_term: f64 = @as(f64, half_len) * @as(f64, player.spread_heat) *
-        @as(f64, @floatFromInt(mag_roll & 0x1ff)) * 0.001953125;
-    const dir_angle: f32 = @as(f32, @floatFromInt(dir_roll & 0x1ff)) * (native_tau / 512.0);
-    const aim_jitter_x: f32 = @floatCast(@cos(@as(f64, dir_angle)) * offset_term + @as(f64, player.aim.x));
-    const aim_jitter_y: f64 = @sin(@as(f64, dir_angle)) * offset_term + @as(f64, player.aim.y);
-    const native_half_pi_f32: f32 = native_math.roundF32(native_math.native_half_pi);
-    const shot_angle: f32 = @floatCast(std.math.atan2(
-        @as(f64, player.pos.y) - aim_jitter_y,
-        @as(f64, player.pos.x) - @as(f64, aim_jitter_x),
-    ) - @as(f64, native_half_pi_f32));
+    const shot_angle = native_math.shotAngleFromJitterDraws(
+        player.aim.x,
+        player.aim.y,
+        player.pos.x,
+        player.pos.y,
+        player.spread_heat,
+        dir_roll,
+        mag_roll,
+    );
     var particle_angle = directionFromHeading(shot_angle).toAngle();
     if (player.weapon.weapon_id == .flamethrower or player.weapon.weapon_id == .blow_torch or player.weapon.weapon_id == .hr_flamer) {
         particle_angle = directionFromHeading(aim_heading).toAngle();
@@ -553,7 +710,9 @@ fn tryFireWeaponWithForce(
 
     switch (recipe.mode) {
         .primary_pellets => |mode| {
-            const type_id = mode.type_id;
+            uses_primary_projectile_spawn = true;
+            const type_id = projectileSpawnType(mode.type_id, projectile_spawn_override);
+            if (type_id != mode.type_id) projectile_spawn_credit_multiplier = 2;
             const type_id_i32 = @intFromEnum(type_id);
             const pellets = @max(0, mode.count);
             shot_count = pellets;
@@ -577,7 +736,7 @@ fn tryFireWeaponWithForce(
                 muzzle,
                 narrowF32(shot_angle),
                 mode.type_id,
-                secondary_owner,
+                projectile_owner,
                 2.0,
                 target_hint,
                 if (target_hint != null) creatures else null,
@@ -608,14 +767,22 @@ fn tryFireWeaponWithForce(
             shot_count = 1;
         },
         .multi_plasma_fan => {
+            uses_primary_projectile_spawn = true;
             shot_count = 5;
-            const spread_small = std.math.pi / 10.0;
-            const spread_large = std.math.pi / 6.0;
-            _ = projectiles.spawn(muzzle, narrowF32(shot_angle - spread_small), @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle), projectile_owner, weapon_data.weapon_stats.get(.plasma_rifle).travel_budget, projectile_hits_players);
-            _ = projectiles.spawn(muzzle, narrowF32(shot_angle - spread_large), @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun), projectile_owner, weapon_data.weapon_stats.get(.plasma_minigun).travel_budget, projectile_hits_players);
-            _ = projectiles.spawn(muzzle, narrowF32(shot_angle), @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle), projectile_owner, weapon_data.weapon_stats.get(.plasma_rifle).travel_budget, projectile_hits_players);
-            _ = projectiles.spawn(muzzle, narrowF32(shot_angle + spread_large), @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun), projectile_owner, weapon_data.weapon_stats.get(.plasma_minigun).travel_budget, projectile_hits_players);
-            _ = projectiles.spawn(muzzle, narrowF32(shot_angle + spread_small), @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle), projectile_owner, weapon_data.weapon_stats.get(.plasma_rifle).travel_budget, projectile_hits_players);
+            const spread_small: f32 = 0.31415927;
+            const spread_large: f32 = 0.5235988;
+            const rifle_type_id = projectileSpawnType(.plasma_rifle, projectile_spawn_override);
+            const minigun_type_id = projectileSpawnType(.plasma_minigun, projectile_spawn_override);
+            if (rifle_type_id != .plasma_rifle or minigun_type_id != .plasma_minigun) {
+                projectile_spawn_credit_multiplier = 2;
+            }
+            const rifle_meta = projectileTravelBudgetFromTypeId(rifle_type_id);
+            const minigun_meta = projectileTravelBudgetFromTypeId(minigun_type_id);
+            _ = projectiles.spawn(muzzle, native_math.pc24Sub(shot_angle, spread_small), @intFromEnum(rifle_type_id), projectile_owner, rifle_meta, projectile_hits_players);
+            _ = projectiles.spawn(muzzle, native_math.pc24Sub(shot_angle, spread_large), @intFromEnum(minigun_type_id), projectile_owner, minigun_meta, projectile_hits_players);
+            _ = projectiles.spawn(muzzle, narrowF32(shot_angle), @intFromEnum(rifle_type_id), projectile_owner, rifle_meta, projectile_hits_players);
+            _ = projectiles.spawn(muzzle, native_math.pc24Add(shot_angle, spread_large), @intFromEnum(minigun_type_id), projectile_owner, minigun_meta, projectile_hits_players);
+            _ = projectiles.spawn(muzzle, native_math.pc24Add(shot_angle, spread_small), @intFromEnum(rifle_type_id), projectile_owner, rifle_meta, projectile_hits_players);
         },
         .swarmer_dump => {
             // Native spawns one rocket per integer counter step below the float
@@ -638,7 +805,7 @@ fn tryFireWeaponWithForce(
                     muzzle,
                     angle,
                     secondary_projectiles_mod.SecondaryProjectileTypeId.homing_rocket,
-                    secondary_owner,
+                    projectile_owner,
                     2.0,
                     player.aim,
                     creatures,
@@ -655,17 +822,21 @@ fn tryFireWeaponWithForce(
     }
 
     const player_idx = player.index;
+    const projectile_spawn_shot_count = if (uses_primary_projectile_spawn and !uses_player_projectile_path)
+        0
+    else
+        shot_count * projectile_spawn_credit_multiplier;
     if (player_idx >= 0 and player_idx < state.shots_fired.len) {
         const idx: usize = @intCast(player_idx);
         if (counts_accuracy_shots) {
-            state.shots_fired[idx] += shot_count;
+            state.shots_fired[idx] += projectile_spawn_shot_count;
         }
         const weapon_idx: usize = @intCast(@intFromEnum(player.weapon.weapon_id));
         if (weapon_idx < state.weapon_shots_fired[idx].len) {
             state.weapon_shots_fired[idx][weapon_idx] += shot_count;
         }
     }
-    state.shots_fired_total += shot_count;
+    state.shots_fired_total += projectile_spawn_shot_count;
 
     if (state.bonuses.reflex_boost <= 0.0 and !is_fire_bullets) {
         player.weapon.ammo -= ammo_cost;
@@ -673,11 +844,11 @@ fn tryFireWeaponWithForce(
 
     player.shot_seq += 1;
 
-    if (!perks.perkActive(player, PerkId.sharpshooter)) {
+    if (!perks.perkActive(perk_player, PerkId.sharpshooter)) {
         const spread_heat_base = if (is_fire_bullets) fire_bullets_spread_heat else weapon_spread_heat;
-        const spread_inc = spread_heat_base * 1.3;
+        const spread_inc = native_math.pc24Mul(spread_heat_base, @as(f32, 1.3));
         player.spread_heat = std.math.clamp(
-            player.spread_heat + spread_inc,
+            native_math.pc24Add(player.spread_heat, spread_inc),
             0.0,
             0.48,
         );
@@ -689,7 +860,7 @@ fn tryFireWeaponWithForce(
     player.muzzle_flash_alpha = @min(0.8, player.muzzle_flash_alpha);
 
     if (player.weapon.ammo <= 0.0 and (force_pre_swap_fire_gate or player.weapon.reload_timer <= 0.0)) {
-        player_runtime.playerStartReload(player, state);
+        player_runtime.playerStartReloadWithPlayers(player, state, all_players);
     }
 
     return true;
@@ -702,34 +873,39 @@ pub fn applyPlayerPerkTicks(
     dt: f32,
 ) void {
     var sprite_effects: effects_mod.SpriteEffectPool = .{};
-    applyPlayerPerkTicksWithEffects(state, player, projectiles, &sprite_effects, dt);
+    applyPlayerPerkTicksWithEffects(state, player, null, projectiles, &sprite_effects, dt);
 }
 
 pub fn applyPlayerPerkTicksWithEffects(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     sprite_effects: *effects_mod.SpriteEffectPool,
     dt: f32,
 ) void {
-    tickManBomb(state, player, projectiles, dt);
-    tickLivingFortress(player, dt);
-    tickFireCaugh(state, player, projectiles, sprite_effects, dt);
-    tickHotTempered(state, player, projectiles, dt);
+    const perk_player = playerUpdatePerkSource(state, player, all_players);
+    tickManBomb(state, player, perk_player, all_players, projectiles, dt);
+    tickLivingFortress(player, perk_player, dt);
+    tickFireCaugh(state, player, perk_player, all_players, projectiles, sprite_effects, dt);
+    tickHotTempered(state, player, perk_player, all_players, projectiles, dt);
+    tickPlayerSpreadDamping(state, dt);
 }
 
 fn tickManBomb(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     dt: f32,
 ) void {
-    if (!perks.perkActive(player, PerkId.man_bomb)) {
+    if (!perks.perkActive(perk_player, PerkId.man_bomb)) {
         player.man_bomb_timer = 0.0;
         return;
     }
 
-    player.man_bomb_timer += dt;
+    player.man_bomb_timer = native_math.pc24Add(player.man_bomb_timer, dt);
     if (player.man_bomb_timer <= state.perk_interval_man_bomb) return;
 
     const owner = if (!state.friendly_fire_enabled)
@@ -747,6 +923,7 @@ fn tickManBomb(
         spawnPerkProjectile(
             state,
             player,
+            all_players,
             projectiles,
             player.pos,
             angle,
@@ -755,16 +932,23 @@ fn tickManBomb(
         );
     }
     state.sfx_queue.append(.explosion_small);
-    player.man_bomb_timer -= state.perk_interval_man_bomb;
+    player.man_bomb_timer = native_math.pc24Sub(
+        player.man_bomb_timer,
+        state.perk_interval_man_bomb,
+    );
     state.perk_interval_man_bomb = 4.0;
 }
 
 fn tickLivingFortress(
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
     dt: f32,
 ) void {
-    if (perks.perkActive(player, PerkId.living_fortress)) {
-        player.living_fortress_timer = @min(30.0, player.living_fortress_timer + dt);
+    if (perks.perkActive(perk_player, PerkId.living_fortress)) {
+        player.living_fortress_timer = @min(
+            @as(f32, 30.0),
+            native_math.pc24Add(player.living_fortress_timer, dt),
+        );
     } else {
         player.living_fortress_timer = 0.0;
     }
@@ -773,16 +957,18 @@ fn tickLivingFortress(
 fn tickFireCaugh(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     sprite_effects: *effects_mod.SpriteEffectPool,
     dt: f32,
 ) void {
-    if (!perks.perkActive(player, PerkId.fire_caugh)) {
+    if (!perks.perkActive(perk_player, PerkId.fire_caugh)) {
         player.fire_cough_timer = 0.0;
         return;
     }
 
-    player.fire_cough_timer += dt;
+    player.fire_cough_timer = native_math.pc24Add(player.fire_cough_timer, dt);
     if (player.fire_cough_timer <= state.perk_interval_fire_cough) return;
 
     const owner = if (!state.friendly_fire_enabled)
@@ -793,26 +979,23 @@ fn tickFireCaugh(
     state.sfx_queue.append(.plasmaminigun_fire);
     const aim_heading = player.aim_heading;
     const origin_pos = player.pos;
-    const muzzle = state_mod.Vec2.add(
-        origin_pos,
-        rotateVec(directionFromHeading(aim_heading), -0.150915).mul(16.0),
-    );
-    const aim_delta = state_mod.Vec2.sub(player.aim, origin_pos);
-    const dist = aim_delta.length();
-    const max_offset = dist * player.spread_heat * 0.5;
+    const muzzle_xy = native_math.fireMuzzlePos(origin_pos.x, origin_pos.y, aim_heading);
+    const muzzle: state_mod.Vec2 = .{ .x = muzzle_xy[0], .y = muzzle_xy[1] };
     const dir_roll = state.rng.randTagged(rng_callers.player_update_fire_cough_spread_dir);
-    const dir_angle = @as(f32, @floatFromInt(dir_roll & 0x1ff)) * (native_tau / 512.0);
     const mag_roll = state.rng.randTagged(rng_callers.player_update_fire_cough_spread_mag);
-    const mag = @as(f32, @floatFromInt(mag_roll & 0x1ff)) * (1.0 / 512.0);
-    const offset = max_offset * mag;
-    const jitter = state_mod.Vec2.add(
-        player.aim,
-        state_mod.Vec2.fromAngle(dir_angle).mul(offset),
+    const angle = native_math.shotAngleFromJitterDraws(
+        player.aim.x,
+        player.aim.y,
+        origin_pos.x,
+        origin_pos.y,
+        player.spread_heat,
+        dir_roll,
+        mag_roll,
     );
-    const angle = state_mod.Vec2.sub(jitter, origin_pos).toHeading();
     spawnPerkProjectile(
         state,
         player,
+        all_players,
         projectiles,
         muzzle,
         angle,
@@ -828,22 +1011,24 @@ fn tickFireCaugh(
         .{ .r = 0.5, .g = 0.5, .b = 0.5, .a = 0.413 },
     );
 
-    player.fire_cough_timer -= state.perk_interval_fire_cough;
+    player.fire_cough_timer = native_math.pc24Sub(player.fire_cough_timer, state.perk_interval_fire_cough);
     state.perk_interval_fire_cough = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.player_update_fire_cough_interval_reset) % 4)) + 2.0;
 }
 
 fn tickHotTempered(
     state: *state_mod.GameplayState,
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     dt: f32,
 ) void {
-    if (!perks.perkActive(player, PerkId.hot_tempered)) {
+    if (!perks.perkActive(perk_player, PerkId.hot_tempered)) {
         player.hot_tempered_timer = 0.0;
         return;
     }
 
-    player.hot_tempered_timer += dt;
+    player.hot_tempered_timer = native_math.pc24Add(player.hot_tempered_timer, dt);
     if (player.hot_tempered_timer <= state.perk_interval_hot_tempered) return;
 
     const owner = if (state.friendly_fire_enabled)
@@ -855,10 +1040,11 @@ fn tickHotTempered(
             .plasma_minigun
         else
             .plasma_rifle;
-        const angle = @as(f32, @floatFromInt(idx)) * (native_pi / 4.0);
+        const angle = native_math.pc24Mul(@as(f32, @floatFromInt(idx)), native_math.native_quarter_pi);
         spawnPerkProjectile(
             state,
             player,
+            all_players,
             projectiles,
             player.pos,
             angle,
@@ -868,13 +1054,25 @@ fn tickHotTempered(
     }
     state.sfx_queue.append(.explosion_small);
 
-    player.hot_tempered_timer -= state.perk_interval_hot_tempered;
+    player.hot_tempered_timer = native_math.pc24Sub(player.hot_tempered_timer, state.perk_interval_hot_tempered);
     state.perk_interval_hot_tempered = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.player_update_hot_tempered_interval_reset) % 8)) + 2.0;
+}
+
+fn tickPlayerSpreadDamping(state: *state_mod.GameplayState, dt: f32) void {
+    if (state.player_spread_damping_gate > 0.0) {
+        const next_scalar = native_math.pc24Sub(state.player_spread_damping_scalar, dt);
+        state.player_spread_damping_scalar = if (next_scalar < 0.3) 0.3 else next_scalar;
+    } else {
+        const recovery = native_math.pc24Mul(dt, @as(f32, 0.8));
+        const next_scalar = native_math.pc24Add(recovery, state.player_spread_damping_scalar);
+        state.player_spread_damping_scalar = if (next_scalar > 1.0) 1.0 else next_scalar;
+    }
 }
 
 fn spawnPerkProjectile(
     state: *state_mod.GameplayState,
     player: *const state_mod.PlayerState,
+    all_players: ?[]const state_mod.PlayerState,
     projectiles: *projectiles_mod.ProjectilePool,
     pos: state_mod.Vec2,
     angle: f32,
@@ -883,10 +1081,13 @@ fn spawnPerkProjectile(
 ) void {
     var spawn_type_id = type_id;
     var shot_credit: i32 = 0;
-    const player_owned_spawn = owner.playerIndexInBounds(state.shots_fired.len) != null;
+    const player_owned_spawn = owner.playerIndexInBounds(state.shots_fired.len) != null and
+        (!state.preserve_bugs or owner.usesNativePlayerProjectilePath());
     if (!state.bonus_spawn_guard and player_owned_spawn) {
         shot_credit = 1;
-        if (spawn_type_id != .fire_bullets and player.fire_bullets_timer > 0.0) {
+        if (spawn_type_id != .fire_bullets and
+            projectileSpawnFireBulletsActive(state, player, all_players))
+        {
             // `projectile_spawn` Fire Bullets override loops once, crediting shots twice.
             spawn_type_id = .fire_bullets;
             shot_credit = 2;
@@ -1076,15 +1277,6 @@ fn directionFromHeading(heading: f32) state_mod.Vec2 {
     };
 }
 
-fn rotateVec(vec: state_mod.Vec2, theta: f32) state_mod.Vec2 {
-    const cos_theta = narrowF32(math.cos(theta));
-    const sin_theta = narrowF32(math.sin(theta));
-    return .{
-        .x = narrowF32(vec.x * cos_theta - vec.y * sin_theta),
-        .y = narrowF32(vec.x * sin_theta + vec.y * cos_theta),
-    };
-}
-
 fn expectFloatClose(expected: f32, actual: f32) !void {
     try std.testing.expectApproxEqAbs(expected, actual, 1e-6);
 }
@@ -1140,6 +1332,8 @@ test "weapon usage tracks most used weapon" {
     }
     try std.testing.expectEqual(@as(i32, 3), state.weapon_shots_fired[0][2]);
 
+    state.weapon_usage_time[@intFromEnum(game_ids.WeaponId.pistol)] = 16;
+    state.weapon_usage_time[@intFromEnum(game_ids.WeaponId.assault_rifle)] = 48;
     const most_used = survival_progression.mostUsedWeaponIdForPlayer(state, 0, game_ids.WeaponId.pistol);
     try std.testing.expectEqual(game_ids.WeaponId.assault_rifle, most_used);
 }
@@ -1188,6 +1382,40 @@ test "weapon runtime starts reload when ammo is depleted" {
     );
     try std.testing.expect(!player.weapon.reload_active);
     try std.testing.expectEqual(@as(f32, @floatFromInt(player.weapon.clip_size)), player.weapon.ammo);
+}
+
+test "reload preload gate ignores reload active byte" {
+    var state = state_mod.GameplayState.init(1);
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var secondary_projectiles: secondary_projectiles_mod.SecondaryProjectilePool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    var particles: particles_mod.ParticlePool = .{};
+    var player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{},
+        .weapon = .{
+            .weapon_id = game_ids.WeaponId.ion_cannon,
+            .clip_size = 6,
+            .ammo = -1.0,
+            .reload_active = false,
+            .reload_timer = 0.01,
+            .reload_timer_max = 3.0,
+            .shot_cooldown = 0.5,
+        },
+    };
+
+    try stepPlayerForTick(
+        &state,
+        &player,
+        &projectiles,
+        &secondary_projectiles,
+        &creatures,
+        &particles,
+        .{},
+        0.016,
+    );
+
+    try expectFloatClose(6.0, player.weapon.ammo);
 }
 
 test "manual reload starts even when clip is full" {
@@ -1302,6 +1530,7 @@ test "anxious loader reduces reload timer on fire press" {
 
 test "angry reloader spawns plasma ring at half reload" {
     var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
     var projectiles: projectiles_mod.ProjectilePool = .{};
     var secondary_projectiles: secondary_projectiles_mod.SecondaryProjectilePool = .{};
     var creatures: creatures_mod.CreaturePool = .{};
@@ -1398,6 +1627,49 @@ test "man bomb spawns eight ion projectiles and preserves bonus guard latch" {
     }
 }
 
+test "man bomb and living fortress timers keep native stored cadence" {
+    var state = state_mod.GameplayState.init(1);
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+    };
+    player.perk_counts.set(PerkId.man_bomb, 1);
+    player.perk_counts.set(PerkId.living_fortress, 1);
+
+    for (0..240) |_| {
+        applyPlayerPerkTicks(&state, &player, &projectiles, 1.0 / 60.0);
+    }
+
+    try std.testing.expectEqual(@as(usize, 0), activeProjectileCount(&projectiles));
+    try std.testing.expectEqual(@as(f32, 3.9999969005584717), player.man_bomb_timer);
+    try std.testing.expectEqual(@as(f32, 3.9999969005584717), player.living_fortress_timer);
+
+    applyPlayerPerkTicks(&state, &player, &projectiles, 1.0 / 60.0);
+
+    try std.testing.expectEqual(@as(usize, 8), activeProjectileCount(&projectiles));
+    try std.testing.expectEqual(@as(f32, 0.016663551330566406), player.man_bomb_timer);
+    try std.testing.expectEqual(@as(f32, 4.016663551330566), player.living_fortress_timer);
+}
+
+test "player perk phase advances shared spread damping once per player update" {
+    var state = state_mod.GameplayState.init(1);
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var player: state_mod.PlayerState = .{ .index = 0, .pos = .{} };
+    state.player_spread_damping_scalar = 0.5;
+
+    applyPlayerPerkTicks(&state, &player, &projectiles, 0.5);
+
+    try std.testing.expectEqual(@as(f32, 0.9), state.player_spread_damping_scalar);
+
+    state.player_spread_damping_gate = 1.0;
+    state.player_spread_damping_scalar = 0.35;
+
+    applyPlayerPerkTicks(&state, &player, &projectiles, 0.1);
+
+    try std.testing.expectEqual(@as(f32, 0.3), state.player_spread_damping_scalar);
+}
+
 test "hot tempered spawns alternating plasma projectiles when charged" {
     var state = state_mod.GameplayState.init(1);
     var projectiles: projectiles_mod.ProjectilePool = .{};
@@ -1417,6 +1689,47 @@ test "hot tempered spawns alternating plasma projectiles when charged" {
         try std.testing.expect(proj.active);
         try std.testing.expectEqual(@as(i32, -100), proj.owner.toLegacy());
     }
+}
+
+test "hot tempered preserves global fire bullets projectile override" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var sprite_effects: effects_mod.SpriteEffectPool = .{};
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{ .x = 100.0, .y = 100.0 },
+            .hot_tempered_timer = 1.95,
+        },
+        .{
+            .index = 1,
+            .pos = .{ .x = 200.0, .y = 200.0 },
+            .fire_bullets_timer = 1.0,
+        },
+    };
+    players[0].perk_counts.set(PerkId.hot_tempered, 1);
+
+    applyPlayerPerkTicksWithEffects(
+        &state,
+        &players[0],
+        players[0..],
+        &projectiles,
+        &sprite_effects,
+        0.1,
+    );
+
+    try std.testing.expectEqual(@as(usize, 8), activeProjectileCount(&projectiles));
+    try std.testing.expectEqual(@as(usize, 8), activeProjectileTypeCount(
+        &projectiles,
+        @intFromEnum(game_ids.ProjectileTypeId.fire_bullets),
+    ));
+    try std.testing.expectEqual(@as(i32, 16), state.shots_fired[0]);
+    try std.testing.expectEqual(@as(i32, 16), state.shots_fired_total);
+    try std.testing.expectEqual(
+        @as(i32, 16),
+        state.weapon_shots_fired[0][@intFromEnum(game_ids.ProjectileTypeId.fire_bullets)],
+    );
 }
 
 test "stationary reloader triples reload speed" {
@@ -1471,6 +1784,55 @@ test "stationary reloader triples reload speed" {
 
     try expectFloatClose(0.9, base_player.weapon.reload_timer);
     try expectFloatClose(0.7, perk_player.weapon.reload_timer);
+}
+
+test "stationary reload keeps native completion frame" {
+    var state = state_mod.GameplayState.init(1);
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var secondary_projectiles: secondary_projectiles_mod.SecondaryProjectilePool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    var particles: particles_mod.ParticlePool = .{};
+    var player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{ .x = 50.0, .y = 50.0 },
+        .weapon = .{
+            .weapon_id = game_ids.WeaponId.pistol,
+            .clip_size = 10,
+            .ammo = 10.0,
+            .reload_active = true,
+            .reload_timer = 1.5,
+            .reload_timer_max = 1.5,
+        },
+    };
+    player.perk_counts.set(PerkId.stationary_reloader, 1);
+
+    for (0..19) |_| {
+        try stepPlayerForTick(
+            &state,
+            &player,
+            &projectiles,
+            &secondary_projectiles,
+            &creatures,
+            &particles,
+            .{},
+            1.0 / 38.0,
+        );
+    }
+
+    try std.testing.expectEqual(@as(f32, 4.172325134277344e-07), player.weapon.reload_timer);
+
+    try stepPlayerForTick(
+        &state,
+        &player,
+        &projectiles,
+        &secondary_projectiles,
+        &creatures,
+        &particles,
+        .{},
+        1.0 / 38.0,
+    );
+
+    try std.testing.expectEqual(@as(f32, 0.0), player.weapon.reload_timer);
 }
 
 test "alternate weapon reload press swaps and adds cooldown" {
@@ -1853,25 +2215,25 @@ test "multi plasma fires five projectiles with fixed spread profile" {
     try std.testing.expectEqual(@as(usize, 5), activeProjectileCount(&projectiles));
     try std.testing.expectEqual(@as(i32, 5), state.weapon_shots_fired[0][10]);
 
-    const shot_angle = std.math.pi / 2.0;
-    const spread_small = std.math.pi / 10.0;
-    const spread_large = std.math.pi / 6.0;
+    const shot_angle = native_math.shotAngleFromJitterDraws(200.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
+    const spread_small: f32 = 0.31415927;
+    const spread_large: f32 = 0.5235988;
     const expected = [_]struct {
         angle: f32,
         type_id: i32,
     }{
-        .{ .angle = shot_angle - spread_small, .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle) },
-        .{ .angle = shot_angle - spread_large, .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun) },
+        .{ .angle = native_math.pc24Sub(shot_angle, spread_small), .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle) },
+        .{ .angle = native_math.pc24Sub(shot_angle, spread_large), .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun) },
         .{ .angle = shot_angle, .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle) },
-        .{ .angle = shot_angle + spread_large, .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun) },
-        .{ .angle = shot_angle + spread_small, .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle) },
+        .{ .angle = native_math.pc24Add(shot_angle, spread_large), .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_minigun) },
+        .{ .angle = native_math.pc24Add(shot_angle, spread_small), .type_id = @intFromEnum(game_ids.ProjectileTypeId.plasma_rifle) },
     };
 
     for (expected, 0..) |entry, idx| {
         const proj = projectiles.entries[idx];
         try std.testing.expect(proj.active);
         try std.testing.expectEqual(entry.type_id, proj.type_id);
-        try expectFloatClose(entry.angle, proj.angle);
+        try std.testing.expectEqual(entry.angle, proj.angle);
     }
 }
 
@@ -2076,6 +2438,81 @@ test "fire bullets on shotgun spawns pellet count projectiles and keeps ammo" {
     for (projectiles.entries[0..12]) |proj| {
         try std.testing.expect(proj.active);
         try std.testing.expectEqual(@intFromEnum(game_ids.ProjectileTypeId.fire_bullets), proj.type_id);
+    }
+}
+
+test "projectile spawn preserves global fire bullets override and shot credit" {
+    const cases = [_]struct {
+        preserve_bugs: bool,
+        player_index: usize,
+        friendly_fire_enabled: bool,
+        expected_type_id: ProjectileTypeId,
+        expected_shots: i32,
+    }{
+        .{ .preserve_bugs = true, .player_index = 0, .friendly_fire_enabled = false, .expected_type_id = .fire_bullets, .expected_shots = 2 },
+        .{ .preserve_bugs = false, .player_index = 0, .friendly_fire_enabled = false, .expected_type_id = .pistol, .expected_shots = 1 },
+        .{ .preserve_bugs = true, .player_index = 3, .friendly_fire_enabled = true, .expected_type_id = .pistol, .expected_shots = 0 },
+        .{ .preserve_bugs = false, .player_index = 3, .friendly_fire_enabled = true, .expected_type_id = .pistol, .expected_shots = 1 },
+    };
+
+    for (cases) |case| {
+        var state = state_mod.GameplayState.init(1);
+        state.preserve_bugs = case.preserve_bugs;
+        state.friendly_fire_enabled = case.friendly_fire_enabled;
+        var projectiles: projectiles_mod.ProjectilePool = .{};
+        var secondary_projectiles: secondary_projectiles_mod.SecondaryProjectilePool = .{};
+        var creatures: creatures_mod.CreaturePool = .{};
+        var particles: particles_mod.ParticlePool = .{};
+        var effects: effects_mod.EffectPool = .{};
+        var sprite_effects: effects_mod.SpriteEffectPool = .{};
+        var players = [_]state_mod.PlayerState{
+            .{
+                .index = 0,
+                .pos = .{},
+                .aim = .{ .x = 200.0, .y = 0.0 },
+                .aim_dir = .{ .x = 1.0, .y = 0.0 },
+                .spread_heat = 0.0,
+            },
+            .{
+                .index = 1,
+                .pos = .{ .x = 300.0, .y = 300.0 },
+                .fire_bullets_timer = 1.0,
+            },
+            .{ .index = 2, .pos = .{ .x = 400.0, .y = 400.0 } },
+            .{ .index = 3, .pos = .{ .x = 500.0, .y = 500.0 } },
+        };
+        const firing_idx = case.player_index;
+        players[firing_idx].aim = players[firing_idx].pos.add(.{ .x = 200.0, .y = 0.0 });
+        players[firing_idx].aim_dir = .{ .x = 1.0, .y = 0.0 };
+        players[firing_idx].spread_heat = 0.0;
+        player_runtime.weaponAssignPlayer(&players[firing_idx], .pistol);
+        const ammo_before = players[firing_idx].weapon.ammo;
+
+        try stepPlayerForTickWithEffects(
+            &state,
+            &players[firing_idx],
+            players[0..],
+            &projectiles,
+            &secondary_projectiles,
+            &creatures,
+            &particles,
+            &effects,
+            &sprite_effects,
+            null,
+            5,
+            .{ .fire_down = true, .preprocessed_player_tick = true },
+            1.0 / 60.0,
+        );
+
+        try std.testing.expectEqual(@as(usize, 1), activeProjectileCount(&projectiles));
+        try std.testing.expectEqual(@intFromEnum(case.expected_type_id), projectiles.entries[0].type_id);
+        try expectFloatClose(ammo_before - 1.0, players[firing_idx].weapon.ammo);
+        try std.testing.expectEqual(case.expected_shots, state.shots_fired[firing_idx]);
+        try std.testing.expectEqual(case.expected_shots, state.shots_fired_total);
+        try std.testing.expectEqual(
+            @as(i32, 1),
+            state.weapon_shots_fired[firing_idx][@intFromEnum(WeaponId.pistol)],
+        );
     }
 }
 
@@ -2558,6 +2995,7 @@ test "mini rocket swarmers preserve bugged spread when requested" {
     bug_player.weapon.shot_cooldown = 0.0;
     bug_player.weapon.reload_timer = 0.0;
     bug_player.weapon.ammo = 6.0;
+    bug_player.spread_heat = 0.0;
 
     try std.testing.expect(try tryFireWeapon(
         &bug_state,
@@ -2568,15 +3006,15 @@ test "mini rocket swarmers preserve bugged spread when requested" {
         &bug_particles,
     ));
 
-    const shot_angle = std.math.pi / 2.0;
+    const shot_angle = native_math.shotAngleFromJitterDraws(200.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
     const rocket_count: f32 = 6.0;
     const fixed_step = (native_pi * (2.0 / 3.0)) / (rocket_count - 1.0);
     const fixed_first_angle = shot_angle - native_pi * (1.0 / 3.0);
     try expectFloatClose(fixed_first_angle, fixed_secondary_projectiles.entries[0].angle);
     try expectFloatClose(fixed_first_angle + fixed_step, fixed_secondary_projectiles.entries[1].angle);
 
-    const bug_step = rocket_count * (native_pi / 3.0);
-    const bug_first_angle = (shot_angle - native_pi) - bug_step * rocket_count * 0.5;
+    const bug_step = narrowF32(rocket_count * (native_pi / 3.0));
+    const bug_first_angle = narrowF32((shot_angle - native_pi) - bug_step * rocket_count * 0.5);
     try expectFloatClose(bug_first_angle, bug_secondary_projectiles.entries[0].angle);
-    try expectFloatClose(bug_first_angle + bug_step, bug_secondary_projectiles.entries[1].angle);
+    try expectFloatClose(narrowF32(bug_first_angle + bug_step), bug_secondary_projectiles.entries[1].angle);
 }

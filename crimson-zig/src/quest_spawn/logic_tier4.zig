@@ -121,7 +121,7 @@ fn build_403_lizard_zombie_pact(
                     .y = @floatFromInt(idx * 0xB4 + 0x100),
                 },
                 0.0,
-                common.SpawnId.alien_spawner_child_31_fast_0c,
+                common.SpawnId.den_lizard_weak_0c,
                 trigger,
                 idx + 1,
             );
@@ -133,7 +133,7 @@ fn build_403_lizard_zombie_pact(
                     .y = @floatFromInt(idx * 0xB4 + 0x180),
                 },
                 0.0,
-                common.SpawnId.alien_spawner_child_31_fast_0c,
+                common.SpawnId.den_lizard_weak_0c,
                 trigger,
                 idx + 2,
             );
@@ -222,7 +222,7 @@ fn build_405_the_massacre(
                 len,
                 edges_wide.right,
                 0.0,
-                common.SpawnId.alien_const_red_fast_2b,
+                common.SpawnId.alien_deadly_fast_2b,
                 trigger,
                 wave + 1,
             );
@@ -291,7 +291,7 @@ fn build_406_the_unblitzkrieg(
         len,
         .{ .x = 512.0, .y = 512.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         trigger,
         1,
     );
@@ -310,7 +310,7 @@ fn build_407_gauntlet(
     out_entries: []spawn_runtime.QuestSpawnEntry,
     len: *usize,
 ) common.QuestSpawnBuildError!void {
-    const player_count = ctx.player_count + 4;
+    const player_count = ctx.player_count + if (ctx.hardcore) @as(i32, 4) else 0;
     const center = common.centerPoint(ctx.width, ctx.height);
     const edges = common.squareEdgeMidpoints(ctx.width, 64.0);
 
@@ -326,7 +326,7 @@ fn build_407_gauntlet(
             step,
             0.0,
             .zero,
-            common.SpawnId.alien_spawner_child_32_slow_0a,
+            common.SpawnId.den_spider_basic_0a,
             0,
             200,
             1,
@@ -362,7 +362,7 @@ fn build_407_gauntlet(
             step,
             0.0,
             .zero,
-            common.SpawnId.alien_spawner_child_32_slow_0a,
+            common.SpawnId.den_spider_basic_0a,
             42_500,
             500,
             1,
@@ -376,7 +376,7 @@ fn build_408_syntax_terror(
     out_entries: []spawn_runtime.QuestSpawnEntry,
     len: *usize,
 ) common.QuestSpawnBuildError!void {
-    const player_count = ctx.player_count + 4;
+    const player_count = ctx.player_count + if (ctx.hardcore) @as(i32, 4) else 0;
     const loop_count = player_count + 9;
 
     var outer_seed: i32 = 0x14C9;
@@ -399,7 +399,7 @@ fn build_408_syntax_terror(
                         .y = @floatFromInt(y),
                     },
                     0.0,
-                    common.SpawnId.alien_spawner_child_1d_fast_07,
+                    common.SpawnId.den_alien_basic_07,
                     trigger,
                     1,
                 );
@@ -425,7 +425,7 @@ fn build_409_the_annihilation(
         len,
         .{ .x = 128.0, .y = half_w },
         0.0,
-        common.SpawnId.alien_const_red_fast_2b,
+        common.SpawnId.alien_deadly_fast_2b,
         500,
         2,
     );
@@ -441,7 +441,7 @@ fn build_409_the_annihilation(
             len,
             .{ .x = x, .y = y },
             0.0,
-            common.SpawnId.alien_spawner_child_1d_fast_07,
+            common.SpawnId.den_alien_basic_07,
             trigger,
             1,
         );
@@ -461,7 +461,7 @@ fn build_409_the_annihilation(
             len,
             .{ .x = x, .y = y },
             0.0,
-            common.SpawnId.alien_spawner_child_1d_fast_07,
+            common.SpawnId.den_alien_basic_07,
             trigger,
             1,
         );
@@ -474,20 +474,19 @@ fn build_409_the_annihilation(
 fn appendEndOfAllAlternatingEdgeSpiders(
     out_entries: []spawn_runtime.QuestSpawnEntry,
     len: *usize,
-    edges_wide: common.EdgePoints,
     trigger_start: i32,
 ) common.QuestSpawnBuildError!void {
     var trigger = trigger_start;
     var y: i32 = 0x100;
     var toggle = false;
     while (y < 0x300) : (y += 0x80) {
-        const x = if (toggle) edges_wide.right.x else edges_wide.left.x;
+        const x: f32 = if (toggle) 1152.0 else -128.0;
         try common.appendSpawn(
             out_entries,
             len,
             .{ .x = x, .y = @floatFromInt(y) },
             0.0,
-            common.SpawnId.spider_sp1_const_ranged_variant_3c,
+            common.SpawnId.spider_plasma_shooter_3c,
             trigger,
             2,
         );
@@ -502,13 +501,18 @@ fn build_410_the_end_of_all(
     out_entries: []spawn_runtime.QuestSpawnEntry,
     len: *usize,
 ) common.QuestSpawnBuildError!void {
-    const corners = common.insetCornerPoints(ctx.width, ctx.height, 128.0);
+    const corners: common.CornerPoints = .{
+        .top_left = .{ .x = 128.0, .y = 128.0 },
+        .top_right = .{ .x = 896.0, .y = 128.0 },
+        .bottom_left = .{ .x = 128.0, .y = 896.0 },
+        .bottom_right = .{ .x = 896.0, .y = 896.0 },
+    };
     try common.appendSpawn(
         out_entries,
         len,
         corners.top_left,
         0.0,
-        common.SpawnId.spider_sp1_const_ranged_variant_3c,
+        common.SpawnId.spider_plasma_shooter_3c,
         3000,
         1,
     );
@@ -517,7 +521,7 @@ fn build_410_the_end_of_all(
         len,
         corners.top_right,
         0.0,
-        common.SpawnId.spider_sp1_const_ranged_variant_3c,
+        common.SpawnId.spider_plasma_shooter_3c,
         6000,
         1,
     );
@@ -526,7 +530,7 @@ fn build_410_the_end_of_all(
         len,
         corners.bottom_left,
         0.0,
-        common.SpawnId.spider_sp1_const_ranged_variant_3c,
+        common.SpawnId.spider_plasma_shooter_3c,
         9000,
         1,
     );
@@ -535,13 +539,12 @@ fn build_410_the_end_of_all(
         len,
         corners.bottom_right,
         0.0,
-        common.SpawnId.spider_sp1_const_ranged_variant_3c,
+        common.SpawnId.spider_plasma_shooter_3c,
         12_000,
         1,
     );
 
-    const center = common.centerPoint(ctx.width, ctx.height);
-    const edges_wide = common.edgeMidpoints(ctx.width, ctx.height, 128.0);
+    const center: spawn_runtime.Vec2 = .{ .x = 512.0, .y = 512.0 };
 
     try common.appendRingSpawns(
         out_entries,
@@ -552,7 +555,7 @@ fn build_410_the_end_of_all(
         1.0471976,
         0.0,
         .zero,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         13_000,
         300,
         1,
@@ -563,12 +566,12 @@ fn build_410_the_end_of_all(
         len,
         .{ .x = 512.0, .y = 512.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_3c_slow_0b,
+        common.SpawnId.den_spider_plasma_shooters_0b,
         14_800,
         1,
     );
 
-    try appendEndOfAllAlternatingEdgeSpiders(out_entries, len, edges_wide, 18_000);
+    try appendEndOfAllAlternatingEdgeSpiders(out_entries, len, 18_000);
 
     try common.appendRingSpawns(
         out_entries,
@@ -579,33 +582,36 @@ fn build_410_the_end_of_all(
         1.0471976,
         0.5235988,
         .zero,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         43_000,
         300,
         1,
     );
 
-    try common.appendRingSpawns(
-        out_entries,
-        len,
-        center,
-        180.0,
-        12,
-        0.5235988,
-        0.5235988,
-        .zero,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
-        62_800,
-        500,
-        1,
-    );
+    if (ctx.hardcore) {
+        var trigger: i32 = 62_800;
+        var ring_index: i32 = 0;
+        while (ring_index < 12) : (ring_index += 1) {
+            const angle = (@as(f32, @floatFromInt(ring_index)) + 1.0) * 0.5235988;
+            try common.appendSpawn(
+                out_entries,
+                len,
+                common.ringPoint(center, 180.0, angle),
+                0.0,
+                common.SpawnId.den_alien_basic_07,
+                trigger,
+                1,
+            );
+            trigger += 500;
+        }
+    }
 
-    try appendEndOfAllAlternatingEdgeSpiders(out_entries, len, edges_wide, 48_000);
+    try appendEndOfAllAlternatingEdgeSpiders(out_entries, len, 48_000);
 }
 
 fn unblitzkrieg_spawn_id_for(toggle: bool) common.SpawnId {
     return if (toggle)
-        common.SpawnId.alien_spawner_child_31_slow_0d
+        common.SpawnId.den_lizard_weak_slower_0d
     else
-        common.SpawnId.alien_spawner_child_1d_fast_07;
+        common.SpawnId.den_alien_basic_07;
 }

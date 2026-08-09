@@ -9,6 +9,7 @@ from grim.geom import Vec2
 
 from ..creatures.damage_runtime import CreatureDamageRuntime
 from ..game_modes import GameMode
+from ..math_parity import f32, x87_pc24_hypot, x87_pc24_sub
 from ..perks.helpers import perk_active
 from ..rng_caller_static import RngCallerStatic
 from ..sim.state_types import BonusPickupEvent, GameplayState, PlayerState
@@ -81,6 +82,24 @@ def _all_carried_weapon_ids(players: Sequence[PlayerState]) -> set[WeaponId]:
     return carried
 
 
+def _native_force_drop_has_pistol(players: Sequence[PlayerState]) -> bool:
+    if not players:
+        return False
+    if players[0].weapon.weapon_id == WeaponId.PISTOL:
+        return True
+    return len(players) == 2 and players[1].weapon.weapon_id == WeaponId.PISTOL
+
+
+def _within_native_radius(a: Vec2, b: Vec2, radius: float) -> bool:
+    return (
+        x87_pc24_hypot(
+            x87_pc24_sub(a.x, b.x),
+            x87_pc24_sub(a.y, b.y),
+        )
+        < radius
+    )
+
+
 class BonusPool:
     def __init__(self, *, size: int = BONUS_POOL_SIZE) -> None:
         self._entries = [BonusEntry() for _ in range(int(size))]
@@ -140,22 +159,19 @@ class BonusPool:
         detail_preset: int = 5,
         emit_burst: bool = True,
     ) -> BonusEntry | None:
-        if state.game_mode == GameMode.RUSH:
-            return None
-        if bonus_id == BonusId.UNUSED:
-            return None
-        entry = self._alloc_slot()
-        if entry is None:
-            return None
-
-        entry.bonus_id = bonus_id
-        entry.picked = False
-        entry.pos = pos.clamp_rect(
+        clamped_pos = pos.clamp_rect(
             BONUS_SPAWN_MARGIN,
             BONUS_SPAWN_MARGIN,
             float(world_width) - BONUS_SPAWN_MARGIN,
             float(world_height) - BONUS_SPAWN_MARGIN,
         )
+        if state.game_mode == GameMode.RUSH:
+            return None
+        entry = self._alloc_slot_or_sentinel()
+
+        entry.bonus_id = bonus_id
+        entry.picked = False
+        entry.pos = clamped_pos
         entry.time_left = BONUS_TIME_MAX
         entry.time_max = BONUS_TIME_MAX
 
@@ -174,7 +190,28 @@ class BonusPool:
                 count=16,
                 rng=state.rng,
                 detail_preset=int(detail_preset),
+                rotation_caller=RngCallerStatic.BONUS_SPAWN_AT_BURST_ROTATION,
+                vel_x_caller=RngCallerStatic.BONUS_SPAWN_AT_BURST_VEL_X,
+                vel_y_caller=RngCallerStatic.BONUS_SPAWN_AT_BURST_VEL_Y,
+                scale_step_caller=RngCallerStatic.BONUS_SPAWN_AT_BURST_SCALE_STEP,
             )
+        return None if self._is_sentinel_entry(entry) else entry
+
+    def seed_tutorial_entry(
+        self,
+        index: int,
+        *,
+        pos: Vec2,
+        bonus_id: BonusId,
+        amount: int,
+    ) -> BonusEntry:
+        entry = self._entries[int(index)]
+        entry.bonus_id = bonus_id
+        entry.time_left = 100.0
+        entry.time_max = 100.0
+        entry.picked = False
+        entry.amount = int(amount)
+        entry.pos = pos
         return entry
 
     def spawn_at_pos(
@@ -199,11 +236,14 @@ class BonusPool:
         entry = self._alloc_slot_or_sentinel()
 
         bonus_id = bonus_pick_random_type(self, state, players)
-        min_dist_sq = BONUS_SPAWN_MIN_DISTANCE * BONUS_SPAWN_MIN_DISTANCE
         for active_entry in self._entries:
             if active_entry.bonus_id == BonusId.UNUSED:
                 continue
-            if Vec2.distance_sq(pos, active_entry.pos) < min_dist_sq:
+            distance = x87_pc24_hypot(
+                x87_pc24_sub(pos.x, active_entry.pos.x),
+                x87_pc24_sub(pos.y, active_entry.pos.y),
+            )
+            if distance < BONUS_SPAWN_MIN_DISTANCE:
                 entry = self._sentinel
                 break
 
@@ -248,8 +288,12 @@ class BonusPool:
             return None
 
         rng = state.rng
-        # Native special-case: while any player has Pistol, 3/4 chance to force a Weapon drop.
-        if players and any(player.weapon.weapon_id == WeaponId.PISTOL for player in players):
+        force_drop_has_pistol = any(player.weapon.weapon_id == WeaponId.PISTOL for player in players)
+        if bool(state.preserve_bugs):
+            force_drop_has_pistol = _native_force_drop_has_pistol(players)
+
+        # Native checks player 0, plus player 1 only for an exact two-player game.
+        if force_drop_has_pistol:  # noqa: SIM102 - preserve the native branch shape
             if (rng.rand_tagged(RngCallerStatic.BONUS_TRY_SPAWN_ON_KILL_PISTOL_FORCE_WEAPON) & 3) < 3:
                 entry = self.spawn_at_pos(
                     pos,
@@ -271,9 +315,7 @@ class BonusPool:
                     self._clear_entry(entry)
                     return None
 
-                if entry.amount == WeaponId.PISTOL or (
-                    players and perk_active(players[0], PerkId.MY_FAVOURITE_WEAPON)
-                ):
+                if entry.amount == WeaponId.PISTOL or (players and perk_active(players[0], PerkId.MY_FAVOURITE_WEAPON)):
                     self._clear_entry(entry)
                     return None
 
@@ -293,9 +335,7 @@ class BonusPool:
                     has_pistol = any(player.weapon.weapon_id == WeaponId.PISTOL for player in players)
                 if has_pistol:
                     allow_without_magnet = (
-                        rng.rand_tagged(RngCallerStatic.BONUS_TRY_SPAWN_ON_KILL_PISTOL_ALLOW_WITHOUT_MAGNET)
-                        % 5
-                        == 1
+                        rng.rand_tagged(RngCallerStatic.BONUS_TRY_SPAWN_ON_KILL_PISTOL_ALLOW_WITHOUT_MAGNET) % 5 == 1
                     )
 
             if not allow_without_magnet:
@@ -319,14 +359,15 @@ class BonusPool:
         )
 
         if entry.bonus_id == BonusId.WEAPON:
-            near_sq = BONUS_WEAPON_NEAR_RADIUS * BONUS_WEAPON_NEAR_RADIUS
             near_player = False
             if players:
                 if bool(state.preserve_bugs):
                     # Native checks player 1 position only.
-                    near_player = Vec2.distance_sq(pos, players[0].pos) < near_sq
+                    near_player = _within_native_radius(pos, players[0].pos, BONUS_WEAPON_NEAR_RADIUS)
                 else:
-                    near_player = any(Vec2.distance_sq(pos, player.pos) < near_sq for player in players)
+                    near_player = any(
+                        _within_native_radius(pos, player.pos, BONUS_WEAPON_NEAR_RADIUS) for player in players
+                    )
             if near_player:
                 entry.bonus_id = BonusId.POINTS
                 entry.amount = 100
@@ -388,8 +429,8 @@ class BonusPool:
             if _bonus_entry_is_empty(entry):
                 continue
 
-            decay = dt * (BONUS_PICKUP_DECAY_RATE if entry.picked else 1.0)
-            entry.time_left -= decay
+            decay = f32(float(f32(dt)) * (BONUS_PICKUP_DECAY_RATE if entry.picked else 1.0))
+            entry.time_left = f32(float(f32(entry.time_left)) - float(decay))
             if not entry.picked and state.game_mode == GameMode.TUTORIAL:
                 entry.time_left = 5.0
             expired_to_unused = False
@@ -410,7 +451,7 @@ class BonusPool:
             # twice, both players gain shield, and both consume RNG).
             picked_now = False
             for player in players:
-                if Vec2.distance_sq(entry.pos, player.pos) < BONUS_PICKUP_RADIUS * BONUS_PICKUP_RADIUS:
+                if _within_native_radius(entry.pos, player.pos, BONUS_PICKUP_RADIUS):
                     bonus_apply(
                         state,
                         player,

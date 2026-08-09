@@ -3,6 +3,7 @@ from __future__ import annotations
 from crimson.creatures.runtime import CreatureState
 from crimson.effects import EffectPool
 from crimson.gameplay import GameplayState
+from crimson.math_parity import f32
 from crimson.owner_ref import OwnerRef
 from crimson.projectiles.effects import _spawn_ion_hit_effects
 from crimson.projectiles.runtime import PrimaryStepCtx, ProjectilePool
@@ -19,6 +20,7 @@ def test_plasma_cannon_hit_spawns_rings_and_sfx() -> None:
     pool = ProjectilePool(size=64)
     creature = CreatureState(active=True, hp=100.0, pos=Vec2(), size=50.0)
     runtime_state = GameplayState()
+    runtime_state.bonus_spawn_guard = True
 
     pool.spawn(
         pos=Vec2(),
@@ -42,6 +44,7 @@ def test_plasma_cannon_hit_spawns_rings_and_sfx() -> None:
     )
 
     assert runtime_state.sfx_queue == [SfxId.EXPLOSION_MEDIUM, SfxId.SHOCKWAVE]
+    assert not runtime_state.bonus_spawn_guard
 
     rings = [entry for entry in runtime_state.effects.iter_active() if int(entry.effect_id) == 1]
     assert len(rings) == 2
@@ -170,7 +173,7 @@ def test_shrinkifier_hit_spawns_native_hit_effects() -> None:
 
     ring = rings[0]
     assert_float_close(float(ring.scale_step), -4.0)
-    assert_float_close(float(ring.lifetime), 0.3)
+    assert ring.lifetime == f32(0.3)
     assert_float_close(float(ring.half_width), 36.0)
 
     assert_float_close(float(creature.size), 32.5)
@@ -337,12 +340,12 @@ def test_shrinkifier_shrink_death_bypasses_damage_pipeline() -> None:
         def on_creature_lethal(
             self,
             creature_index: int,
-            resolve_death_sfx: Callable[[], tuple[SfxId, ...]],
+            resolve_damage_followup: Callable[[], tuple[SfxId, ...]],
         ) -> None:
             lethal_calls.append(int(creature_index))
             # Native shrink-death goes straight to creature_handle_death with
             # no death-SFX or shock-burst draws.
-            assert resolve_death_sfx() == ()
+            assert resolve_damage_followup() == ()
 
     pool.spawn(
         pos=Vec2(),
@@ -378,7 +381,7 @@ def test_shrinkifier_shrink_death_bypasses_damage_pipeline() -> None:
 
 
 def test_secondary_homing_acquires_targets_beyond_1000_units() -> None:
-    from crimson.projectiles.runtime.collision import _creature_find_nearest_for_secondary
+    from crimson.projectiles.runtime.collision import creature_find_nearest_alive
 
     far_creature = CreatureState(active=True, hp=10.0, lifecycle_stage=16.0, pos=Vec2(1200.0, 900.0))
     creatures = [CreatureState() for _ in range(3)]
@@ -386,4 +389,57 @@ def test_secondary_homing_acquires_targets_beyond_1000_units() -> None:
 
     # Native compares plain distances against a 1e6 seed, so targets farther
     # than 1000 units (offscreen spawns) are still acquired.
-    assert _creature_find_nearest_for_secondary(creatures=creatures, origin=Vec2(0.0, 0.0)) == 2
+    assert creature_find_nearest_alive(creatures=creatures, origin=Vec2(0.0, 0.0)) == 2
+
+
+def test_secondary_homing_compares_stored_x87_pc24_distances() -> None:
+    from crimson.projectiles.runtime.collision import creature_find_nearest_alive
+
+    creatures = [
+        CreatureState(
+            active=True,
+            hp=10.0,
+            lifecycle_stage=16.0,
+            pos=Vec2(-631.7838745117188, -249.09634399414062),
+        ),
+        CreatureState(
+            active=True,
+            hp=10.0,
+            lifecycle_stage=16.0,
+            pos=Vec2(-627.4663696289062, -259.78033447265625),
+        ),
+    ]
+
+    # A host-double squared-distance compare chooses slot 0; native narrows the
+    # x87 fsqrt result and slot 1 is strictly closer at that precision.
+    assert creature_find_nearest_alive(creatures=creatures, origin=Vec2()) == 1
+
+
+def test_shock_chain_retarget_compares_stored_x87_pc24_distances() -> None:
+    from crimson.projectiles.runtime.collision import creature_find_nearest_active
+
+    creatures = [
+        CreatureState(
+            active=True,
+            hp=10.0,
+            pos=Vec2(-1727.156494140625, -1351.4605712890625),
+        ),
+        CreatureState(
+            active=True,
+            hp=10.0,
+            pos=Vec2(1722.1292724609375, -1357.8604736328125),
+        ),
+    ]
+
+    # Host-double squared distances prefer slot 1. Native stores equal PC=24
+    # fsqrt results, so its strict comparison retains the earlier slot 0.
+    assert Vec2.distance_sq(Vec2(), creatures[0].pos) > Vec2.distance_sq(Vec2(), creatures[1].pos)
+    assert (
+        creature_find_nearest_active(
+            creatures=creatures,
+            origin=Vec2(),
+            exclude_id=2,
+            min_dist=100.0,
+        )
+        == 0
+    )

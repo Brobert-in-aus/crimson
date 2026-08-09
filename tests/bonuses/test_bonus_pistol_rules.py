@@ -29,6 +29,38 @@ def test_pistol_safety_net_forces_weapon_drop() -> None:
     assert entry.amount == WeaponId.ASSAULT_RIFLE
 
 
+def test_pistol_safety_net_preserve_bugs_requires_exact_two_player_slice() -> None:
+    state = _init_bonus_state(GameplayState(preserve_bugs=True))
+    rng = ScriptedCrand([0], fallback=ScriptedCrand.Fallback.RAISE)
+    state.rng = rng
+
+    players = [
+        PlayerState(index=0, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE)),
+        PlayerState(index=1, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL)),
+        PlayerState(index=2, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE)),
+    ]
+
+    entry = state.bonus_pool.try_spawn_on_kill(pos=Vec2(256.0, 256.0), state=state, players=players)
+
+    assert entry is None
+    assert rng.calls == 1
+
+
+def test_pistol_safety_net_preserve_bugs_admits_player_two_in_two_player_slice() -> None:
+    state = _init_bonus_state(GameplayState(preserve_bugs=True))
+    state.rng = ScriptedCrand([0, 0, 0, 1], fallback=ScriptedCrand.Fallback.ZERO)
+
+    players = [
+        PlayerState(index=0, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE)),
+        PlayerState(index=1, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL)),
+    ]
+
+    entry = state.bonus_pool.try_spawn_on_kill(pos=Vec2(256.0, 256.0), state=state, players=players)
+
+    assert entry is not None
+    assert entry.bonus_id == BonusId.WEAPON
+
+
 def test_pistol_extra_gate_allows_spawn_without_bonus_magnet() -> None:
     state = _init_bonus_state(GameplayState())
     state.rng = ScriptedCrand([3, 0, 1, 0, 0], fallback=ScriptedCrand.Fallback.ZERO)
@@ -82,6 +114,24 @@ def test_weapon_drop_near_player2_stays_player1_only_with_preserve_bugs() -> Non
     player2 = PlayerState(index=1, pos=Vec2(500.0, 500.0), weapon=WeaponSlot(weapon_id=WeaponId.SUBMACHINE_GUN))
 
     entry = state.bonus_pool.try_spawn_on_kill(pos=Vec2(500.0, 500.0), state=state, players=[player1, player2])
+    assert entry is not None
+    assert entry.bonus_id == BonusId.WEAPON
+    assert entry.amount == WeaponId.SUBMACHINE_GUN
+
+
+def test_weapon_drop_near_check_uses_native_pc24_hypotenuse_boundary() -> None:
+    state = _init_bonus_state(GameplayState(preserve_bugs=True))
+    state.rng = ScriptedCrand([1, 13, 1, 4], fallback=ScriptedCrand.Fallback.ZERO)
+
+    player = PlayerState(index=0, pos=Vec2(), weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE))
+    entry = state.bonus_pool.try_spawn_on_kill(
+        pos=Vec2(43.35334777832031, 35.44696044921875),
+        state=state,
+        players=[player],
+    )
+
+    # Double-precision dx²+dy² is below 56², but native PC=24 math rounds the
+    # hypotenuse to exactly 56 and does not convert the weapon drop to points.
     assert entry is not None
     assert entry.bonus_id == BonusId.WEAPON
     assert entry.amount == WeaponId.SUBMACHINE_GUN

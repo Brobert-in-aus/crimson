@@ -26,7 +26,6 @@ pub const BuildTypoSessionOptions = struct {
 
 pub const BuildReplaySessionOptions = struct {
     strict_events: bool = true,
-    inter_tick_rand_draws: i32 = 0,
     quest_spawn_entries: ?[]const spawn_mod.QuestSpawnEntry = null,
     quest_start_weapon_id: ?i32 = null,
 };
@@ -154,11 +153,12 @@ pub fn buildReplaySession(
             quest_spawn_entries = quest_spawn_entries_storage[0..entries.len];
         } else {
             const level_key = runtime_bootstrap.resolveQuestLevelKey(header) orelse return error.InvalidQuestSpawnTable;
-            const built = quest_spawn_logic.buildQuestSpawnTable(
+            const built = quest_spawn_logic.buildQuestSpawnTableWithHardcore(
                 level_key,
                 header.player_count,
                 header.seed,
                 header.world_size,
+                header.hardcore,
                 quest_spawn_entries_storage[0..],
             ) catch |build_err| switch (build_err) {
                 error.InvalidQuestSpawnTable => return error.InvalidQuestSpawnTable,
@@ -184,7 +184,6 @@ pub fn buildReplaySession(
     const config = try runtime_session.SessionConfig.fromReplayHeader(header);
     const session_options: BuildSessionOptions = .{
         .strict_events = options.strict_events,
-        .inter_tick_rand_draws = options.inter_tick_rand_draws,
         .defer_menu_open_events = mode.defer_menu_open_events,
         .apply_world_dt_steps = mode.apply_world_dt_steps,
         .capture_spawn_events_authoritative = mode.capture_spawn_events_authoritative,
@@ -207,7 +206,6 @@ pub fn buildReplaySession(
             .{
                 .session_options = .{
                     .strict_events = session_options.strict_events,
-                    .inter_tick_rand_draws = session_options.inter_tick_rand_draws,
                     .defer_menu_open_events = session_options.defer_menu_open_events,
                     .apply_world_dt_steps = session_options.apply_world_dt_steps,
                     .capture_spawn_events_authoritative = session_options.capture_spawn_events_authoritative,

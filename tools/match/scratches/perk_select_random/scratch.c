@@ -2,25 +2,25 @@
 
 int perk_select_random(void)
 {
-    int attempt = 1;
     int perk_id;
+    int can_offer;
+    int attempt = 1;
 
-    for (;;) {
+    do {
         perk_id = crt_rand();
         perk_id = perk_id % perk_id_max + 1;
-        if ((unsigned char)perk_meta_table[perk_id].available) {
-            if ((unsigned char)perk_can_offer(perk_id)) {
-                break;
+        if (perk_meta_table[perk_id].available == 0) {
+            attempt = attempt + 1;
+        } else {
+            can_offer = perk_can_offer(perk_id);
+            if ((char)can_offer == 0) {
+                attempt = attempt + 1;
+            } else {
+                return perk_id;
             }
         }
-        ++attempt;
-        if (attempt <= 1000) {
-            continue;
-        }
+    } while (attempt <= 1000);
 
-        console_printf(&console_log_queue, "Perk Randomizer failed to generate a random perk!\n");
-        return perk_id_instant_winner;
-    }
-
-    return perk_id;
+    console_printf(&console_log_queue, "Perk Randomizer failed to generate a random perk!\n");
+    return perk_id_instant_winner;
 }

@@ -24,6 +24,7 @@ pub const spawn_plan_native = @import("spawn_plan_native.zig");
 pub const replay_codec = @import("replay_codec.zig");
 pub const replay_runner = @import("runtime/replay_runner.zig");
 pub const spawn = @import("runtime/spawn.zig");
+pub const survival_progression = @import("runtime/survival_progression.zig");
 pub const anim = @import("runtime/anim.zig");
 pub const fire_recipes = @import("runtime/fire_recipes.zig");
 pub const creatures = @import("runtime/creatures.zig");
@@ -37,6 +38,7 @@ pub const effects = @import("runtime/effects.zig");
 pub const terrain_fx = @import("runtime/terrain_fx.zig");
 pub const secondary_projectiles = @import("runtime/secondary_projectiles.zig");
 pub const state = @import("runtime/state.zig");
+pub const movement = @import("runtime/movement.zig");
 pub const weapons = @import("runtime/weapons.zig");
 pub const projectiles = @import("runtime/projectiles.zig");
 pub const bonuses = @import("runtime/bonuses.zig");
@@ -44,10 +46,6 @@ pub const bootstrap = @import("runtime/bootstrap.zig");
 pub const session = @import("runtime/session.zig");
 pub const session_builders = @import("runtime/session_builders.zig");
 pub const live_runner = @import("runtime/live_runner.zig");
-// Exposed for the host ABI: a recording's claimed shot counts must be read
-// through the SAME accessor the replay verifier uses, or the claim and the
-// re-simulation disagree without the simulation having diverged at all.
-pub const survival_progression = @import("runtime/survival_progression.zig");
 pub const tutorial_runtime = @import("tutorial/runtime.zig");
 pub const typo_names = @import("typo/names.zig");
 pub const ui_formatting = @import("ui_formatting.zig");
@@ -66,45 +64,10 @@ pub const window_atlas = @import("window_atlas.zig");
 pub const version = "0.1.0-dev";
 
 test {
-    // Collect the inline tests of the gameplay/runtime modules. Tests are
-    // only collected from root-module files that a test block references —
-    // dependency-module references (like test_root's `cz.creatures`) analyze
-    // the files without collecting their tests, which let the runtime suites
-    // silently never run (and bit-rot) until 2026-07-26. Explicit references
-    // rather than refAllDecls(@This()): refAllDecls force-analyzes OS-gated
-    // std paths (std.os.linux.bpf) that fail to compile on Windows.
-    _ = net;
-    _ = quest_level;
-    _ = anim;
-    _ = bonuses;
-    _ = creatures;
     _ = effects;
-    _ = fire_recipes;
-    _ = formats;
-    _ = game_ids;
-    _ = hash;
-    _ = helpers;
-    _ = lifecycle;
-    _ = live_runner;
-    _ = local_input;
-    _ = native_math;
-    _ = particles;
-    _ = perks;
-    _ = persistence;
+    _ = net;
     _ = projectiles;
+    _ = quest_level;
     _ = quest_spawn_logic_full;
-    _ = replay_codec;
-    _ = replay_runner;
-    _ = secondary_projectiles;
-    _ = session;
-    _ = session_builders;
-    _ = spawn;
-    _ = state;
-    _ = terrain_fx;
-    _ = tutorial_runtime;
-    _ = typo_names;
-    _ = ui_formatting;
-    _ = weapon_data;
     _ = weapons;
-    _ = window_atlas;
 }

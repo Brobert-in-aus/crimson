@@ -25,6 +25,24 @@ pub fn buildQuestSpawnTable(
     world_size: f32,
     out_entries: []spawn_runtime.QuestSpawnEntry,
 ) QuestSpawnBuildError!QuestSpawnBuildResult {
+    return buildQuestSpawnTableWithHardcore(
+        level_key,
+        player_count,
+        seed,
+        world_size,
+        false,
+        out_entries,
+    );
+}
+
+pub fn buildQuestSpawnTableWithHardcore(
+    level_key: i32,
+    player_count: i32,
+    seed: u32,
+    world_size: f32,
+    hardcore: bool,
+    out_entries: []spawn_runtime.QuestSpawnEntry,
+) QuestSpawnBuildError!QuestSpawnBuildResult {
     if (player_count < 1 or player_count > 4) return error.InvalidQuestSpawnTable;
     const descriptor = lookupLevelBuilder(level_key) orelse return error.InvalidQuestSpawnTable;
 
@@ -32,6 +50,7 @@ pub fn buildQuestSpawnTable(
         .width = world_size,
         .height = world_size,
         .player_count = player_count,
+        .hardcore = hardcore,
     };
     var rng = common.QuestRng.init(seed);
     var len: usize = 0;
@@ -41,6 +60,53 @@ pub fn buildQuestSpawnTable(
         .entries = out_entries[0..len],
         .start_weapon_id = descriptor.start_weapon_id,
     };
+}
+
+test "builder-specific hardcore quest branches use context flag" {
+    const Case = struct {
+        level_key: i32,
+        normal_count: usize,
+        hardcore_count: usize,
+    };
+    const cases = [_]Case{
+        .{ .level_key = 210, .normal_count = 3, .hardcore_count = 6 },
+        .{ .level_key = 407, .normal_count = 68, .hardcore_count = 92 },
+        .{ .level_key = 408, .normal_count = 40, .hardcore_count = 56 },
+        .{ .level_key = 410, .normal_count = 25, .hardcore_count = 37 },
+    };
+
+    for (cases) |case| {
+        const descriptor = lookupLevelBuilder(case.level_key) orelse unreachable;
+        var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 128;
+        var rng = common.QuestRng.init(0);
+        var len: usize = 0;
+        try descriptor.build(
+            .{
+                .width = 1024.0,
+                .height = 1024.0,
+                .player_count = 1,
+            },
+            &rng,
+            out_entries[0..],
+            &len,
+        );
+        try std.testing.expectEqual(case.normal_count, len);
+
+        rng = common.QuestRng.init(0);
+        len = 0;
+        try descriptor.build(
+            .{
+                .width = 1024.0,
+                .height = 1024.0,
+                .player_count = 1,
+                .hardcore = true,
+            },
+            &rng,
+            out_entries[0..],
+            &len,
+        );
+        try std.testing.expectEqual(case.hardcore_count, len);
+    }
 }
 
 pub fn lookupLevelBuilder(level_key: i32) ?LevelBuilder {
@@ -57,6 +123,192 @@ fn expectQuestEntryEqual(expected: spawn_runtime.QuestSpawnEntry, actual: spawn_
     try std.testing.expectEqual(expected.spawn_id, actual.spawn_id);
     try std.testing.expectEqual(expected.trigger_ms, actual.trigger_ms);
     try std.testing.expectEqual(expected.count, actual.count);
+}
+
+test "everred bonus bottom y stays at native constant" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 64;
+    const built = try buildQuestSpawnTable(201, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 34), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), built.entries[16].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -64.0), built.entries[16].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), built.entries[17].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), built.entries[17].pos.y, 1e-6);
+}
+
+test "the end of all stays in native fixed coordinate space" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 64;
+    const built = try buildQuestSpawnTable(410, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 25), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), built.entries[0].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), built.entries[1].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 592.0), built.entries[4].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), built.entries[4].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -128.0), built.entries[11].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), built.entries[12].pos.x, 1e-6);
+
+    const hardcore = try buildQuestSpawnTableWithHardcore(410, 1, 0, 2048.0, true, out_entries[0..]);
+    try std.testing.expectApproxEqAbs(@as(f32, 332.0), hardcore.entries[26].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 511.0), hardcore.entries[26].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 667.0), hardcore.entries[31].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 422.0), hardcore.entries[31].pos.y, 1e-6);
+}
+
+test "the gathering edges stay at native fixed coordinates" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 16;
+    const built = try buildQuestSpawnTable(510, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 13), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, -128.0), built.entries[10].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), built.entries[10].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), built.entries[11].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), built.entries[12].pos.x, 1e-6);
+}
+
+test "survival of the fastest corners stay at native fixed coordinates" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 32;
+    const built = try buildQuestSpawnTable(207, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 26), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), built.entries[22].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), built.entries[22].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), built.entries[23].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), built.entries[24].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), built.entries[25].pos.x, 1e-6);
+}
+
+test "nagolipoli stays in native fixed coordinate space" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 192;
+    const built = try buildQuestSpawnTable(509, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 164), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 640.0), built.entries[0].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), built.entries[0].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 690.0), built.entries[8].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 64.0), built.entries[148].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 960.0), built.entries[154].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), built.entries[162].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, -64.0), built.entries[163].pos.y, 1e-6);
+}
+
+test "cross fire lower spawn stays at native fixed coordinate" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 16;
+    const built = try buildQuestSpawnTable(506, 1, 0, 2048.0, out_entries[0..]);
+
+    try std.testing.expectEqual(@as(usize, 7), built.entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), built.entries[0].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), built.entries[5].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), built.entries[5].pos.y, 1e-6);
+}
+
+test "gang wars uses native half height and fixed chain coordinates" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 32;
+    const descriptor = lookupLevelBuilder(504) orelse unreachable;
+    var rng = common.QuestRng.init(0);
+    var len: usize = 0;
+    try descriptor.build(
+        .{
+            .width = 2048.0,
+            .height = 2049.0,
+            .player_count = 1,
+        },
+        &rng,
+        out_entries[0..],
+        &len,
+    );
+    const entries = out_entries[0..len];
+
+    try std.testing.expectEqual(@as(usize, 24), entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.5), entries[0].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), entries[12].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), entries[12].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.5), entries[13].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 512.0), entries[23].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), entries[23].pos.y, 1e-6);
+}
+
+test "fortress uses native half height" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 48;
+    const descriptor = lookupLevelBuilder(503) orelse unreachable;
+    var rng = common.QuestRng.init(0);
+    var len: usize = 0;
+    try descriptor.build(
+        .{
+            .width = 2048.0,
+            .height = 2049.0,
+            .player_count = 1,
+        },
+        &rng,
+        out_entries[0..],
+        &len,
+    );
+    const entries = out_entries[0..len];
+
+    try std.testing.expectEqual(@as(usize, 42), entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.5), entries[0].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 320.0), entries[8].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 448.0), entries[8].pos.y, 1e-6);
+    try std.testing.expectEqual(@as(u32, 0x42FFFFFE), @as(u32, @bitCast(entries[13].pos.y)));
+}
+
+test "alien squads far corner stays at native fixed coordinate" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 64;
+    const descriptor = lookupLevelBuilder(108) orelse unreachable;
+    var rng = common.QuestRng.init(0);
+    var len: usize = 0;
+    try descriptor.build(
+        .{
+            .width = 2048.0,
+            .height = 2048.0,
+            .player_count = 1,
+        },
+        &rng,
+        out_entries[0..],
+        &len,
+    );
+    const entries = out_entries[0..len];
+
+    try std.testing.expectEqual(@as(usize, 60), entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, -64.0), entries[8].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), entries[9].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), entries[9].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), entries[59].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1088.0), entries[59].pos.y, 1e-6);
+}
+
+test "blighting corners and red right waves stay at native coordinates" {
+    var out_entries = [_]spawn_runtime.QuestSpawnEntry{undefined} ** 64;
+    const descriptor = lookupLevelBuilder(301) orelse unreachable;
+    var rng = common.QuestRng.init(0);
+    var len: usize = 0;
+    try descriptor.build(
+        .{
+            .width = 2048.0,
+            .height = 3072.0,
+            .player_count = 1,
+        },
+        &rng,
+        out_entries[0..],
+        &len,
+    );
+    const entries = out_entries[0..len];
+
+    try std.testing.expectEqual(@as(usize, 17), entries.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 2176.0), entries[0].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), entries[0].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), entries[2].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), entries[2].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), entries[3].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), entries[3].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 128.0), entries[4].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), entries[4].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), entries[5].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 896.0), entries[5].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), entries[10].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), entries[10].pos.y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1152.0), entries[13].pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1024.0), entries[13].pos.y, 1e-6);
 }
 
 test "level 1-10 rectangular spawn summary stays stable" {
@@ -210,7 +462,7 @@ test "level 5-1 rectangular spawn summary stays stable" {
     }
     for (0..6) |i| {
         expected[expected_len] = .{
-            .pos = .{ .x = 800.0, .y = @as(f32, @floatFromInt(@as(i32, @intCast(i)) * 32 + 944)) },
+            .pos = .{ .x = 800.0, .y = @as(f32, @floatFromInt(@as(i32, @intCast(i)) * 32 + 1644)) },
             .heading = 0.0,
             .spawn_id = @enumFromInt(18),
             .trigger_ms = @as(i32, @intCast(i * 100)) + 40_000,
@@ -240,7 +492,7 @@ test "append radial spawns rejects non-positive radius step" {
             252.0,
             0.0,
             .zero,
-            common.SpawnId.alien_const_pale_green_26,
+            common.SpawnId.alien_small_gray_26,
             2000,
             1,
         ),
@@ -263,7 +515,7 @@ test "append radial spawns rejects inverted radius range" {
             84.0,
             42.0,
             .from_center,
-            common.SpawnId.alien_const_pale_green_26,
+            common.SpawnId.alien_small_gray_26,
             2000,
             1,
         ),

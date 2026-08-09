@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 from crimson.creatures.spawn import SpawnId
+from crimson.quests import quest_by_level
 from crimson.quests.level import QuestLevel
 from crimson.quests.runtime import (
     apply_hardcore_spawn_table_adjustment,
     build_quest_spawn_table,
 )
-from crimson.quests.tier1 import build_1_3_target_practice, build_1_6_the_random_factor
-from crimson.quests.tier2 import build_2_5_sweep_stakes
-from crimson.quests.tier3 import build_3_3_the_killing, build_3_9_deja_vu
+from crimson.quests.tier1 import (
+    build_1_3_target_practice,
+    build_1_6_the_random_factor,
+    build_1_8_alien_squads,
+)
+from crimson.quests.tier2 import (
+    build_2_1_everred_pastures,
+    build_2_5_sweep_stakes,
+    build_2_7_survival_of_the_fastest,
+)
+from crimson.quests.tier3 import build_3_1_the_blighting, build_3_3_the_killing, build_3_9_deja_vu
+from crimson.quests.tier4 import build_4_10_the_end_of_all
+from crimson.quests.tier5 import (
+    build_5_3_the_fortress,
+    build_5_4_the_gang_wars,
+    build_5_9_nagolipoli,
+    build_5_10_the_gathering,
+)
 from crimson.quests.types import QuestContext, QuestDefinition, SpawnEntry
 from crimson.rng_caller_static import RngCallerStatic
 from crimson.terrain_slots import DEFAULT_TERRAIN_SLOTS
@@ -18,26 +34,162 @@ from grim.rand import Crand, CrandLike
 from tests.support.helpers import ScriptedCrand
 
 
+def test_everred_bonus_bottom_y_is_native_constant() -> None:
+    ctx = QuestContext(width=2048, height=2048, player_count=1)
+
+    entries = build_2_1_everred_pastures(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 34
+    assert entries[16].pos == Vec2(1024.0, -64.0)
+    assert entries[17].pos == Vec2(1024.0, 1088.0)
+
+
+def test_gang_wars_uses_native_half_height_and_fixed_chain_positions() -> None:
+    ctx = QuestContext(width=2048, height=2049, player_count=1)
+
+    entries = build_5_4_the_gang_wars(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 24
+    assert entries[0].pos == Vec2(-150.0, 1024.5)
+    assert entries[12].pos == Vec2(512.0, 1152.0)
+    assert entries[13].pos == Vec2(-150.0, 1024.5)
+    assert entries[23].pos == Vec2(512.0, 1152.0)
+
+
+def test_fortress_uses_native_half_height() -> None:
+    ctx = QuestContext(width=2048, height=2049, player_count=1)
+
+    entries = build_5_3_the_fortress(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 42
+    assert entries[0].pos == Vec2(-50.0, 1024.5)
+    assert entries[8].pos == Vec2(320.0, 448.0)
+    assert entries[13].pos == Vec2(320.0, 127.99998474121094)
+
+
+def test_alien_squads_far_corner_stays_at_native_fixed_coordinate() -> None:
+    ctx = QuestContext(width=2048, height=2048, player_count=1)
+
+    entries = build_1_8_alien_squads(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 60
+    assert entries[8].pos == Vec2(-64.0, -64.0)
+    assert entries[9].pos == Vec2(1088.0, 1088.0)
+    assert entries[59].pos == Vec2(1088.0, 1088.0)
+
+
+def test_blighting_corners_and_red_right_waves_stay_at_native_coordinates() -> None:
+    ctx = QuestContext(width=2048, height=3072, player_count=1)
+
+    entries = build_3_1_the_blighting(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 17
+    assert entries[0].pos == Vec2(2176.0, 1024.0)
+    assert [entry.pos for entry in entries[2:6]] == [
+        Vec2(896.0, 128.0),
+        Vec2(128.0, 128.0),
+        Vec2(128.0, 896.0),
+        Vec2(896.0, 896.0),
+    ]
+    assert entries[10].pos == Vec2(1152.0, 1024.0)
+    assert entries[13].pos == Vec2(1152.0, 1024.0)
+
+
+def test_end_of_all_stays_in_native_fixed_coordinate_space() -> None:
+    ctx = QuestContext(width=2048, height=3072, player_count=1)
+
+    entries = build_4_10_the_end_of_all(ctx, rng=Crand(0), full_version=True)
+
+    assert len(entries) == 25
+    assert [entry.pos for entry in entries[:4]] == [
+        Vec2(128.0, 128.0),
+        Vec2(896.0, 128.0),
+        Vec2(128.0, 896.0),
+        Vec2(896.0, 896.0),
+    ]
+    assert entries[4].pos == Vec2(592.0, 512.0)
+    assert entries[10].pos == Vec2(512.0, 512.0)
+    assert [entry.pos for entry in entries[11:15]] == [
+        Vec2(-128.0, 256.0),
+        Vec2(1152.0, 384.0),
+        Vec2(-128.0, 512.0),
+        Vec2(1152.0, 640.0),
+    ]
+
+    hardcore_entries = build_4_10_the_end_of_all(
+        QuestContext(width=2048, height=3072, player_count=1, hardcore=True),
+        rng=Crand(0),
+        full_version=True,
+    )
+    assert hardcore_entries[26].pos == Vec2(332.0, 511.0)
+    assert hardcore_entries[31].pos == Vec2(667.0, 422.0)
+
+
+def test_gathering_edges_stay_at_native_fixed_coordinates() -> None:
+    entries = build_5_10_the_gathering(
+        QuestContext(width=2048, height=3072, player_count=1),
+        rng=Crand(0),
+        full_version=True,
+    )
+
+    assert len(entries) == 13
+    assert entries[10].pos == Vec2(-128.0, 512.0)
+    assert entries[11].pos == Vec2(1152.0, 512.0)
+    assert entries[12].pos == Vec2(1152.0, 512.0)
+
+
+def test_survival_of_the_fastest_corners_stay_at_native_coordinates() -> None:
+    entries = build_2_7_survival_of_the_fastest(
+        QuestContext(width=2048, height=3072, player_count=1),
+        rng=Crand(0),
+        full_version=True,
+    )
+
+    assert len(entries) == 26
+    assert [entry.pos for entry in entries[22:]] == [
+        Vec2(128.0, 128.0),
+        Vec2(896.0, 128.0),
+        Vec2(128.0, 896.0),
+        Vec2(896.0, 896.0),
+    ]
+
+
+def test_nagolipoli_stays_in_native_fixed_coordinate_space() -> None:
+    entries = build_5_9_nagolipoli(
+        QuestContext(width=2048, height=3072, player_count=1),
+        rng=Crand(0),
+        full_version=True,
+    )
+
+    assert len(entries) == 164
+    assert entries[0].pos == Vec2(640.0, 512.0)
+    assert entries[8].pos == Vec2(690.0, 512.0)
+    assert entries[148].pos == Vec2(64.0, 256.0)
+    assert entries[154].pos == Vec2(960.0, 256.0)
+    assert entries[162].pos == Vec2(512.0, 1088.0)
+    assert entries[163].pos == Vec2(512.0, -64.0)
+
+
 def test_apply_hardcore_spawn_table_adjustment() -> None:
     entries = [
         SpawnEntry(
             pos=Vec2(),
             heading=0.0,
-            spawn_id=SpawnId.ALIEN_CONST_RED_FAST_2B,
+            spawn_id=SpawnId.ALIEN_DEADLY_FAST_2B,
             trigger_ms=0,
             count=2,
         ),
         SpawnEntry(
             pos=Vec2(),
             heading=0.0,
-            spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+            spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
             trigger_ms=0,
             count=2,
         ),
         SpawnEntry(
             pos=Vec2(),
             heading=0.0,
-            spawn_id=SpawnId.ALIEN_CONST_PALE_GREEN_26,
+            spawn_id=SpawnId.ALIEN_SMALL_GRAY_26,
             trigger_ms=0,
             count=1,
         ),
@@ -52,6 +204,45 @@ def test_apply_hardcore_spawn_table_adjustment() -> None:
     ]
 
 
+def test_builder_specific_hardcore_branches_use_runtime_flag() -> None:
+    ctx = QuestContext(width=1024, height=1024, player_count=1)
+    cases = (
+        (QuestLevel(2, 10), 3, 6),
+        (QuestLevel(4, 7), 68, 92),
+        (QuestLevel(4, 8), 40, 56),
+        (QuestLevel(4, 10), 25, 37),
+    )
+
+    for level, normal_count, hardcore_count in cases:
+        quest = quest_by_level(level)
+        assert quest is not None
+        normal = build_quest_spawn_table(
+            quest,
+            ctx,
+            rng=Crand(0),
+            hardcore=False,
+            full_version=True,
+        )
+        demo = build_quest_spawn_table(
+            quest,
+            ctx,
+            rng=Crand(0),
+            hardcore=False,
+            full_version=False,
+        )
+        hardcore = build_quest_spawn_table(
+            quest,
+            ctx,
+            rng=Crand(0),
+            hardcore=True,
+            full_version=True,
+        )
+
+        assert len(normal) == normal_count
+        assert len(demo) == normal_count
+        assert len(hardcore) == hardcore_count
+
+
 def test_build_quest_spawn_table_passes_rng_and_full_version() -> None:
     def builder(ctx: QuestContext, *, rng: CrandLike, full_version: bool = True) -> list[SpawnEntry]:
         del ctx
@@ -61,7 +252,7 @@ def test_build_quest_spawn_table_passes_rng_and_full_version() -> None:
             SpawnEntry(
                 pos=Vec2(1.0, 2.0),
                 heading=0.0,
-                spawn_id=SpawnId.ALIEN_CONST_PALE_GREEN_26,
+                spawn_id=SpawnId.ALIEN_SMALL_GRAY_26,
                 trigger_ms=trigger,
                 count=count,
             ),
@@ -111,16 +302,16 @@ def test_build_3_3_the_killing_discards_pick_rolls_and_cycles_by_wave_index() ->
         (SpawnId.AI1_SPIDER_SP1_BLUE_TINT_1B, 8000),
         (SpawnId.AI1_LIZARD_BLUE_TINT_1C, 14000),
         (SpawnId.AI1_ALIEN_BLUE_TINT_1A, 20000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 26000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 27000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 28000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 26000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 27000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 28000),
         (SpawnId.AI1_LIZARD_BLUE_TINT_1C, 32000),
         (SpawnId.AI1_ALIEN_BLUE_TINT_1A, 38000),
         (SpawnId.AI1_SPIDER_SP1_BLUE_TINT_1B, 44000),
         (SpawnId.AI1_LIZARD_BLUE_TINT_1C, 50000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 56000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 57000),
-        (SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07, 58000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 56000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 57000),
+        (SpawnId.DEN_ALIEN_BASIC_07, 58000),
     ]
     assert [(entry.pos.x, entry.pos.y) for entry in entries[4:7]] == [
         (139.0, 138.0),
@@ -165,7 +356,7 @@ def test_quest_rng_builders_use_exact_native_callers() -> None:
     random_factor_rng = ScriptedCrand([0], fallback=ScriptedCrand.Fallback.REPEAT_LAST)
     build_1_6_the_random_factor(ctx, rng=random_factor_rng, full_version=True)
     assert [record.caller for record in random_factor_rng.records_since()] == [
-        RngCallerStatic.QUEST_BUILD_THE_RANDOM_FACTOR_BRUTE_GATE,
+        RngCallerStatic.QUEST_BUILD_THE_RANDOM_FACTOR_ALIEN_BIG_GRAY_GATE,
     ] * 10
 
     sweep_stakes_rng = ScriptedCrand([0], fallback=ScriptedCrand.Fallback.REPEAT_LAST)

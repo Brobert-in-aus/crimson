@@ -9,6 +9,7 @@ from grim.sfx_map import SfxId
 from ...creatures.damage_runtime import CreatureDamageRuntime
 from ...creatures.damage_types import CreatureDamageType
 from ...effects import FxQueue
+from ...math_parity import x87_pc24_hypot, x87_pc24_mul, x87_pc24_sub
 from ...owner_ref import OwnerRef
 from ...sim.state_types import GameplayState, PlayerState
 from ..helpers import perk_active
@@ -32,7 +33,7 @@ class _FinalRevengeCreatureDamageRuntime(CreatureDamageRuntime):
     def on_creature_lethal(
         self,
         creature_index: int,
-        resolve_death_sfx: Callable[[], tuple[SfxId, ...]],
+        resolve_damage_followup: Callable[[], tuple[SfxId, ...]],
     ) -> None:
         self.deaths.append(
             self.creatures.handle_death(
@@ -47,7 +48,7 @@ class _FinalRevengeCreatureDamageRuntime(CreatureDamageRuntime):
                 fx_queue=self.fx_queue,
             ),
         )
-        self.state.sfx_queue.extend(resolve_death_sfx())
+        self.state.sfx_queue.extend(resolve_damage_followup())
 
 
 def apply_final_revenge_on_player_death(
@@ -65,7 +66,8 @@ def apply_final_revenge_on_player_death(
     """Apply Final Revenge perk behavior when a player dies."""
     from ...creatures.damage import creature_apply_damage_with_lethal_followup
 
-    if not perk_active(player, PerkId.FINAL_REVENGE):
+    perk_player = players[0] if state.preserve_bugs and players else player
+    if not perk_active(perk_player, PerkId.FINAL_REVENGE):
         return
 
     player_pos = player.pos
@@ -76,7 +78,6 @@ def apply_final_revenge_on_player_death(
         detail_preset=int(detail_preset),
     )
 
-    prev_guard = bool(state.bonus_spawn_guard)
     state.bonus_spawn_guard = True
     creature_damage_runtime = _FinalRevengeCreatureDamageRuntime(
         state=state,
@@ -92,15 +93,16 @@ def apply_final_revenge_on_player_death(
         if not creature.active:
             continue
 
-        delta = creature.pos - player_pos
-        if abs(delta.x) > 512.0 or abs(delta.y) > 512.0:
+        dx = x87_pc24_sub(creature.pos.x, player_pos.x)
+        dy = x87_pc24_sub(creature.pos.y, player_pos.y)
+        if abs(dx) > 512.0 or abs(dy) > 512.0:
             continue
 
-        remaining = 512.0 - delta.length()
+        remaining = x87_pc24_sub(512.0, x87_pc24_hypot(dx, dy))
         if remaining <= 0.0:
             continue
 
-        damage = remaining * 5.0
+        damage = x87_pc24_mul(remaining, 5.0)
         creature_apply_damage_with_lethal_followup(
             creature,
             creature_index=int(creature_idx),
@@ -117,7 +119,7 @@ def apply_final_revenge_on_player_death(
             creature_damage_runtime=creature_damage_runtime,
         )
 
-    state.bonus_spawn_guard = prev_guard
+    state.bonus_spawn_guard = False
     state.sfx_queue.append(SfxId.EXPLOSION_LARGE)
     state.sfx_queue.append(SfxId.SHOCKWAVE)
 

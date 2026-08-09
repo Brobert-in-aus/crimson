@@ -71,7 +71,7 @@ const CONFIG = {
     0x000: { name: 'grim_release', args: [] },
     0x004: { name: 'grim_set_paused', args: ['i32'] },
     0x008: { name: 'grim_get_version', args: [] },
-    0x00C: { name: 'grim_check_device', args: [] },
+    0x00C: { name: 'grim_save_screenshot', args: ['cstr'] },
     0x010: { name: 'grim_apply_config', args: [] },
     0x014: { name: 'grim_init_system', args: [] },
     0x018: { name: 'grim_shutdown', args: [] },
@@ -177,12 +177,12 @@ const LINK_BASE = {
 // Known addresses from docs/data_map.json (static VAs).
 const ADDR = {
   // crimsonland.exe globals
-  grim_interface_ptr: 0x0048083c, // DAT_0048083c
-  player_health_base: 0x004908d4, // DAT_004908d4
-  projectile_pool_base: 0x004926b8, // DAT_004926b8
-  creature_pool_base: 0x0049bf38, // DAT_0049bf38
-  weapon_table_base: 0x004d7a2c, // DAT_004d7a2c (name buffer start)
-  weapon_ammo_class_base: 0x004d7a28, // DAT_004d7a28
+  grim_interface_ptr: 0x0048083c,
+  player_health_base: 0x004908d4,
+  projectile_pool_base: 0x004926b8,
+  creature_pool_base: 0x0049bf38,
+  weapon_table_base: 0x004d7a2c, // name buffer start
+  weapon_ammo_class_base: 0x004d7a28,
 
   // crimsonland.exe functions (static VAs from analysis/ghidra/maps/name_map.json)
   grim_load_interface: 0x0041dc80,
@@ -712,11 +712,11 @@ function readCreature(idx) {
     index: idx,
     base: b.toString(),
     active_u8: tryReadU8(b.add(0x00)),
-    phase_seed_f32: tryReadFloat(b.add(0x04)),
+    phase_seed_i32: tryReadS32(b.add(0x04)),
     state_flag_u8: tryReadU8(b.add(0x08)),
     collision_flag_u8: tryReadU8(b.add(0x09)),
     collision_timer_f32: tryReadFloat(b.add(0x0c)),
-    hitbox_size_f32: tryReadFloat(b.add(0x10)),
+    lifecycle_stage_f32: tryReadFloat(b.add(0x10)),
     pos: [tryReadFloat(b.add(0x14)), tryReadFloat(b.add(0x18))],
     vel: [tryReadFloat(b.add(0x1c)), tryReadFloat(b.add(0x20))],
     health_f32: tryReadFloat(b.add(0x24)),
@@ -726,7 +726,7 @@ function readCreature(idx) {
     size_f32: tryReadFloat(b.add(0x34)),
     hit_flash_timer_f32: tryReadFloat(b.add(0x38)),
     tint: [tryReadFloat(b.add(0x3c)), tryReadFloat(b.add(0x40)), tryReadFloat(b.add(0x44)), tryReadFloat(b.add(0x48))],
-    force_target_i32: tryReadS32(b.add(0x4c)),
+    force_target_u8: tryReadU8(b.add(0x4c)),
     target: [tryReadFloat(b.add(0x50)), tryReadFloat(b.add(0x54))],
     contact_damage_f32: tryReadFloat(b.add(0x58)),
     move_speed_f32: tryReadFloat(b.add(0x5c)),

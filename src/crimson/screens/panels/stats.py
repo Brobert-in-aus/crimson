@@ -305,8 +305,8 @@ class StatisticsMenuView:
         dst = rl.Rectangle(
             panel_top_left.x, panel_top_left.y, panel_w, STATISTICS_PANEL_HEIGHT * scale,
         )
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        draw_classic_menu_panel(resources.texture(TextureId.UI_MENU_PANEL), dst=dst, tint=rl.WHITE, shadow=fx_detail)
+        shadows_enabled = self.state.config.display.shadows_enabled
+        draw_classic_menu_panel(resources.texture(TextureId.UI_MENU_PANEL), dst=dst, tint=rl.WHITE, shadow=shadows_enabled)
 
         # Title: full-size row from ui_itemTexts.jaz (128x32).
         label_tex = resources.texture(TextureId.UI_ITEM_TEXTS)
@@ -329,11 +329,14 @@ class StatisticsMenuView:
         # "played for # hours # minutes"
         font = resources.small_font
         draw_small_text(font, _format_playtime_text(
-            int(self.state.status.game_sequence_id),
+            int(self.state.status.play_time_ms),
             preserve_bugs=bool(self.state.preserve_bugs),
         ), panel_top_left + Vec2(_PLAYTIME_X * scale, _PLAYTIME_Y * scale), rl.Color(255, 255, 255, int(255 * 0.8)))
 
-        if _is_orbes_volantes_day(dt.date.today()) and int(self.state.stats_menu_easter_egg_roll) == _STATS_EASTER_TRIGGER_ROLL:
+        if (
+            _is_orbes_volantes_day(dt.datetime.now(tz=dt.UTC).astimezone().date())
+            and int(self.state.stats_menu_easter_egg_roll) == _STATS_EASTER_TRIGGER_ROLL
+        ):
             self.state.stats_menu_easter_egg_roll = _STATS_EASTER_ROLL_UNSET
             x = float(self.state.rng.rand_tagged(RngCallerStatic.REWRITE_STATS_MENU_EASTER_TEXT_X) % 64 + 16)
             draw_small_text(font, _STATS_EASTER_TEXT, Vec2(x, _STATS_EASTER_TEXT_Y), rl.Color(51, 255, 153, 128))
@@ -375,8 +378,8 @@ class StatisticsMenuView:
         offset_x = MENU_SIGN_OFFSET_X * sign_scale + shift_x
         offset_y = MENU_SIGN_OFFSET_Y * sign_scale
         rotation_deg = 0.0
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        if fx_detail:
+        shadows_enabled = self.state.config.display.shadows_enabled
+        if shadows_enabled:
             MenuView._draw_ui_quad_shadow(
                 texture=sign,
                 src=rl.Rectangle(0.0, 0.0, float(sign.width), float(sign.height)),

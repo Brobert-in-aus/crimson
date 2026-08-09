@@ -43,7 +43,7 @@ GAME_OVER_PANEL_X = -45.0
 #   _DAT_0048cc60 = 0xc2340000 (-45.0)
 #   _DAT_0048cc64 = 0x42dc0000 (110.0)
 GAME_OVER_PANEL_Y = 110.0
-# `DAT_0048cc48` is cloned from the 3-slice menu panel layout (`ui_menu_item_element._pad4+0xac`)
+# `ui_element_slot_30` is cloned from the 3-slice menu panel layout (`ui_menu_item_element._pad4+0xac`)
 # in `ui_menu_layout_init`; trace confirms a 510x378 bbox for both phase 0 and phase 1.
 GAME_OVER_PANEL_W = 510.0
 GAME_OVER_PANEL_H = 378.0
@@ -62,7 +62,7 @@ TEXTURE_TOP_BANNER_H = 64.0
 # so banner/content anchor is +214 from the panel-left edge in steady state.
 GAME_OVER_BANNER_X_OFFSET = 214.0
 
-INPUT_BOX_W = 166.0  # `_DAT_0048259c = 0xa6` before `ui_text_input_update`
+INPUT_BOX_W = 166.0  # `game_over_name_input_state_width_px = 0xa6` before `ui_text_input_update`
 INPUT_BOX_H = 18.0
 
 PANEL_SLIDE_DURATION_MS = 250.0
@@ -454,7 +454,7 @@ class GameOverUi(msgspec.Struct):
             label_color,
         )
 
-        # Separator between columns (mirrors FUN_00441220 + offset adjustments).
+        # Separator between columns (mirrors highscore_card_draw_vertical_divider).
         separator_x = card_origin.x + 80.0 * scale
         rl.draw_line(
             int(separator_x),
@@ -641,12 +641,12 @@ class GameOverUi(msgspec.Struct):
         panel_top_left = panel_layout.top_left
 
         # Panel background
-        fx_detail = self.config.display.fx_detail_enabled(level=0, default=False)
+        shadows_enabled = self.config.display.shadows_enabled
         draw_classic_menu_panel(
             resources.texture(TextureId.UI_MENU_PANEL),
             dst=panel.to_rl(),
             tint=rl.WHITE,
-            shadow=fx_detail,
+            shadow=shadows_enabled,
         )
 
         # Banner (Reaper / Well done)

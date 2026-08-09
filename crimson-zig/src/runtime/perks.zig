@@ -1,5 +1,6 @@
 const std = @import("std");
 const game_ids = @import("../game_ids.zig");
+const runtime_helpers = @import("helpers.zig");
 const native_math = @import("native_math.zig");
 
 const bonus_runtime = @import("bonuses.zig");
@@ -36,6 +37,8 @@ const PerkFlagSet = std.EnumSet(PerkFlag);
 pub const perk_id_max: i32 = @intCast(state_mod.perk_count_size - 1);
 const perk_id_max_usize: usize = state_mod.perk_count_size - 1;
 const perk_base_available_max_id: i32 = 27;
+const grim_deal_xp_scale: f32 = @bitCast(@as(u32, 0x3E3851EC));
+const breathing_room_fraction: f32 = @bitCast(@as(u32, 0x3F2AAAAB));
 
 inline fn perkIdIndex(perk_id: PerkId) usize {
     return @intCast(@intFromEnum(perk_id));
@@ -139,8 +142,6 @@ pub fn perksRebuildAvailable(
     state: *state_mod.GameplayState,
     quest_unlock_index: i32,
 ) void {
-    if (state.perk_available_unlock_index == quest_unlock_index) return;
-
     state.perk_available = state_mod.PerkAvailability.initFill(false);
 
     var perk_id: i32 = 1;
@@ -328,6 +329,30 @@ pub fn perkSelectionPickWithContext(
     return perk_id;
 }
 
+/// Apply a replayed pick from the choices prepared by an earlier menu-open.
+///
+/// Native capture order matters: picking marks the cache dirty, but does not
+/// generate the next offer. A later explicit menu-open owns that RNG work.
+pub fn perkSelectionPickPreparedWithContext(
+    state: *state_mod.GameplayState,
+    players: []state_mod.PlayerState,
+    choice_index: i32,
+    context: PerkApplyContext,
+) PerkApplyError!?PerkId {
+    if (players.len == 0) return null;
+    if (state.perk_selection.pending_count <= 0) return null;
+
+    const choices = perkSelectionPreparedChoices(players, &state.perk_selection);
+    if (choices.len == 0) return null;
+    if (choice_index < 0 or choice_index >= choices.len) return null;
+
+    const perk_id = choices[@intCast(choice_index)];
+    try applyPerkWithContext(state, players, perk_id, context);
+    state.perk_selection.pending_count = @max(0, state.perk_selection.pending_count - 1);
+    state.perk_selection.choices_dirty = true;
+    return perk_id;
+}
+
 pub fn applyPerk(
     state: *state_mod.GameplayState,
     players: []state_mod.PlayerState,
@@ -356,11 +381,17 @@ pub fn applyPerkWithContext(
             players[0].experience += 2500;
         },
         PerkId.grim_deal => {
+            const experience = players[0].experience;
+            const bonus: i32 = @intFromFloat(native_math.pc24Mul(
+                @as(f64, @floatFromInt(experience)),
+                grim_deal_xp_scale,
+            ));
             players[0].health = -1.0;
-            players[0].experience += @intFromFloat(@as(f32, @floatFromInt(players[0].experience)) * 0.18);
+            players[0].experience = experience + bonus;
         },
         PerkId.plaguebearer => {
-            for (players) |*player| {
+            const plaguebearer_players = if (state.preserve_bugs) players[0..1] else players;
+            for (plaguebearer_players) |*player| {
                 player.plaguebearer_active = true;
             }
         },
@@ -380,7 +411,11 @@ pub fn applyPerkWithContext(
             players[0].level += 3;
             state.perk_selection.pending_count += 3;
             state.perk_selection.choices_dirty = true;
-            for (players) |*player| {
+            const contract_players = if (state.preserve_bugs)
+                players[0..@min(players.len, 2)]
+            else
+                players;
+            for (contract_players) |*player| {
                 if (player.health > 0.0) player.health = 0.1;
             }
         },
@@ -390,7 +425,10 @@ pub fn applyPerkWithContext(
                     // Native computes `h - h * 0.33333334f` and stores f32. Its
                     // `= 1.0` clamp only fires when the result is <= 0, which
                     // cannot happen for positive health - dead code, no floor.
-                    player.health = narrowF32(player.health - player.health * 0.33333334);
+                    player.health = native_math.pc24Sub(
+                        player.health,
+                        native_math.pc24Mul(player.health, 0.33333334),
+                    );
                 }
             }
         },
@@ -424,8 +462,8 @@ pub fn applyPerkWithContext(
         },
         PerkId.breathing_room => {
             for (players) |*player| {
-                const reduction = narrowF32(player.health * (2.0 / 3.0));
-                player.health = narrowF32(player.health - reduction);
+                const reduction = native_math.pc24Mul(player.health, breathing_room_fraction);
+                player.health = native_math.pc24Sub(player.health, reduction);
             }
             applyPerkImmediateCreatureEffects(perk_id, state, context);
             state.bonus_spawn_guard = false;
@@ -440,9 +478,9 @@ pub fn applyPerkWithContext(
                 if (!state.preserve_bugs and player.health <= 0.0) continue;
                 const amount: f32 = @floatFromInt(state.rng.randTagged(rng_callers.perk_apply_bandage_heal) % 50 + 1);
                 if (state.preserve_bugs) {
-                    player.health = @min(100.0, narrowF32(player.health * amount));
+                    player.health = @min(100.0, native_math.pc24Mul(player.health, amount));
                 } else {
-                    player.health = @min(100.0, narrowF32(player.health + amount));
+                    player.health = @min(100.0, native_math.pc24Add(player.health, amount));
                 }
                 effects.spawnBurst(
                     state,
@@ -495,7 +533,7 @@ fn applyPerkImmediateCreatureEffectsWithEffects(
         PerkId.breathing_room => {
             for (&creatures.entries) |*creature| {
                 if (!creature.active) continue;
-                creature.lifecycle_stage = narrowF32(creature.lifecycle_stage - dt_frame);
+                creature.lifecycle_stage = native_math.pc24Sub(creature.lifecycle_stage, dt_frame);
             }
         },
         PerkId.lifeline_50_50 => {
@@ -534,19 +572,19 @@ pub fn updatePerkEffects(
             if (player.shield_timer <= 0.0) {
                 player.shield_timer = 0.0;
             } else {
-                player.shield_timer -= dt;
+                player.shield_timer = native_math.pc24Sub(player.shield_timer, dt);
             }
 
             if (player.fire_bullets_timer <= 0.0) {
                 player.fire_bullets_timer = 0.0;
             } else {
-                player.fire_bullets_timer -= dt;
+                player.fire_bullets_timer = native_math.pc24Sub(player.fire_bullets_timer, dt);
             }
 
             if (player.speed_bonus_timer <= 0.0) {
                 player.speed_bonus_timer = 0.0;
             } else {
-                player.speed_bonus_timer -= dt;
+                player.speed_bonus_timer = native_math.pc24Sub(player.speed_bonus_timer, dt);
             }
         }
     }
@@ -561,7 +599,7 @@ pub fn updatePerkEffects(
             var repeat: usize = 0;
             while (repeat < players.len) : (repeat += 1) {
                 if (players[0].health <= 0.0 or players[0].health >= 100.0) continue;
-                players[0].health += dt;
+                players[0].health = native_math.pc24Add(players[0].health, dt);
                 if (players[0].health > 100.0) {
                     players[0].health = 100.0;
                 }
@@ -569,11 +607,11 @@ pub fn updatePerkEffects(
         } else {
             var heal_amount = dt;
             if (perkActive(&players[0], PerkId.greater_regeneration)) {
-                heal_amount = dt * 2.0;
+                heal_amount = native_math.pc24Mul(dt, @as(f32, 2.0));
             }
             for (players) |*player| {
                 if (player.health <= 0.0 or player.health >= 100.0) continue;
-                player.health += heal_amount;
+                player.health = native_math.pc24Add(player.health, heal_amount);
                 if (player.health > 100.0) {
                     player.health = 100.0;
                 }
@@ -581,7 +619,7 @@ pub fn updatePerkEffects(
         }
     }
 
-    state.lean_mean_exp_timer -= dt;
+    state.lean_mean_exp_timer = native_math.pc24Sub(state.lean_mean_exp_timer, dt);
     if (state.lean_mean_exp_timer < 0.0) {
         state.lean_mean_exp_timer = 0.25;
         const perk_count = perkCountGet(&players[0], PerkId.lean_mean_exp_machine);
@@ -592,22 +630,25 @@ pub fn updatePerkEffects(
 
     if (!perkActive(&players[0], PerkId.death_clock)) return;
 
+    const death_clock_drain = native_math.pc24Mul(dt, @as(f32, 3.33333325));
     for (players) |*player| {
         if (player.health <= 0.0) {
             player.health = 0.0;
         } else {
-            player.health -= dt * 3.3333333;
+            player.health = native_math.pc24Sub(player.health, death_clock_drain);
         }
     }
 }
 
 pub fn updateEvilEyesTargets(
+    preserve_bugs: bool,
     players: []state_mod.PlayerState,
     creatures: []const creatures_mod.CreatureState,
 ) void {
     if (players.len == 0) return;
-    for (players) |*player| {
-        if (player.health <= 0.0 or !perkActive(player, PerkId.evil_eyes)) {
+    const effect_players = if (preserve_bugs) players[0..1] else players;
+    for (effect_players) |*player| {
+        if ((!preserve_bugs and player.health <= 0.0) or !perkActive(player, PerkId.evil_eyes)) {
             player.evil_eyes_target_creature = -1;
             continue;
         }
@@ -628,15 +669,16 @@ pub fn applyPyrokineticEffects(
 
     const burn_intensities = [_]f32{ 0.8, 0.6, 0.4, 0.3, 0.2 };
 
-    for (players) |*player| {
-        if (player.health <= 0.0) continue;
+    const effect_players = if (state.preserve_bugs) players[0..1] else players;
+    for (effect_players) |*player| {
+        if (!state.preserve_bugs and player.health <= 0.0) continue;
         if (!perkActive(player, PerkId.pyrokinetic)) continue;
 
         const target_idx = creatureFindInRadius(creatures.entries[0..], player.aim, 12.0, 0);
         if (target_idx == -1) continue;
 
         var creature = &creatures.entries[@intCast(target_idx)];
-        creature.collision_timer = narrowF32(creature.collision_timer - dt);
+        creature.collision_timer = native_math.pc24Sub(creature.collision_timer, dt);
         if (creature.collision_timer >= 0.0) continue;
 
         creature.collision_timer = 0.5;
@@ -648,7 +690,10 @@ pub fn applyPyrokineticEffects(
                 3 => rng_callers.perks_update_effects_pyrokinetic_angle_0p3,
                 else => rng_callers.perks_update_effects_pyrokinetic_angle_0p2,
             };
-            const angle = narrowF32(@as(f32, @floatFromInt(state.rng.randTagged(caller) % 0x274)) * 0.01);
+            const angle = native_math.pc24Mul(
+                @as(f32, @floatFromInt(state.rng.randTagged(caller) % 0x274)),
+                @as(f32, 0.01),
+            );
             _ = particles.spawnParticle(
                 state,
                 creature.pos,
@@ -669,7 +714,7 @@ pub fn applyJinxedEffects(
     dt: f32,
 ) void {
     if (state.jinxed_timer >= 0.0) {
-        state.jinxed_timer = narrowF32(state.jinxed_timer - dt);
+        state.jinxed_timer = native_math.pc24Sub(state.jinxed_timer, dt);
     }
     if (state.jinxed_timer >= 0.0) return;
     if (players.len == 0) return;
@@ -677,18 +722,26 @@ pub fn applyJinxedEffects(
 
     if ((state.rng.randTagged(rng_callers.perks_update_effects_jinxed_accident_gate) % 10) == 3) {
         const target_idx = selectJinxedAccidentTarget(state, players);
-        players[target_idx].health = narrowF32(players[target_idx].health - 5.0);
+        players[target_idx].health = native_math.pc24Sub(players[target_idx].health, @as(f32, 5.0));
         _ = terrain_fx.decals.addRandom(state, players[target_idx].pos);
         _ = terrain_fx.decals.addRandom(state, players[target_idx].pos);
     }
 
     const timer_roll = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.perks_update_effects_jinxed_timer_reset) % 0x14));
-    state.jinxed_timer = narrowF32(narrowF32(timer_roll * 0.1) + state.jinxed_timer + 2.0);
+    state.jinxed_timer = native_math.pc24Add(
+        native_math.pc24Add(
+            native_math.pc24Mul(timer_roll, @as(f32, 0.1)),
+            state.jinxed_timer,
+        ),
+        @as(f32, 2.0),
+    );
 
     if (state.bonuses.freeze > 0.0) return;
 
-    const pool_limit: usize = 0x180;
-    const pool_mod = @min(pool_limit, creatures.entries.len);
+    const pool_mod = jinxedCreaturePoolMod(
+        state.preserve_bugs,
+        creatures.entries.len,
+    );
     if (pool_mod == 0) return;
 
     var idx: usize = @intCast(state.rng.randTagged(rng_callers.perks_update_effects_jinxed_creature_pick) % @as(u32, @intCast(pool_mod)));
@@ -699,8 +752,9 @@ pub fn applyJinxedEffects(
     if (!creatures.entries[idx].active) return;
 
     creatures.entries[idx].hp = -1.0;
-    creatures.entries[idx].lifecycle_stage = narrowF32(
-        creatures.entries[idx].lifecycle_stage - dt * 20.0,
+    creatures.entries[idx].lifecycle_stage = native_math.pc24Sub(
+        creatures.entries[idx].lifecycle_stage,
+        native_math.pc24Mul(dt, @as(f32, 20.0)),
     );
     // Native awards the reward exactly once: the Jinxed kill branch has no
     // Double Experience handling, unlike creature_handle_death.
@@ -708,11 +762,17 @@ pub fn applyJinxedEffects(
     state.sfx_queue.append(.trooper_inpain_01);
 }
 
+fn jinxedCreaturePoolMod(preserve_bugs: bool, creature_count: usize) usize {
+    const pool_limit: usize = if (preserve_bugs) 0x17f else 0x180;
+    return @min(pool_limit, creature_count);
+}
+
 pub fn applyFinalRevengeOnDeathTransition(
     state: *state_mod.GameplayState,
     players: []state_mod.PlayerState,
     player_index: usize,
     health_before: f32,
+    player1_health_before: f32,
     creatures: *creatures_mod.CreaturePool,
     bonuses: *bonus_runtime.BonusPool,
     dt: f32,
@@ -720,14 +780,17 @@ pub fn applyFinalRevengeOnDeathTransition(
     detail_preset: i32,
 ) void {
     var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
     applyFinalRevengeOnDeathTransitionWithEffects(
         state,
         players,
         player_index,
         health_before,
+        player1_health_before,
         creatures,
         bonuses,
         &effects,
+        &terrain_fx,
         dt,
         world_size,
         detail_preset,
@@ -739,6 +802,7 @@ pub fn applyFinalRevengeOnDeathTransitionWithEffects(
     players: []state_mod.PlayerState,
     player_index: usize,
     health_before: f32,
+    player1_health_before: f32,
     creatures: *creatures_mod.CreaturePool,
     bonuses: *bonus_runtime.BonusPool,
     effects: *effects_mod.EffectPool,
@@ -747,42 +811,19 @@ pub fn applyFinalRevengeOnDeathTransitionWithEffects(
     world_size: f32,
     detail_preset: i32,
 ) void {
-    if (player_index >= players.len) return;
-    const player = &players[player_index];
-    if (!(health_before > 0.0) or !(player.health <= 0.0)) return;
-    if (!perkActive(player, PerkId.final_revenge)) return;
-
-    effects.spawnExplosionBurst(state, player.pos, 1.0, detail_preset);
-    const prev_spawn_guard = state.bonus_spawn_guard;
-    state.bonus_spawn_guard = true;
-    defer state.bonus_spawn_guard = prev_spawn_guard;
-
-    const owner = owner_ref.OwnerRef.fromPlayer(@intCast(player.index));
-    for (creatures.entries, 0..) |creature, idx| {
-        if (!creature.active) continue;
-        const dx = narrowF32(creature.pos.x - player.pos.x);
-        const dy = narrowF32(creature.pos.y - player.pos.y);
-        if (@abs(dx) > 512.0 or @abs(dy) > 512.0) continue;
-        const distance = narrowF32(std.math.sqrt(narrowF32(dx * dx + dy * dy)));
-        const remaining = narrowF32(512.0 - distance);
-        if (!(remaining > 0.0)) continue;
-        const damage = narrowF32(remaining * 5.0);
-        _ = creatures.applyExplosionDamage(
-            state,
-            players,
-            bonuses,
-            terrain_fx,
-            idx,
-            damage,
-            .{},
-            owner,
-            dt,
-            world_size,
-            null,
-        );
-    }
-    state.sfx_queue.append(.explosion_large);
-    state.sfx_queue.append(.shockwave);
+    creatures.applyFinalRevengeOnPlayerDamage(
+        state,
+        players,
+        player_index,
+        health_before,
+        player1_health_before,
+        bonuses,
+        effects,
+        terrain_fx,
+        dt,
+        world_size,
+        detail_preset,
+    );
 }
 
 pub fn creatureFindInRadius(
@@ -797,9 +838,7 @@ pub fn creatureFindInRadius(
         const creature = creatures[idx];
         if (!creature.active) continue;
         if (!creature_lifecycle.isCollidable(creature.lifecycle_stage)) continue;
-        const dist = narrowF32(state_mod.Vec2.sub(creature.pos, pos).length() - radius);
-        const threshold = narrowF32(creature.size * 0.14285715 + 3.0);
-        if (threshold < dist) continue;
+        if (!runtime_helpers.withinNativeFindRadius(pos, creature.pos, radius, creature.size)) continue;
         return @intCast(idx);
     }
     return -1;
@@ -845,7 +884,7 @@ fn awardExperienceOnceFromReward(
 
     const before = player.experience;
     const before_f32 = narrowF32(@as(f32, @floatFromInt(before)));
-    const total_f32 = narrowF32(before_f32 + reward_value);
+    const total_f32 = native_math.pc24Add(before_f32, reward_value);
     const after: i32 = @intFromFloat(total_f32);
     player.experience = after;
     return after - before;
@@ -956,8 +995,14 @@ fn perkCanOffer(
     game_mode: GameModeId,
     player_count: i32,
 ) bool {
-    _ = state;
-    if (perk_id == .antiperk) return false;
+    if (game_mode == .quests and
+        state.hardcore and
+        state.quest_stage_major == 2 and
+        state.quest_stage_minor == 10 and
+        (perk_id == .poison_bullets or perk_id == .veins_of_poison or perk_id == .plaguebearer))
+    {
+        return false;
+    }
 
     const flags = perkFlags(perk_id);
     if (game_mode == .quests and !flags.contains(.quest_mode_allowed)) {
@@ -1025,18 +1070,6 @@ fn isDeathClockBlocked(perk_id: PerkId) bool {
         perk_id == PerkId.bandage;
 }
 
-fn setOnlyPerksAvailable(
-    state: *state_mod.GameplayState,
-    unlock_index: i32,
-    perk_ids: []const PerkId,
-) void {
-    state.perk_available = state_mod.PerkAvailability.initFill(false);
-    for (perk_ids) |perk_id| {
-        state.perk_available.set(perk_id, true);
-    }
-    state.perk_available_unlock_index = unlock_index;
-}
-
 test "perk menu open consumes rng and caches choices" {
     var state = state_mod.GameplayState.init(0x1234);
     var players = [_]state_mod.PlayerState{
@@ -1063,19 +1096,50 @@ test "quest unlock perk lookup exposes exact reward table rows" {
     try std.testing.expectEqual(@as(?PerkId, null), questUnlockPerkForIndex(50));
 }
 
-test "antiperk is never offerable" {
+test "antiperk is excluded by availability rather than offer predicate" {
     var state = state_mod.GameplayState.init(1);
     const player: state_mod.PlayerState = .{
         .index = 0,
         .pos = .{},
     };
-    try std.testing.expect(!perkCanOffer(
+    try std.testing.expect(perkCanOffer(
         &state,
         &player,
         PerkId.antiperk,
         .survival,
         1,
     ));
+    try std.testing.expect(!buildPerkAvailabilityForUnlockIndex(0).get(.antiperk));
+}
+
+test "hardcore quest 2-10 blocks poison perks" {
+    var state = state_mod.GameplayState.init(1);
+    const player: state_mod.PlayerState = .{
+        .index = 0,
+        .pos = .{},
+    };
+    state.hardcore = true;
+    state.quest_stage_major = 2;
+    state.quest_stage_minor = 10;
+
+    try std.testing.expect(!perkCanOffer(&state, &player, .poison_bullets, .quests, 1));
+    try std.testing.expect(!perkCanOffer(&state, &player, .veins_of_poison, .quests, 1));
+    try std.testing.expect(!perkCanOffer(&state, &player, .plaguebearer, .quests, 1));
+
+    state.quest_stage_minor = 9;
+    try std.testing.expect(perkCanOffer(&state, &player, .poison_bullets, .quests, 1));
+}
+
+test "perk availability rebuild clears stale state at the same unlock index" {
+    var state = state_mod.GameplayState.init(1);
+    state.perk_available_unlock_index = 0;
+    state.perk_available.set(PerkId.antiperk, true);
+    state.perk_available.set(PerkId.sharpshooter, false);
+
+    perksRebuildAvailable(&state, 0);
+
+    try std.testing.expect(!state.perk_available.get(PerkId.antiperk));
+    try std.testing.expect(state.perk_available.get(PerkId.sharpshooter));
 }
 
 test "perk pick decrements pending and refreshes choices" {
@@ -1151,23 +1215,12 @@ test "perk generate choices rejects pyromaniac when no player has flamethrower" 
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{}, .weapon = .{ .weapon_id = game_ids.WeaponId.pistol } },
     };
-    setOnlyPerksAvailable(&state, 0, &.{
-        PerkId.pyromaniac,
-        PerkId.sharpshooter,
-        PerkId.fastloader,
-        PerkId.lean_mean_exp_machine,
-        PerkId.long_distance_runner,
-        PerkId.pyrokinetic,
-        PerkId.instant_winner,
-        PerkId.grim_deal,
-    });
-
     const choices = perkSelectionCurrentChoices(
         &state,
         players[0..],
         .survival,
         1,
-        0,
+        49,
     );
     for (choices) |perk_id| {
         try std.testing.expect(perk_id != PerkId.pyromaniac);
@@ -1183,27 +1236,88 @@ test "perk generate choices blocks jinxed when death clock is active" {
         },
     };
     players[0].perk_counts.set(PerkId.death_clock, 1);
-    setOnlyPerksAvailable(&state, 0, &.{
-        PerkId.jinxed,
-        PerkId.sharpshooter,
-        PerkId.fastloader,
-        PerkId.lean_mean_exp_machine,
-        PerkId.long_distance_runner,
-        PerkId.pyrokinetic,
-        PerkId.instant_winner,
-        PerkId.pyromaniac,
-    });
-
     const choices = perkSelectionCurrentChoices(
         &state,
         players[0..],
         .survival,
         1,
-        0,
+        49,
     );
     for (choices) |perk_id| {
         try std.testing.expect(perk_id != PerkId.jinxed);
     }
+}
+
+test "jinxed preserve bugs excludes the last native creature slot" {
+    try std.testing.expectEqual(
+        @as(usize, 0x17f),
+        jinxedCreaturePoolMod(true, creatures_mod.max_creatures),
+    );
+    try std.testing.expectEqual(
+        creatures_mod.max_creatures,
+        jinxedCreaturePoolMod(false, creatures_mod.max_creatures),
+    );
+    try std.testing.expectEqual(
+        @as(usize, 16),
+        jinxedCreaturePoolMod(true, 16),
+    );
+}
+
+test "pyrokinetic and jinxed timers keep native 36hz proc frame" {
+    var pyro_state = state_mod.GameplayState.init(1);
+    var pyro_players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{},
+            .health = 100.0,
+            .aim = .{ .x = 100.0, .y = 200.0 },
+        },
+    };
+    pyro_players[0].perk_counts.set(PerkId.pyrokinetic, 1);
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.entries[0] = .{
+        .active = true,
+        .pos = .{ .x = 100.0, .y = 200.0 },
+        .hp = 100.0,
+        .collision_timer = 0.25,
+    };
+    var particles: particles_mod.ParticlePool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+
+    for (0..9) |_| {
+        applyPyrokineticEffects(
+            &pyro_state,
+            pyro_players[0..],
+            &creatures,
+            &particles,
+            &terrain_fx,
+            1.0 / 36.0,
+        );
+    }
+
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), creatures.entries[0].collision_timer);
+
+    var jinxed_state = state_mod.GameplayState.init(1);
+    jinxed_state.jinxed_timer = 0.25;
+    jinxed_state.bonuses.freeze = 1.0;
+    var jinxed_players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 50.0 },
+    };
+    jinxed_players[0].perk_counts.set(PerkId.jinxed, 1);
+    var empty_creatures: creatures_mod.CreaturePool = .{};
+    var jinxed_terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+
+    for (0..9) |_| {
+        applyJinxedEffects(
+            &jinxed_state,
+            jinxed_players[0..],
+            &empty_creatures,
+            &jinxed_terrain_fx,
+            1.0 / 36.0,
+        );
+    }
+
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), jinxed_state.jinxed_timer);
 }
 
 test "death clock apply and update mirror runtime hooks" {
@@ -1225,6 +1339,28 @@ test "death clock apply and update mirror runtime hooks" {
 
     updatePerkEffects(&state, players[0..], 1.0 / 60.0);
     try std.testing.expectApproxEqAbs(@as(f32, 99.944444445), players[0].health, 1e-5);
+}
+
+test "death clock reaches native zero crossing at 30hz" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{},
+            .health = 100.0,
+        },
+    };
+    players[0].perk_counts.set(PerkId.death_clock, 1);
+
+    for (0..900) |_| {
+        updatePerkEffects(&state, players[0..], 1.0 / 30.0);
+    }
+
+    try std.testing.expectEqual(@as(f32, -0.0008849054574966431), players[0].health);
+
+    updatePerkEffects(&state, players[0..], 1.0 / 30.0);
+
+    try std.testing.expectEqual(@as(f32, 0.0), players[0].health);
 }
 
 test "regeneration heals when rng allows" {
@@ -1476,6 +1612,16 @@ test "grim deal kills owner and boosts experience" {
     try std.testing.expectEqual(@as(i32, 7), players[1].experience);
 }
 
+test "grim deal uses native float scale before truncation" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .experience = 1_456_361 },
+    };
+
+    try applyPerk(&state, players[0..], PerkId.grim_deal);
+    try std.testing.expectEqual(@as(i32, 1_718_506), players[0].experience);
+}
+
 test "instant winner grants xp to owner only" {
     var state = state_mod.GameplayState.init(1);
     var players = [_]state_mod.PlayerState{
@@ -1563,6 +1709,16 @@ test "breathing room reduces player health and clears bonus spawn guard" {
     try std.testing.expect(!state.bonus_spawn_guard);
 }
 
+test "breathing room rounds each native float operation" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 1.0 },
+    };
+
+    try applyPerk(&state, players[0..], PerkId.breathing_room);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x3EAAAAAA))), players[0].health);
+}
+
 test "breathing room applies immediate creature lifecycle step when context is provided" {
     var state = state_mod.GameplayState.init(1);
     var players = [_]state_mod.PlayerState{
@@ -1579,7 +1735,7 @@ test "breathing room applies immediate creature lifecycle step when context is p
     try std.testing.expectApproxEqAbs(@as(f32, 3.3), creatures.entries[0].lifecycle_stage, 1e-6);
 }
 
-test "thick skinned clamps health floor at one" {
+test "thick skinned keeps two thirds without a health floor" {
     var state = state_mod.GameplayState.init(1);
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{}, .health = 90.0 },
@@ -1592,6 +1748,19 @@ test "thick skinned clamps health floor at one" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.8), players[1].health, 1e-4);
 }
 
+test "thick skinned rounds multiply before health subtraction" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = @bitCast(@as(u32, 0x41CC0E4A)) },
+    };
+
+    try applyPerk(&state, players[0..], PerkId.thick_skinned);
+    try std.testing.expectEqual(
+        @as(f32, @bitCast(@as(u32, 0x41880986))),
+        players[0].health,
+    );
+}
+
 test "plaguebearer apply marks all players active" {
     var state = state_mod.GameplayState.init(1);
     var players = [_]state_mod.PlayerState{
@@ -1602,6 +1771,19 @@ test "plaguebearer apply marks all players active" {
     try applyPerk(&state, players[0..], PerkId.plaguebearer);
     try std.testing.expect(players[0].plaguebearer_active);
     try std.testing.expect(players[1].plaguebearer_active);
+}
+
+test "plaguebearer preserve bugs marks only player zero active" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+    };
+
+    try applyPerk(&state, players[0..], PerkId.plaguebearer);
+    try std.testing.expect(players[0].plaguebearer_active);
+    try std.testing.expect(!players[1].plaguebearer_active);
 }
 
 test "lean mean exp machine ticks xp and ignores double experience multiplier" {
@@ -1642,6 +1824,35 @@ test "lean mean exp machine tick awards player zero only in multiplayer" {
     updatePerkEffects(&state, players[0..], 0.1);
     try std.testing.expectEqual(@as(i32, 20), players[0].experience);
     try std.testing.expectEqual(@as(i32, 0), players[1].experience);
+}
+
+test "perk effect timers keep native 36hz cadence" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{ .x = 10.0, .y = 20.0 },
+            .shield_timer = 0.25,
+            .fire_bullets_timer = 0.25,
+            .speed_bonus_timer = 0.25,
+        },
+    };
+    players[0].perk_counts.set(PerkId.lean_mean_exp_machine, 1);
+
+    for (0..9) |_| {
+        updatePerkEffects(&state, players[0..], 1.0 / 36.0);
+    }
+
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), state.lean_mean_exp_timer);
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), players[0].shield_timer);
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), players[0].fire_bullets_timer);
+    try std.testing.expectEqual(@as(f32, 1.1175870895385742e-08), players[0].speed_bonus_timer);
+    try std.testing.expectEqual(@as(i32, 0), players[0].experience);
+
+    updatePerkEffects(&state, players[0..], 1.0 / 36.0);
+
+    try std.testing.expectEqual(@as(f32, 0.25), state.lean_mean_exp_timer);
+    try std.testing.expectEqual(@as(i32, 10), players[0].experience);
 }
 
 test "lifeline 50-50 replay perk effect deactivates every other eligible creature slot" {
@@ -1720,7 +1931,7 @@ test "evil eyes targeting defaults to alive player slot" {
         },
     };
 
-    updateEvilEyesTargets(players[0..], creatures[0..]);
+    updateEvilEyesTargets(false, players[0..], creatures[0..]);
     try std.testing.expectEqual(@as(i32, -1), players[0].evil_eyes_target_creature);
     try std.testing.expectEqual(@as(i32, 0), players[1].evil_eyes_target_creature);
 }
@@ -1760,7 +1971,113 @@ test "evil eyes targeting assigns each alive owner" {
         },
     };
 
-    updateEvilEyesTargets(players[0..], creatures[0..]);
+    updateEvilEyesTargets(false, players[0..], creatures[0..]);
     try std.testing.expectEqual(@as(i32, 0), players[0].evil_eyes_target_creature);
     try std.testing.expectEqual(@as(i32, 1), players[1].evil_eyes_target_creature);
+}
+
+test "final revenge uses native blast arithmetic and explosion scale" {
+    var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 0.0 },
+    };
+    players[0].perk_counts.set(PerkId.final_revenge, 1);
+
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.entries[0] = .{
+        .active = true,
+        .pos = .{ .x = 155.231201171875, .y = 295.6527099609375 },
+        .hp = 10000.0,
+    };
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+
+    applyFinalRevengeOnDeathTransitionWithEffects(
+        &state,
+        players[0..],
+        0,
+        1.0,
+        1.0,
+        &creatures,
+        &bonuses,
+        &effects,
+        &terrain_fx,
+        0.0,
+        1024.0,
+        5,
+    );
+
+    try std.testing.expectEqual(@as(u32, 0x460e568a), @as(u32, @bitCast(creatures.entries[0].hp)));
+    try std.testing.expectEqual(@as(f32, 45.0), effects.entries[0].scale_step);
+    try std.testing.expect(!state.bonus_spawn_guard);
+}
+
+test "final revenge preserve mode uses player one source and strict lethal boundary" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 100.0 },
+        .{ .index = 1, .pos = .{}, .health = -1.0 },
+    };
+    players[0].perk_counts.set(PerkId.final_revenge, 1);
+    var creatures: creatures_mod.CreaturePool = .{};
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var effects: effects_mod.EffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+
+    applyFinalRevengeOnDeathTransitionWithEffects(
+        &state,
+        players[0..],
+        1,
+        1.0,
+        100.0,
+        &creatures,
+        &bonuses,
+        &effects,
+        &terrain_fx,
+        0.0,
+        1024.0,
+        5,
+    );
+    try std.testing.expectEqual(@as(usize, 2), state.sfx_queue.len);
+
+    var exact_zero_state = state_mod.GameplayState.init(1);
+    exact_zero_state.preserve_bugs = true;
+    players[1].health = 0.0;
+    applyFinalRevengeOnDeathTransitionWithEffects(
+        &exact_zero_state,
+        players[0..],
+        1,
+        1.0,
+        100.0,
+        &creatures,
+        &bonuses,
+        &effects,
+        &terrain_fx,
+        0.0,
+        1024.0,
+        5,
+    );
+    try std.testing.expectEqual(@as(usize, 0), exact_zero_state.sfx_queue.len);
+
+    var dead_player1_state = state_mod.GameplayState.init(1);
+    dead_player1_state.preserve_bugs = true;
+    players[1].health = -1.0;
+    applyFinalRevengeOnDeathTransitionWithEffects(
+        &dead_player1_state,
+        players[0..],
+        1,
+        1.0,
+        -1.0,
+        &creatures,
+        &bonuses,
+        &effects,
+        &terrain_fx,
+        0.0,
+        1024.0,
+        5,
+    );
+    try std.testing.expectEqual(@as(usize, 0), dead_player1_state.sfx_queue.len);
 }

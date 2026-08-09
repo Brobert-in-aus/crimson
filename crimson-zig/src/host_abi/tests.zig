@@ -273,7 +273,13 @@ test "recorded replay verifies with weapon usage history" {
     // caught the encoder being handed a slice of dead stack — a usage array made
     // of the encoder's own locals, which rerolled weapon drops and desynced
     // longer runs while every short gate stayed green.
-    const replay = try crimson_zig.replay_codec.parseReplay(std.testing.allocator, bytes[0..len]);
+    const payload = try crimson_zig.replay_codec.inflateZstdFilePayload(
+        std.testing.allocator,
+        bytes[0..len],
+        crimson_zig.replay_codec.max_replay_payload_bytes,
+    );
+    defer std.testing.allocator.free(payload);
+    const replay = try crimson_zig.replay_codec.parseReplay(std.testing.allocator, payload);
     defer replay.deinit(std.testing.allocator);
     const expected_usage = [_]u32{
         0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 2, 1, 0, 1, 0, 0, 2, 0, 0,
@@ -648,7 +654,7 @@ test "abi weapon usage counts: seeded via config, queryable" {
     try std.testing.expectEqual(@as(u32, 0), counts[1]); // spawn pistol does NOT count
 }
 
-test "abi verify passthrough matches native verifier byte for byte" {
+test "abi verify mirrors native verifier result" {
     const allocator = std.testing.allocator;
     for ([_][]const u8{ survival_fixture, rush_fixture }) |fixture| {
         const expected = try verify_native.runReplayVerifyBytesJson(
@@ -660,6 +666,23 @@ test "abi verify passthrough matches native verifier byte for byte" {
         defer expected.deinit(allocator);
 
         var out_len: u32 = 0;
+        if (expected.exit_code == 1 and expected.stdout.len == 0 and expected.stderr.len > 0) {
+            try std.testing.expectEqual(exports.err_generic, exports.crimson_host_verify_replay_json(
+                fixture.ptr,
+                @intCast(fixture.len),
+                null,
+                &out_len,
+            ));
+            var err_buf: [1024]u8 = undefined;
+            const err_len = exports.crimson_host_last_error(&err_buf, err_buf.len);
+            try std.testing.expect(err_len > 0);
+            try std.testing.expectEqualStrings(
+                std.mem.trimEnd(u8, expected.stderr, "\n"),
+                err_buf[0..@intCast(err_len)],
+            );
+            continue;
+        }
+
         try std.testing.expectEqual(exports.ok, exports.crimson_host_verify_replay_json(
             fixture.ptr,
             @intCast(fixture.len),

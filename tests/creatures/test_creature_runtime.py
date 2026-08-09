@@ -3,12 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+import pytest
+
 import crimson.creatures.runtime as creature_runtime
 from crimson.bonuses import BonusId
 from crimson.bonuses.pool import BonusEntry
 from crimson.creatures.runtime import CREATURE_LIFECYCLE_ALIVE, CreaturePool
 from crimson.creatures.spawn import (
     HAS_SPAWN_SLOT_FLAG,
+    NATIVE_SPAWN_SLOT_COUNT,
     RANDOM_HEADING_SENTINEL,
     CreatureAiMode,
     CreatureFlags,
@@ -22,11 +25,13 @@ from crimson.creatures.spawn import (
 from crimson.effects import FxQueue
 from crimson.game_modes import GameMode
 from crimson.gameplay import GameplayState
-from crimson.math_parity import f32
+from crimson.math_parity import f32, x87_pc24_add, x87_pc24_hypot, x87_pc24_mul, x87_pc24_sub
 from crimson.owner_ref import OwnerRef
 from crimson.perks import PerkId
+from crimson.projectiles.types import ProjectileTemplateId
 from crimson.rng_caller_static import RngCallerStatic
 from crimson.sim.state_types import PlayerState, WeaponSlot
+from crimson.weapon_runtime import prepare_weapon_availability
 from crimson.weapons import WeaponId
 from grim.geom import Vec2
 from grim.rand import Crand
@@ -101,6 +106,53 @@ def test_spawn_plan_remaps_spawn_slot_indices() -> None:
     assert pool.spawn_slots[new_slot_idx].owner_creature == owner_idx
 
 
+def test_spawn_plan_reuses_native_spawn_slot_pool_and_overwrites_last_on_exhaustion() -> None:
+    rng = Crand(0)
+    env = SpawnEnv(
+        terrain_width=1024.0,
+        terrain_height=1024.0,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+    plan = build_spawn_plan(SpawnId.ZOMBIE_BOSS_SPAWNER_00, Vec2(100.0, 200.0), 0.0, rng, env)
+    pool = CreaturePool()
+    empty_slot = SpawnSlotInit(
+        owner_creature=-1,
+        timer=9.0,
+        count=9,
+        limit=9,
+        interval=9.0,
+        child_template_id=SpawnId.ALIEN_RANDOM_1D,
+    )
+    pool.spawn_slots.append(empty_slot)
+
+    mapping, _ = pool.spawn_plan(plan)
+
+    assert len(pool.spawn_slots) == 1
+    assert pool.entries[mapping[0]].spawn_slot_index == 0
+    assert pool.spawn_slots[0].owner_creature == mapping[0]
+
+    pool = CreaturePool()
+    for owner_index in range(NATIVE_SPAWN_SLOT_COUNT):
+        pool.spawn_slots.append(
+            SpawnSlotInit(
+                owner_creature=owner_index,
+                timer=0.0,
+                count=0,
+                limit=1,
+                interval=1.0,
+                child_template_id=SpawnId.ALIEN_RANDOM_1D,
+            ),
+        )
+
+    mapping, _ = pool.spawn_plan(plan)
+
+    assert len(pool.spawn_slots) == NATIVE_SPAWN_SLOT_COUNT
+    assert pool.entries[mapping[0]].spawn_slot_index == NATIVE_SPAWN_SLOT_COUNT - 1
+    assert pool.spawn_slots[-1].owner_creature == mapping[0]
+
+
 def test_spawn_plan_materialization_spawns_burst_fx() -> None:
     rng = Crand(0)
     env = SpawnEnv(
@@ -125,6 +177,27 @@ def test_spawn_plan_materialization_spawns_burst_fx() -> None:
     assert all(int(entry.effect_id) == 0 for entry in active)
 
 
+def test_hardcore_runtime_spawn_clears_shared_quest_retry_count() -> None:
+    env = SpawnEnv(
+        terrain_width=1024.0,
+        terrain_height=1024.0,
+        demo_mode_active=True,
+        hardcore=True,
+        quest_fail_retry_count=4,
+    )
+    pool = CreaturePool(env=env)
+
+    pool.spawn_template(
+        SpawnId.ALIEN_HIDDEN_1_21,
+        Vec2(100.0, 200.0),
+        0.0,
+        Crand(0xBEEF),
+    )
+
+    assert env.quest_fail_retry_count == 0
+    assert pool.env is env
+
+
 def test_angle_approach_wraps_tau_boundary_like_native_capture() -> None:
     # Regression for Session 19 creature slot 32 drift at ticks 91->92.
     angle = -0.3199998736381531
@@ -142,6 +215,18 @@ def test_angle_approach_wraps_tau_boundary_like_native_capture() -> None:
         0.1,
     )
     assert_float_close(angle, -0.3199995458126068)
+
+
+def test_creature_movement_heading_subtraction_uses_native_f32_store() -> None:
+    delta = creature_runtime._movement_delta_from_heading_f32(
+        0.49451950192451477,
+        dt=0.03400000184774399,
+        move_scale=1.0,
+        move_speed=1.1699999570846558,
+    )
+
+    assert delta.x == 0.566398024559021
+    assert delta.y == -1.0504270792007446
 
 
 def test_spawn_slot_update_uses_random_heading_sentinel(mocker) -> None:
@@ -268,7 +353,7 @@ def test_spawn_slot_child_can_update_in_same_tick() -> None:
             count=0,
             limit=1,
             interval=1.0,
-            child_template_id=SpawnId.ALIEN_CONST_GREY_BRUTE_29,
+            child_template_id=SpawnId.ALIEN_BIG_GRAY_29,
         ),
     )
 
@@ -301,6 +386,28 @@ def test_non_spawner_update_does_not_clamp_offscreen_positions() -> None:
 
     assert_float_close(creature.pos.x, -64.0)
     assert_float_close(creature.pos.y, 1088.0)
+
+
+def test_attack_cooldown_is_stored_at_native_precision() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE))
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 50.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.pos = Vec2(128.0, 128.0)
+    creature.attack_cooldown = 1.0
+
+    options = make_creature_update_options(state=state, players=[player])
+    pool.update(0.1, options=options)
+    pool.update(0.1, options=options)
+
+    expected = f32(f32(1.0 - f32(0.1)) - f32(0.1))
+    assert creature.attack_cooldown == expected
 
 
 def test_non_spawner_movement_is_independent_of_creature_type_id() -> None:
@@ -454,6 +561,118 @@ def test_creature_contact_damage_targets_player1_when_player0_is_dead() -> None:
     ]
 
 
+def test_near_player_movement_rollback_is_stored_at_native_precision() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        health=100.0,
+        weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE),
+    )
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 50.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.move_speed = 1.3
+    creature.size = 45.0
+    creature.pos = Vec2(110.0, 100.0)
+    creature.target_player = 0
+
+    pool.update(0.1, options=make_creature_update_options(state=state, players=[player]))
+
+    assert creature.pos.x == f32(creature.pos.x)
+    assert creature.pos.y == f32(creature.pos.y)
+
+
+def test_contact_cooldown_addition_is_stored_at_native_precision() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        health=100.0,
+        weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE),
+    )
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 50.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.attack_cooldown = f32(0.077)
+
+    dt = f32(0.084)
+    pool.update(dt, options=make_creature_update_options(state=state, players=[player]))
+
+    expected = x87_pc24_add(x87_pc24_sub(f32(0.077), dt), f32(1.0))
+    assert creature.attack_cooldown == expected
+
+
+def test_creature_eat_gate_uses_stored_native_distance() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(),
+        health=100.0,
+        weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE),
+    )
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 50.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.ai_mode = CreatureAiMode.HOLD_TIMER
+    creature.orbit_radius = 1.0
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.contact_damage = 0.0
+    creature.pos = Vec2(19.999998092651367, 0.003907000180333853)
+    creature.vel = Vec2(1.0, 2.0)
+
+    assert Vec2.distance_sq(creature.pos, player.pos) < 20.0 * 20.0
+    assert x87_pc24_hypot(creature.pos.x, creature.pos.y) == 20.0
+
+    pool.update(0.01, options=make_creature_update_options(state=state, players=[player]))
+
+    assert creature.pos == Vec2(19.999998092651367, 0.003907000180333853)
+
+
+def test_creature_contact_gate_uses_stored_native_distance() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(),
+        health=100.0,
+        weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE),
+    )
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 50.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.ai_mode = CreatureAiMode.HOLD_TIMER
+    creature.orbit_radius = 1.0
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.contact_damage = 10.0
+    creature.pos = Vec2(29.999998092651367, 0.009569000452756882)
+
+    assert Vec2.distance_sq(creature.pos, player.pos) < 30.0 * 30.0
+    assert x87_pc24_hypot(creature.pos.x, creature.pos.y) == 30.0
+
+    result = pool.update(0.01, options=make_creature_update_options(state=state, players=[player]))
+
+    assert player.health == 100.0
+    assert creature.attack_cooldown == 0.0
+    assert result.sfx == ()
+
+
 def test_plague_kill_uses_exact_native_attack_sfx_caller() -> None:
     state = GameplayState()
     pool = CreaturePool()
@@ -493,13 +712,61 @@ def test_plague_kill_uses_exact_native_attack_sfx_caller() -> None:
     ]
 
 
+def test_plague_infection_timer_keeps_native_stored_cadence() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(index=0, pos=Vec2(500.0, 500.0))
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 100.0
+    creature.max_hp = 100.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.ai_mode = CreatureAiMode.HOLD_TIMER
+    creature.orbit_radius = 1.0
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.plague_infected = True
+    creature.collision_timer = 0.0
+
+    for _ in range(25):
+        pool.update(0.02, options=make_creature_update_options(state=state, players=[player]))
+
+    assert creature.hp == 70.0
+    assert creature.collision_timer == 0.49999991059303284
+
+
+def test_radioactive_timer_keeps_native_stored_cadence() -> None:
+    state = GameplayState()
+    pool = CreaturePool()
+    player = PlayerState(index=0, pos=Vec2(), health=100.0)
+    player.perk_counts[int(PerkId.RADIOACTIVE)] = 1
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 100.0
+    creature.max_hp = 100.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.ai_mode = CreatureAiMode.HOLD_TIMER
+    creature.orbit_radius = 1.0
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.pos = Vec2(90.0, 0.0)
+    creature.collision_timer = 0.0
+
+    for _ in range(41):
+        pool.update(1.0 / 120.0, options=make_creature_update_options(state=state, players=[player]))
+
+    assert creature.hp == 97.0
+    assert creature.collision_timer == 1.8440186977386475e-07
+
+
 def test_single_player_dead_player_uses_dead_target_position() -> None:
     state = GameplayState()
     pool = CreaturePool()
 
     dead_player = PlayerState(
         index=0,
-        pos=Vec2(900.0, 900.0),
+        pos=Vec2(660.0, 520.0),
         health=0.0,
         weapon=WeaponSlot(weapon_id=WeaponId.ASSAULT_RIFLE),
     )
@@ -510,13 +777,12 @@ def test_single_player_dead_player_uses_dead_target_position() -> None:
     creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
     creature.flags = CreatureFlags(0)
     creature.ai_mode = CreatureAiMode.ORBIT_PLAYER
-    creature.move_speed = 2.0
+    creature.move_speed = 0.0
     creature.size = 45.0
     creature.contact_damage = 0.0
     creature.target_player = 0
     creature.pos = Vec2(500.0, 500.0)
 
-    start_pos = creature.pos
     pool.update(
         1.0 / 60.0,
         options=make_creature_update_options(
@@ -528,8 +794,18 @@ def test_single_player_dead_player_uses_dead_target_position() -> None:
 
     expected_dead_target = Vec2(1024.0 * (27.0 / 64.0), 1024.0 * (27.0 / 64.0))
     assert creature.target_player == 1
-    assert Vec2.distance_sq(creature.target, expected_dead_target) < Vec2.distance_sq(creature.target, dead_player.pos)
-    assert creature.pos.y < start_pos.y
+    assert creature.target == Vec2(569.058349609375, expected_dead_target.y)
+
+    pool.update(
+        1.0 / 60.0,
+        options=make_creature_update_options(
+            state=state,
+            players=[dead_player],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    assert creature.target == Vec2(513.7415771484375, expected_dead_target.y)
 
 
 def test_single_player_dead_player_contact_path_keeps_dead_player_undamaged() -> None:
@@ -553,7 +829,7 @@ def test_single_player_dead_player_contact_path_keeps_dead_player_undamaged() ->
     creature.size = 45.0
     creature.contact_damage = 10.0
     creature.target_player = 0
-    creature.pos = Vec2(400.0, 400.0)
+    creature.pos = Vec2(432.0, 432.0)
 
     pool.update(
         1.0 / 60.0,
@@ -566,7 +842,8 @@ def test_single_player_dead_player_contact_path_keeps_dead_player_undamaged() ->
 
     expected_dead_target = Vec2(1024.0 * (27.0 / 64.0), 1024.0 * (27.0 / 64.0))
     assert creature.target_player == 1
-    assert Vec2.distance_sq(creature.target, expected_dead_target) < Vec2.distance_sq(creature.target, dead_player.pos)
+    assert creature.target == expected_dead_target
+    assert creature.attack_cooldown == 1.0
     assert_float_close(dead_player.health, 0.0)
 
 
@@ -611,6 +888,30 @@ def test_creature_retargets_to_closer_player1_in_two_player_mode() -> None:
     assert creature.target_player == 1
     assert_float_close(player0.health, 100.0)
     assert_float_close(player1.health, 90.0)
+
+
+def test_creature_retarget_keeps_current_player_when_native_distances_round_equal() -> None:
+    pool = CreaturePool()
+    pool._update_tick = 1
+    creature = pool.entries[0]
+    creature.target_player = 0
+    creature.pos = Vec2(0.0, 0.0)
+
+    players = [
+        PlayerState(index=0, pos=Vec2(f32(100.00000762939453), 100.0), health=100.0),
+        PlayerState(index=1, pos=Vec2(100.0, 100.0), health=100.0),
+    ]
+
+    current_exact_sq = Vec2.distance_sq(creature.pos, players[0].pos)
+    alternate_exact_sq = Vec2.distance_sq(creature.pos, players[1].pos)
+    assert alternate_exact_sq < current_exact_sq
+    assert x87_pc24_hypot(players[0].pos.x, players[0].pos.y) == x87_pc24_hypot(
+        players[1].pos.x,
+        players[1].pos.y,
+    )
+    resolution = pool._resolve_target_player(creature, players)
+    assert resolution.target_player == 0
+    assert creature.target_player == 0
 
 
 def test_creature_update_tracks_nearest_auto_target_for_target_player() -> None:
@@ -704,6 +1005,34 @@ def test_creature_update_auto_target_falls_back_when_previous_target_is_dead() -
     )
 
     assert player.auto_target == 1
+
+
+def test_creature_auto_target_keeps_current_slot_when_native_distances_round_equal() -> None:
+    pool = CreaturePool()
+    player = PlayerState(index=0, pos=Vec2(0.0, 0.0), health=100.0, auto_target=0)
+
+    current = pool.entries[0]
+    current.pos = Vec2(f32(100.00000762939453), 100.0)
+    candidate = pool.entries[1]
+    candidate.pos = Vec2(100.0, 100.0)
+
+    current_exact_sq = Vec2.distance_sq(player.pos, current.pos)
+    candidate_exact_sq = Vec2.distance_sq(player.pos, candidate.pos)
+    assert candidate_exact_sq < current_exact_sq
+    assert x87_pc24_hypot(current.pos.x, current.pos.y) == x87_pc24_hypot(
+        candidate.pos.x,
+        candidate.pos.y,
+    )
+
+    pool._update_player_auto_target(
+        players=[player],
+        preserve_bugs=True,
+        player_index=0,
+        creature_index=1,
+        creature=candidate,
+    )
+
+    assert player.auto_target == 0
 
 
 def test_creature_update_auto_target_skips_refresh_on_0x46_boundary_tick() -> None:
@@ -871,6 +1200,79 @@ def test_creature_update_coop_auto_target_preserve_bugs_keeps_player1_distance_b
     assert player1.auto_target == 0
 
 
+def test_creature_update_coop_auto_target_preserve_bugs_reuses_other_player_distance() -> None:
+    state = GameplayState(preserve_bugs=True)
+    pool = CreaturePool()
+    player0 = PlayerState(index=0, pos=Vec2(0.0, 0.0), health=100.0, auto_target=0)
+    player1 = PlayerState(index=1, pos=Vec2(100.0, 0.0), health=100.0)
+
+    current = pool.entries[0]
+    current.active = True
+    current.hp = 50.0
+    current.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    current.ai_mode = CreatureAiMode.ORBIT_PLAYER
+    current.move_speed = 0.0
+    current.size = 45.0
+    current.target_player = 0
+    current.pos = Vec2(50.0, 0.0)
+
+    candidate = pool.entries[1]
+    candidate.active = True
+    candidate.hp = 50.0
+    candidate.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    candidate.ai_mode = CreatureAiMode.ORBIT_PLAYER
+    candidate.move_speed = 0.0
+    candidate.size = 45.0
+    candidate.target_player = 0
+    candidate.pos = Vec2(10.0, 0.0)
+
+    pool.update(
+        1.0 / 60.0,
+        options=make_creature_update_options(
+            state=state,
+            players=[player0, player1],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    # The candidate is 10 units from player 1, but native reuses its 90-unit
+    # distance from player 2. It therefore does not replace the 50-unit slot.
+    assert player0.auto_target == 0
+
+
+def test_creature_update_preserve_bugs_updates_dead_auto_target_before_redirect() -> None:
+    state = GameplayState(preserve_bugs=True)
+    pool = CreaturePool()
+    player0 = PlayerState(index=0, pos=Vec2(0.0, 0.0), health=0.0, auto_target=0)
+    player1 = PlayerState(index=1, pos=Vec2(100.0, 0.0), health=100.0, auto_target=0)
+
+    stale_current = pool.entries[0]
+    stale_current.pos = Vec2(200.0, 0.0)
+
+    candidate = pool.entries[1]
+    candidate.active = True
+    candidate.hp = 50.0
+    candidate.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    candidate.ai_mode = CreatureAiMode.ORBIT_PLAYER
+    candidate.move_speed = 0.0
+    candidate.size = 45.0
+    candidate.target_player = 0
+    candidate.pos = Vec2(10.0, 0.0)
+
+    pool.update(
+        1.0 / 60.0,
+        options=make_creature_update_options(
+            state=state,
+            players=[player0, player1],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    assert player0.auto_target == 1
+    assert player1.auto_target == 0
+    assert candidate.target_player == 1
+
+
 def test_small_creature_dies_on_contact() -> None:
     state = GameplayState()
     pool = CreaturePool()
@@ -983,6 +1385,45 @@ def test_death_awards_xp_and_can_spawn_bonus() -> None:
     assert len(state.effects.iter_active()) == 16
     # Successful spawn-on-kill emits a 16-particle burst (4 RNG draws each).
     assert stub_rand._idx == 67
+
+
+@pytest.mark.parametrize(
+    ("preserve_bugs", "expected_experience"),
+    [
+        (True, (13, 0)),
+        (False, (0, 10)),
+    ],
+    ids=["native-player-zero", "corrected-last-hit-owner"],
+)
+def test_death_award_player_source_policy(
+    preserve_bugs: bool,
+    expected_experience: tuple[int, int],
+) -> None:
+    state = GameplayState(preserve_bugs=preserve_bugs)
+    state.bonus_spawn_guard = True
+    players = [
+        PlayerState(index=0, pos=Vec2()),
+        PlayerState(index=1, pos=Vec2()),
+    ]
+    players[0].perk_counts[int(PerkId.BLOODY_MESS_QUICK_LEARNER)] = 1
+    pool = CreaturePool()
+    pool.entries[0].active = True
+    pool.entries[0].hp = 0.0
+    pool.entries[0].reward_value = 10.0
+    pool.entries[0].last_hit_owner = OwnerRef.from_local_player(1)
+
+    death = pool.handle_death(
+        0,
+        state=state,
+        players=players,
+        rng=state.rng,
+        world_width=1024.0,
+        world_height=1024.0,
+        fx_queue=None,
+    )
+
+    assert death.xp_awarded == max(expected_experience)
+    assert (players[0].experience, players[1].experience) == expected_experience
 
 
 def test_bonus_on_death_does_not_synthesize_burst_from_mocked_try_spawn_result(mocker) -> None:
@@ -1329,7 +1770,7 @@ def test_spawn_inits_resets_native_spawn_state_fields() -> None:
                 origin_template_id=0x99,
                 pos=Vec2(100.0, 200.0),
                 heading=0.75,
-                phase_seed=10.0,
+                phase_seed=10,
                 type_id=CreatureTypeId.ALIEN,
                 health=40.0,
                 max_health=40.0,
@@ -1361,7 +1802,7 @@ def test_spawn_init_preserves_stale_link_index_for_implicit_ai7_timer() -> None:
             origin_template_id=0x75,
             pos=Vec2(1064.0, 392.0),
             heading=0.0,
-            phase_seed=0.0,
+            phase_seed=0,
             type_id=CreatureTypeId.SPIDER_SP1,
             flags=CreatureFlags.AI7_LINK_TIMER,
             ai_mode=0,
@@ -1379,6 +1820,53 @@ def test_spawn_init_preserves_stale_link_index_for_implicit_ai7_timer() -> None:
     assert pool.entries[idx].link_index == -1
 
 
+def test_spawn_init_preserves_stale_force_target_from_recycled_slot() -> None:
+    pool = CreaturePool()
+    pool.entries[0].force_target = 1
+
+    idx = pool.spawn_init(
+        CreatureInit(
+            origin_template_id=0x12,
+            pos=Vec2(100.0, 200.0),
+            heading=0.0,
+            phase_seed=0,
+            preserve_force_target=True,
+            type_id=CreatureTypeId.ALIEN,
+            health=40.0,
+            max_health=40.0,
+        ),
+    )
+
+    assert idx == 0
+    assert pool.entries[idx].force_target == 1
+
+
+def test_spawn_template_preserves_stale_ranged_orbit_fields() -> None:
+    pool = CreaturePool()
+    pool.entries[0].orbit_angle = 0.4
+    pool.entries[0].orbit_radius = float(ProjectileTemplateId.SPIDER_PLASMA)
+    env = SpawnEnv(
+        terrain_width=1024.0,
+        terrain_height=1024.0,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+
+    mapping, primary = pool.spawn_template(
+        SpawnId.SPIDER_SP2_RANGED_VARIANT_37,
+        Vec2(100.0, 200.0),
+        0.0,
+        Crand(0xBEEF),
+        env=env,
+    )
+
+    assert mapping == [0]
+    assert primary == 0
+    assert_float_close(pool.entries[0].orbit_angle, 0.4)
+    assert pool.entries[0].orbit_radius == float(ProjectileTemplateId.SPIDER_PLASMA)
+
+
 def test_spawn_init_preserves_stale_target_heading_from_recycled_slot() -> None:
     pool = CreaturePool()
     pool.entries[0].target_heading = 2.5632283687591553
@@ -1388,7 +1876,7 @@ def test_spawn_init_preserves_stale_target_heading_from_recycled_slot() -> None:
             origin_template_id=0x75,
             pos=Vec2(-40.0, 812.0),
             heading=0.53,
-            phase_seed=323.0,
+            phase_seed=323,
             type_id=CreatureTypeId.SPIDER_SP1,
             flags=CreatureFlags.AI7_LINK_TIMER,
             ai_mode=0,
@@ -1407,6 +1895,52 @@ def test_spawn_init_preserves_stale_target_heading_from_recycled_slot() -> None:
     assert_float_close(pool.entries[idx].target_heading, 2.5632283687591553)
 
 
+def test_spawn_init_preserves_stale_target_from_recycled_slot() -> None:
+    pool = CreaturePool()
+    pool.entries[0].target = Vec2(7.0, 8.0)
+
+    idx = pool.spawn_init(
+        CreatureInit(
+            origin_template_id=0x75,
+            pos=Vec2(-40.0, 272.0),
+            heading=3.07,
+            phase_seed=0,
+            type_id=CreatureTypeId.SPIDER_SP1,
+            flags=CreatureFlags.AI7_LINK_TIMER,
+            ai_mode=0,
+            health=61.0,
+            max_health=61.0,
+            move_speed=1.17,
+            reward_value=0.0,
+            size=56.0,
+            contact_damage=5.0,
+        ),
+    )
+
+    assert idx == 0
+    assert pool.entries[idx].target == Vec2(7.0, 8.0)
+
+
+def test_spawn_init_preserves_stale_target_offset_from_recycled_slot() -> None:
+    pool = CreaturePool()
+    pool.entries[0].target_offset = Vec2(-70.71066284179688, -70.710693359375)
+
+    idx = pool.spawn_init(
+        CreatureInit(
+            origin_template_id=-1,
+            pos=Vec2(100.0, 200.0),
+            heading=0.0,
+            phase_seed=0,
+            type_id=CreatureTypeId.ALIEN,
+            health=40.0,
+            max_health=40.0,
+        ),
+    )
+
+    assert idx == 0
+    assert pool.entries[idx].target_offset == Vec2(-70.71066284179688, -70.710693359375)
+
+
 def test_spawn_init_ai_timer_still_overrides_link_index() -> None:
     pool = CreaturePool()
     pool.entries[0].link_index = -1
@@ -1416,7 +1950,7 @@ def test_spawn_init_ai_timer_still_overrides_link_index() -> None:
             origin_template_id=0x38,
             pos=Vec2(1064.0, 392.0),
             heading=0.0,
-            phase_seed=0.0,
+            phase_seed=0,
             type_id=CreatureTypeId.SPIDER_SP1,
             flags=CreatureFlags.AI7_LINK_TIMER,
             ai_mode=0,
@@ -1514,7 +2048,7 @@ def test_tick_dead_ping_pong_corpse_emits_native_19_blood_burst_rng_budget() -> 
     assert len(state.effects.iter_active()) == 38
 
 
-def test_dead_self_damage_tick_flags_still_shrink_hitbox_before_dead_decay() -> None:
+def test_dead_self_damage_tick_flags_still_reduce_lifecycle_before_dead_decay() -> None:
     state = GameplayState()
     player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
     pool = CreaturePool()
@@ -1525,7 +2059,7 @@ def test_dead_self_damage_tick_flags_still_shrink_hitbox_before_dead_decay() -> 
     corpse.lifecycle_stage = 12.640003204345703
     corpse.flags = CreatureFlags.SELF_DAMAGE_TICK
 
-    # 38 ms frame from gameplay_diff_capture tick 3636.
+    # Exercise a non-round frame time at the native damage boundary.
     pool.update(
         0.03800000250339508,
         options=make_creature_update_options(
@@ -1537,6 +2071,79 @@ def test_dead_self_damage_tick_flags_still_shrink_hitbox_before_dead_decay() -> 
 
     # Native applies SELF_DAMAGE_TICK via creature_apply_damage even while hp<=0.
     assert_float_close(corpse.lifecycle_stage, f32(11.006003))
+
+
+def test_newly_dead_self_damage_tick_preserves_native_prologue_order() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    pool = CreaturePool()
+
+    corpse = pool.entries[42]
+    corpse.active = True
+    corpse.hp = -1.0
+    corpse.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    corpse.flags = CreatureFlags.SELF_DAMAGE_TICK
+
+    dt = f32(0.03800000250339508)
+    pool.update(
+        dt,
+        options=make_creature_update_options(
+            state=state,
+            players=[player],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    expected = x87_pc24_sub(
+        x87_pc24_sub(
+            x87_pc24_sub(CREATURE_LIFECYCLE_ALIVE, dt),
+            x87_pc24_mul(dt, 15.0),
+        ),
+        x87_pc24_mul(dt, 28.0),
+    )
+    assert corpse.lifecycle_stage == expected
+
+
+def test_live_self_damage_product_is_stored_at_native_precision() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 8.0
+    creature.max_hp = 8.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.flags = CreatureFlags.SELF_DAMAGE_TICK
+    creature.move_speed = 0.0
+    creature.size = 45.0
+    creature.pos = Vec2(128.0, 128.0)
+
+    dt = f32(0.09800000488758087)
+    pool.update(dt, options=make_creature_update_options(state=state, players=[player]))
+
+    expected = f32(8.0 - f32(dt * 60.0))
+    assert creature.hp == expected
+
+
+def test_tick_dead_death_slide_preserves_native_multiply_order() -> None:
+    pool = CreaturePool()
+    corpse = pool.entries[4]
+    corpse.active = True
+    corpse.hp = -42.440147399902344
+    corpse.lifecycle_stage = 15.908000946044922
+    corpse.heading = 6.330781936645508
+
+    pool._tick_dead(
+        corpse,
+        dt=0.05900000408291817,
+        world_width=1024.0,
+        world_height=1024.0,
+        fx_queue_rotated=None,
+    )
+
+    assert corpse.lifecycle_stage == 14.256000518798828
+    assert corpse.vel == Vec2(0.3601662218570709, -7.56136417388916)
 
 
 def test_spawn_allocation_uses_slot_still_active_until_post_render_cleanup() -> None:
@@ -1572,7 +2179,7 @@ def test_spawn_allocation_uses_slot_still_active_until_post_render_cleanup() -> 
             origin_template_id=-1,
             pos=Vec2(-40.0, 463.0),
             heading=0.0,
-            phase_seed=17.0,
+            phase_seed=17,
             type_id=CreatureTypeId.LIZARD,
             health=60.6925,
             max_health=60.6925,
@@ -1596,7 +2203,7 @@ def test_spawn_init_returns_none_when_pool_is_full() -> None:
             origin_template_id=0,
             pos=Vec2(12.0, 34.0),
             heading=0.0,
-            phase_seed=0.0,
+            phase_seed=0,
             type_id=CreatureTypeId.ZOMBIE,
             health=10.0,
             max_health=10.0,
@@ -1692,6 +2299,7 @@ def test_ai7_link_timer_still_ticks_for_evil_eyes_frozen_target() -> None:
 
 def test_ai7_link_timer_still_ticks_when_live_self_damage_kills_creature() -> None:
     state = GameplayState(rng=Crand(0xBEEF))
+    prepare_weapon_availability(state)
     player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
     pool = CreaturePool()
 
@@ -1719,6 +2327,97 @@ def test_ai7_link_timer_still_ticks_when_live_self_damage_kills_creature() -> No
     # Native runs AI7 timer update before live-branch kill handling.
     assert creature.link_index == 500
     assert creature.ai_mode == 7
+
+
+@pytest.mark.parametrize(
+    ("hp", "lifecycle_stage"),
+    [(1.0, CREATURE_LIFECYCLE_ALIVE), (-1.0, 10.0), (10.0, 10.0)],
+)
+def test_dead_creature_still_reevaluates_target_player(hp: float, lifecycle_stage: float) -> None:
+    state = GameplayState(rng=Crand(0xBEEF))
+    prepare_weapon_availability(state)
+    player0 = PlayerState(index=0, pos=Vec2(500.0, 100.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    player1 = PlayerState(index=1, pos=Vec2(110.0, 100.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = hp
+    creature.max_hp = max(1.0, hp)
+    creature.lifecycle_stage = lifecycle_stage
+    creature.flags = CreatureFlags.SELF_DAMAGE_TICK_STRONG if hp > 0.0 else CreatureFlags(0)
+    creature.target_player = 0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.move_speed = 0.0
+    creature.size = 45.0
+
+    pool.update(
+        0.1,
+        options=make_creature_update_options(
+            state=state,
+            players=[player0, player1],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    assert creature.lifecycle_stage != CREATURE_LIFECYCLE_ALIVE
+    assert creature.target_player == 1
+
+
+def test_fading_corpse_redirects_from_dead_single_player() -> None:
+    state = GameplayState(rng=Crand(0xBEEF))
+    player = PlayerState(index=0, pos=Vec2(500.0, 100.0), health=0.0)
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = -1.0
+    creature.lifecycle_stage = 10.0
+    creature.target_player = 0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.size = 45.0
+
+    pool.update(
+        0.1,
+        options=make_creature_update_options(
+            state=state,
+            players=[player],
+            rng=ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+        ),
+    )
+
+    assert creature.target_player == 1
+
+
+def test_dead_link_cleanup_finishes_current_live_interaction_tail() -> None:
+    state = GameplayState(rng=Crand(0xBEEF))
+    state.bonus_spawn_guard = True
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), health=100.0)
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 10.0
+    creature.max_hp = 10.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.ai_mode = CreatureAiMode.FOLLOW_LINK_TETHERED
+    creature.link_index = 1
+    creature.target_player = 0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.move_speed = 0.0
+    creature.size = 44.0
+    creature.contact_damage = 7.0
+
+    dead_link = pool.entries[1]
+    dead_link.active = False
+    dead_link.hp = 0.0
+
+    pool.update(0.1, options=make_creature_update_options(state=state, players=[player]))
+
+    assert creature.ai_mode == CreatureAiMode.ORBIT_PLAYER
+    assert_float_close(player.health, 93.0)
+    assert_float_close(creature.attack_cooldown, 1.0)
+    assert creature.lifecycle_stage > CREATURE_LIFECYCLE_ALIVE - 1.0
 
 
 def test_ai7_non_spawner_idle_keeps_previous_velocity() -> None:
@@ -1787,6 +2486,58 @@ def test_evil_eyes_target_skips_cooldown_and_keeps_velocity() -> None:
     assert stub_rand._idx == 0
 
 
+def test_evil_eyes_target_still_takes_plague_infection_tick() -> None:
+    state = GameplayState(rng=Crand(0xBEEF))
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    player.perk_counts[int(PerkId.EVIL_EYES)] = 1
+    player.evil_eyes_target_creature = 0
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 100.0
+    creature.max_hp = 100.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.plague_infected = True
+    creature.collision_timer = 0.1
+    creature.target_player = 0
+    creature.pos = Vec2(640.0, 512.0)
+    creature.move_speed = 1.0
+    creature.size = 50.0
+
+    before_pos = creature.pos
+    pool.update(0.2, options=make_creature_update_options(state=state, players=[player]))
+
+    assert_float_close(creature.hp, 85.0)
+    assert creature.collision_timer == f32(0.4)
+    assert creature.pos == before_pos
+
+
+def test_evil_eyes_target_still_reevaluates_target_player() -> None:
+    state = GameplayState(rng=Crand(0xBEEF))
+    player0 = PlayerState(index=0, pos=Vec2(500.0, 100.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    player0.perk_counts[int(PerkId.EVIL_EYES)] = 1
+    player0.evil_eyes_target_creature = 0
+    player1 = PlayerState(index=1, pos=Vec2(110.0, 100.0), weapon=WeaponSlot(weapon_id=WeaponId.PISTOL))
+    pool = CreaturePool()
+
+    creature = pool.entries[0]
+    creature.active = True
+    creature.hp = 100.0
+    creature.max_hp = 100.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    creature.target_player = 0
+    creature.pos = Vec2(100.0, 100.0)
+    creature.move_speed = 1.0
+    creature.size = 50.0
+
+    before_pos = creature.pos
+    pool.update(0.2, options=make_creature_update_options(state=state, players=[player0, player1]))
+
+    assert creature.target_player == 1
+    assert creature.pos == before_pos
+
+
 def test_evil_eyes_default_freezes_targets_from_multiple_players() -> None:
     state = GameplayState(rng=Crand(0xBEEF), preserve_bugs=False)
 
@@ -1845,6 +2596,13 @@ def test_evil_eyes_default_freezes_targets_from_multiple_players() -> None:
 def test_bonus_on_death_drop_emits_native_burst_and_clamps_corpse() -> None:
     state = GameplayState()
     state.bonus_spawn_guard = True
+    draw_callers: list[int | None] = []
+    rng = Crand(1)
+    rng.set_trace_sink(
+        lambda _before, _after, _value, caller: draw_callers.append(caller),
+        require_caller=True,
+    )
+    state.rng = rng
     pool = CreaturePool()
 
     creature = pool.entries[0]
@@ -1871,3 +2629,10 @@ def test_bonus_on_death_drop_emits_native_burst_and_clamps_corpse() -> None:
     assert len(state.effects.iter_active()) == 16
     entry = next(e for e in state.bonus_pool.entries if e.bonus_id == BonusId.POINTS)
     assert entry.pos == Vec2(32.0, 992.0)
+    assert len(draw_callers) == 64
+    assert draw_callers[:4] == [
+        RngCallerStatic.BONUS_SPAWN_AT_BURST_ROTATION,
+        RngCallerStatic.BONUS_SPAWN_AT_BURST_VEL_X,
+        RngCallerStatic.BONUS_SPAWN_AT_BURST_VEL_Y,
+        RngCallerStatic.BONUS_SPAWN_AT_BURST_SCALE_STEP,
+    ]

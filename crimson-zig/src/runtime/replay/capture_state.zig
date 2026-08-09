@@ -387,6 +387,7 @@ pub fn applyCaptureStateReset(
     }
 
     creatures.reset();
+    creatures.applyGameplayResetTargetPlayers(@intCast(players.len));
     creatures.hardcore = hardcore;
     creatures.demo_mode_active = demo_mode_active;
     creatures.quest_fail_retry_count = quest_fail_retry_count;
@@ -410,15 +411,13 @@ fn makeTestHeader(quest_level: []const u8, seed: u32) replay_codec.ReplayHeader 
         .seed = seed,
         .replay_format_version = replay_codec.replay_format_version,
         .quest_level = @constCast(quest_level),
-        .bootstrap_kind = @constCast("none"),
-        .bootstrap_seed = 0,
         .game_version = @constCast(""),
         .tick_rate = 60,
-        .difficulty_level = 0,
+        .quest_fail_retry_count = 0,
         .hardcore = false,
         .preserve_bugs = false,
         .detail_preset = 5,
-        .gore_disabled = 0,
+        .violence_disabled = 0,
         .world_size = 1024.0,
         .player_count = 1,
         .status = .{},
@@ -436,7 +435,11 @@ test "capture state reset clears transient pools and restores header fx toggle" 
 
     var players_storage: [state_mod.max_players]state_mod.PlayerState = undefined;
     const players = players_storage[0..1];
+    player_runtime.initializePlayers(players);
     player_runtime.resetPlayers(players, 1024.0, null);
+    players[0].weapon.reload_active = true;
+    players[0].hot_tempered_timer = 1.25;
+    players[0].fire_bullets_timer = 7.25;
 
     var creatures: creatures_mod.CreaturePool = .{};
     creatures.entries[0].active = true;
@@ -499,6 +502,9 @@ test "capture state reset clears transient pools and restores header fx toggle" 
     try std.testing.expect(!secondary_projectiles.entries[0].active);
     try std.testing.expectEqual(game_ids.BonusId.unused, bonuses.entries[0].bonus_id);
     try std.testing.expect(creatures.capture_spawn_events_authoritative);
+    try std.testing.expect(players[0].weapon.reload_active);
+    try std.testing.expectEqual(@as(f32, 1.25), players[0].hot_tempered_timer);
+    try std.testing.expectEqual(@as(f32, 7.25), players[0].fire_bullets_timer);
 }
 
 test "capture creature spawn event backfills ai7 rollover rng draw for spawned rows" {

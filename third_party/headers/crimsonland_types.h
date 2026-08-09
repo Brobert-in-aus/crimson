@@ -2,6 +2,36 @@
 #ifndef CRIMSONLAND_TYPES_H
 #define CRIMSONLAND_TYPES_H
 
+typedef struct IDirectSoundBuffer *LPDIRECTSOUNDBUFFER;
+
+// VC6 CRT data layouts recovered from the executable's bundled runtime.
+typedef struct crt_dosmaperr_entry_t {
+    unsigned int os_error;
+    int crt_errno;
+} crt_dosmaperr_entry_t;
+
+typedef struct crt_ioinfo_t {
+    long os_handle;
+    unsigned char os_file_flags;
+    char pipe_character;
+    unsigned short reserved_0x06;
+    int lock_initialized;
+    unsigned char critical_section[24];
+} crt_ioinfo_t;
+
+typedef struct crt_runtime_error_entry_t {
+    int code;
+    char *message;
+} crt_runtime_error_entry_t;
+
+typedef struct crt_codepage_info_t {
+    unsigned int code_page;
+    unsigned char lead_bytes[12];
+    unsigned char byte_class_ranges[32];
+} crt_codepage_info_t;
+
+typedef void (*crt_onexit_fn_t)(void);
+
 typedef struct vec2f_t {
     float x;
     float y;
@@ -11,6 +41,11 @@ typedef struct uv2f_t {
     float u;
     float v;
 } uv2f_t;
+
+typedef struct cvar_float_t {
+    unsigned char _pad0[0x0c];
+    float value;
+} cvar_float_t;
 
 typedef enum weapon_id_t {
     WEAPON_ID_NONE = 0x00,
@@ -47,22 +82,22 @@ typedef enum weapon_id_t {
     WEAPON_ID_ION_SHOTGUN = 0x1F,
     WEAPON_ID_FLAMEBURST = 0x20,
     WEAPON_ID_RAYGUN = 0x21,
-    WEAPON_ID_UNKNOWN_34 = 0x22,
-    WEAPON_ID_UNKNOWN_35 = 0x23,
-    WEAPON_ID_UNKNOWN_36 = 0x24,
-    WEAPON_ID_UNKNOWN_37 = 0x25,
-    WEAPON_ID_UNKNOWN_38 = 0x26,
-    WEAPON_ID_UNKNOWN_39 = 0x27,
-    WEAPON_ID_UNKNOWN_40 = 0x28,
+    WEAPON_ID_UNUSED_34 = 0x22,
+    WEAPON_ID_UNUSED_35 = 0x23,
+    WEAPON_ID_UNUSED_36 = 0x24,
+    WEAPON_ID_UNUSED_37 = 0x25,
+    WEAPON_ID_UNUSED_38 = 0x26,
+    WEAPON_ID_UNUSED_39 = 0x27,
+    WEAPON_ID_UNUSED_40 = 0x28,
     WEAPON_ID_PLAGUE_SPREADER_GUN = 0x29,
     WEAPON_ID_BUBBLEGUN = 0x2A,
     WEAPON_ID_RAINBOW_GUN = 0x2B,
     WEAPON_ID_GRIM_WEAPON = 0x2C,
     WEAPON_ID_FIRE_BULLETS = 0x2D,
-    WEAPON_ID_UNKNOWN_46 = 0x2E,
-    WEAPON_ID_UNKNOWN_47 = 0x2F,
-    WEAPON_ID_UNKNOWN_48 = 0x30,
-    WEAPON_ID_UNKNOWN_49 = 0x31,
+    WEAPON_ID_UNUSED_46 = 0x2E,
+    WEAPON_ID_UNUSED_47 = 0x2F,
+    WEAPON_ID_UNUSED_48 = 0x30,
+    WEAPON_ID_UNUSED_49 = 0x31,
     WEAPON_ID_TRANSMUTATOR = 0x32,
     WEAPON_ID_BLASTER_R_300 = 0x33,
     WEAPON_ID_LIGHTNING_RIFLE = 0x34,
@@ -90,6 +125,32 @@ typedef struct weapon_stats_t {
     unsigned char _pad3[4];
 } weapon_stats_t;
 
+// Native construction/storage view beginning four bytes before weapon_table.
+// Each 0x7c-byte row owns its ammo class followed by the public weapon fields;
+// the shifted weapon_stats_t consumer view sees the next row's ammo class as
+// its four-byte trailing pad.
+typedef struct weapon_storage_entry_t {
+    int ammo_class;
+    char name[0x40];
+    unsigned char unlocked;
+    unsigned char _pad0[3];
+    int clip_size;
+    float shot_cooldown;
+    float reload_time;
+    float spread_heat;
+    unsigned char _pad1[4];
+    int shot_sfx_base_id;
+    int shot_sfx_variant_count;
+    int reload_sfx_id;
+    int hud_icon_id;
+    int flags;
+    float travel_budget;
+    float damage_scale;
+    int pellet_count;
+} weapon_storage_entry_t;
+
+typedef weapon_storage_entry_t weapon_storage_table_t[0x40];
+
 typedef struct audio_entry_t {
     unsigned short format_tag;
     unsigned short channels;
@@ -103,7 +164,7 @@ typedef struct audio_entry_t {
     unsigned int pcm_bytes;
     unsigned int stream_cursor;
     float volume;
-    void *buffers[16];
+    LPDIRECTSOUNDBUFFER buffers[16];
     unsigned char buffer_in_use[16];
     void *vorbis_stream;
     unsigned int stream_fill_bytes;
@@ -204,34 +265,80 @@ typedef struct player_input_t {
     int axis_move_y;
 } player_input_t;
 
+// Per-player 0x40-byte persisted binding row.  The four analog axes are
+// stored Y/X in configuration and copied into the runtime X/Y input layout.
+typedef struct player_input_config_t {
+    int move_key_forward;
+    int move_key_backward;
+    int turn_key_left;
+    int turn_key_right;
+    int fire_key;
+    int key_reserved_0;
+    int key_reserved_1;
+    int aim_key_left;
+    int aim_key_right;
+    int axis_aim_y;
+    int axis_aim_x;
+    int axis_move_y;
+    int axis_move_x;
+    int reserved[3];
+} player_input_config_t;
+
 typedef struct player_state_t {
+    unsigned char entity_active;
+    unsigned char _pad_entity_active[3];
+    int entity_phase_seed;
+    unsigned char entity_state_flag;
+    unsigned char plaguebearer_active;
+    unsigned char _pad_entity_flags[2];
+    float entity_collision_timer;
     float death_timer;
-    float pos_x;
-    float pos_y;
-    float move_dx;
-    float move_dy;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    union {
+        struct {
+            float move_dx;
+            float move_dy;
+        };
+        vec2f_t movement;
+    };
     float health;
     float max_health;
     float heading;
     float target_heading;
     float size;
-    unsigned char _pad0[0x18];
-    float aim_x;
-    float aim_y;
+    float entity_hit_flash_timer;
+    unsigned char _pad0[0x14];
+    union {
+        struct {
+            float aim_x;
+            float aim_y;
+        };
+        vec2f_t aim;
+    };
     unsigned char _pad1[4];
     float speed_multiplier;
     int weapon_reset_latch;
     unsigned char _pad2[4];
     float move_speed;
-    unsigned char _pad3[0x28];
+    unsigned char _pad3[8];
+    int entity_reserved_74;
+    int entity_link_index;
+    unsigned char _pad_entity_link[0x14];
+    int entity_ai_mode;
     float move_phase;
-    unsigned char _pad4[4];
+    float player_reserved_98;
     float hot_tempered_timer;
     float man_bomb_timer;
     float living_fortress_timer;
     float fire_cough_timer;
     int experience;
-    unsigned char _pad5[4];
+    int reset_reserved_b0;
     int level;
     int perk_counts[0x80];
     float spread_heat;
@@ -252,7 +359,7 @@ typedef struct player_state_t {
     float alt_reload_timer;
     float alt_shot_cooldown;
     float alt_reload_timer_max;
-    unsigned char _pad7[4];
+    int reset_reserved_zero;
     float muzzle_flash_alpha;
     float aim_heading;
     float turn_speed;
@@ -263,18 +370,28 @@ typedef struct player_state_t {
     float shield_timer;
     float fire_bullets_timer;
     int auto_target;
-    float move_target_x;
-    float move_target_y;
+    union {
+        struct {
+            float move_target_x;
+            float move_target_y;
+        };
+        vec2f_t move_target;
+    };
     player_input_t input;
-    unsigned char _pad8[0x10];
 } player_state_t;
+
+typedef struct creature_bonus_args_t {
+    short bonus_id;
+    short duration_override;
+} creature_bonus_args_t;
 
 typedef struct creature_type_t {
     int texture_handle;
     int sfx_bank_a[4];
     int sfx_bank_b[2];
     unsigned char _pad0[4];
-    float field_0x20;
+    // Initialized to 1.0 for the five animated creature types, but never read.
+    float unused_value;
     unsigned char _pad1[0x10];
     float anim_rate;
     int base_frame;
@@ -320,15 +437,116 @@ typedef union creature_orbit_radius_t {
     unsigned int raw_u32;
 } creature_orbit_radius_t;
 
+typedef struct effect_color_t {
+    float r;
+    float g;
+    float b;
+    float a;
+} effect_color_t;
+
 typedef struct creature_t {
     unsigned char active;
     unsigned char _pad0[3];
-    float phase_seed;
+    int phase_seed;
     unsigned char state_flag;
     unsigned char collision_flag;
     unsigned char _pad1[2];
     float collision_timer;
-    float hitbox_size;
+    float lifecycle_stage;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    union {
+        struct {
+            float vel_x;
+            float vel_y;
+        };
+        vec2f_t velocity;
+    };
+    float health;
+    float max_health;
+    float heading;
+    float target_heading;
+    float size;
+    float hit_flash_timer;
+    union {
+        struct {
+            float tint_r;
+            float tint_g;
+            float tint_b;
+            float tint_a;
+        };
+        effect_color_t color;
+    };
+    unsigned char force_target;
+    unsigned char _pad_force_target[3];
+    union {
+        struct {
+            float target_x;
+            float target_y;
+        };
+        vec2f_t target_position;
+    };
+    float contact_damage;
+    float move_speed;
+    float attack_cooldown;
+    float reward_value;
+    unsigned char _pad2[4];
+    int type_id;
+    signed char target_player;
+    unsigned char _pad_target_player[3];
+    int entity_reserved_74;
+    union {
+        int link_index;
+        creature_bonus_args_t bonus_args;
+    };
+    union {
+        struct {
+            float target_offset_x;
+            float target_offset_y;
+        };
+        vec2f_t target_offset;
+    };
+    float orbit_angle;
+    creature_orbit_radius_t orbit_radius;
+    int flags;
+    int ai_mode;
+    float anim_phase;
+} creature_t;
+
+// Binary Ninja presentation view for tutorial bonus carriers. The tutorial
+// reuses the creature `link_index` slot as two signed 16-bit bonus arguments;
+// keeping this view on its tutorial-specific global lets HLIL name that overlay
+// without misrepresenting ordinary creature link-index accesses.
+typedef struct tutorial_bonus_carrier_binja_t {
+    unsigned char active;
+    unsigned char _reserved_01[0x23];
+    float health;
+    unsigned char _reserved_28[0x50];
+    creature_bonus_args_t bonus_args;
+    unsigned char _reserved_7c[0x10];
+    int flags;
+    int ai_mode;
+    float anim_phase;
+} tutorial_bonus_carrier_binja_t;
+
+// Binary Ninja presentation view for the same 0x98-byte record. The matching
+// view above keeps aggregate aliases used by recovered source, while this flat
+// view prevents array/interior-pointer analysis from degrading ordinary
+// position, velocity, color, and target accesses to `__offset(...)`.
+typedef struct creature_binja_t {
+    unsigned char active;
+    unsigned char _pad0[3];
+    int phase_seed;
+    unsigned char state_flag;
+    unsigned char collision_flag;
+    unsigned char _pad1[2];
+    float collision_timer;
+    float lifecycle_stage;
     float pos_x;
     float pos_y;
     float vel_x;
@@ -343,7 +561,8 @@ typedef struct creature_t {
     float tint_g;
     float tint_b;
     float tint_a;
-    int force_target;
+    unsigned char force_target;
+    unsigned char _pad_force_target[3];
     float target_x;
     float target_y;
     float contact_damage;
@@ -352,8 +571,9 @@ typedef struct creature_t {
     float reward_value;
     unsigned char _pad2[4];
     int type_id;
-    int target_player;
-    unsigned char _pad3[4];
+    signed char target_player;
+    unsigned char _pad_target_player[3];
+    int entity_reserved_74;
     int link_index;
     float target_offset_x;
     float target_offset_y;
@@ -362,7 +582,86 @@ typedef struct creature_t {
     int flags;
     int ai_mode;
     float anim_phase;
-} creature_t;
+} creature_binja_t;
+
+// Binary Ninja induction view anchored at creature_t::lifecycle_stage. The
+// trailing prefix makes sizeof(view) equal the 0x98-byte creature stride, so a
+// native field cursor advances by one typed element while forward accesses
+// retain their recovered field names.
+typedef struct creature_lifecycle_stride_binja_t {
+    float lifecycle_stage;
+    float pos_x;
+    float pos_y;
+    float vel_x;
+    float vel_y;
+    float health;
+    float max_health;
+    float heading;
+    float target_heading;
+    float size;
+    float hit_flash_timer;
+    float tint_r;
+    float tint_g;
+    float tint_b;
+    float tint_a;
+    unsigned char force_target;
+    unsigned char _pad_force_target[3];
+    float target_x;
+    float target_y;
+    float contact_damage;
+    float move_speed;
+    float attack_cooldown;
+    float reward_value;
+    unsigned char _pad2[4];
+    int type_id;
+    signed char target_player;
+    unsigned char _pad_target_player[3];
+    int entity_reserved_74;
+    int link_index;
+    float target_offset_x;
+    float target_offset_y;
+    float orbit_angle;
+    creature_orbit_radius_t orbit_radius;
+    int flags;
+    int ai_mode;
+    float anim_phase;
+    unsigned char _next_record_prefix[0x10];
+} creature_lifecycle_stride_binja_t;
+
+// Equivalent 0x98-byte induction view for loops anchored at max_health.
+typedef struct creature_max_health_stride_binja_t {
+    float max_health;
+    float heading;
+    float target_heading;
+    float size;
+    float hit_flash_timer;
+    float tint_r;
+    float tint_g;
+    float tint_b;
+    float tint_a;
+    unsigned char force_target;
+    unsigned char _pad_force_target[3];
+    float target_x;
+    float target_y;
+    float contact_damage;
+    float move_speed;
+    float attack_cooldown;
+    float reward_value;
+    unsigned char _pad2[4];
+    int type_id;
+    signed char target_player;
+    unsigned char _pad_target_player[3];
+    int entity_reserved_74;
+    int link_index;
+    float target_offset_x;
+    float target_offset_y;
+    float orbit_angle;
+    creature_orbit_radius_t orbit_radius;
+    int flags;
+    int ai_mode;
+    float anim_phase;
+    unsigned char _next_record_prefix[0x28];
+} creature_max_health_stride_binja_t;
 
 typedef struct creature_spawn_slot_t {
     creature_t *owner;
@@ -390,29 +689,145 @@ typedef struct projectile_vel_y_block_t {
 
 typedef struct projectile_tail_t {
     float origin_y;
-    float vel_x;
-    projectile_vel_y_block_t vy;
+    union {
+        struct {
+            float vel_x;
+            projectile_vel_y_block_t vy;
+        };
+        vec2f_t velocity;
+    };
 } projectile_tail_t;
 
 // Similar to projectile_tail_t, but anchored at `pos_y` so loops that take
 // `&projectile_t.pos_y` get a mixed-type view (type_id as enum/int, not float).
 typedef struct projectile_pos_y_block_t {
     float pos_y;
-    float origin_x;
-    projectile_tail_t tail;
+    union {
+        struct {
+            float origin_x;
+            projectile_tail_t tail;
+        };
+        vec2f_t origin;
+    };
 } projectile_pos_y_block_t;
 
 typedef struct projectile_t {
     unsigned char active;
     unsigned char _pad0[3];
     float angle;
-    float pos_x;
-    projectile_pos_y_block_t pos;
+    union {
+        // The anonymous nested view preserves native interior-pointer codegen.
+        // Direct indexed gameplay code uses `fields` for the same flat record.
+        struct {
+            float pos_x;
+            projectile_pos_y_block_t pos;
+        };
+        struct {
+            float pos_x;
+            float pos_y;
+            union {
+                struct {
+                    float origin_x;
+                    float origin_y;
+                };
+                vec2f_t origin;
+            };
+            union {
+                struct {
+                    float vel_x;
+                    float vel_y;
+                };
+                vec2f_t velocity;
+            };
+            projectile_type_id_t type_id;
+            float life_timer;
+            float reserved;
+            float speed_scale;
+            float damage_pool;
+            float hit_radius;
+            float travel_budget;
+            int owner_id;
+        } fields;
+        vec2f_t position;
+    };
 } projectile_t;
 
 typedef projectile_t projectile_pool_t[0x60];
 
+// Binary Ninja presentation view for the same 0x40-byte record. The matching
+// view above preserves native interior-pointer codegen; this flat view lets
+// ordinary decompilation name every field without `pos.tail.vy` paths.
+typedef struct projectile_binja_t {
+    unsigned char active;
+    unsigned char _pad0[3];
+    float angle;
+    float pos_x;
+    float pos_y;
+    float origin_x;
+    float origin_y;
+    float vel_x;
+    float vel_y;
+    projectile_type_id_t type_id;
+    float life_timer;
+    float reserved;
+    float speed_scale;
+    float damage_pool;
+    float hit_radius;
+    float travel_budget;
+    int owner_id;
+} projectile_binja_t;
+
 typedef struct particle_t {
+    unsigned char active;
+    unsigned char render_flag;
+    unsigned char _pad0[2];
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    union {
+        struct {
+            float vel_x;
+            float vel_y;
+        };
+        vec2f_t velocity;
+    };
+    union {
+        struct {
+            float scale_x;
+            float scale_y;
+            float scale_z;
+            float age;
+        };
+        struct {
+            float color_r;
+            float color_g;
+            float color_b;
+            float color_a;
+        };
+        effect_color_t color;
+    };
+    union {
+        float intensity;
+        float progress;
+    };
+    float angle;
+    union {
+        float spin;
+        float rotation;
+    };
+    unsigned char style_id;
+    unsigned char _pad1[3];
+    int target_id;
+} particle_t;
+
+// Binary Ninja presentation view for the same 0x38-byte record. Particle
+// rendering deliberately overlays scale/age with RGBA in matching source; the
+// flat initializer-oriented view keeps pool induction accesses named.
+typedef struct particle_binja_t {
     unsigned char active;
     unsigned char render_flag;
     unsigned char _pad0[2];
@@ -427,9 +842,10 @@ typedef struct particle_t {
     float intensity;
     float angle;
     float spin;
-    int style_id;
+    unsigned char style_id;
+    unsigned char _pad1[3];
     int target_id;
-} particle_t;
+} particle_binja_t;
 
 // Canonical secondary projectile type ids used by `secondary_projectile_t.type_id`.
 typedef enum secondary_projectile_type_id_t {
@@ -446,12 +862,17 @@ typedef struct secondary_projectile_vel_y_block_t {
     secondary_projectile_type_id_t type_id;
     float trail_timer;
     int target_id;
-    unsigned int reserved_0x28;
+    unsigned int unused_0x28;
 } secondary_projectile_vel_y_block_t;
 
 typedef struct secondary_projectile_vel_x_block_t {
-    float vel_x;
-    secondary_projectile_vel_y_block_t vy;
+    union {
+        struct {
+            float vel_x;
+            secondary_projectile_vel_y_block_t vy;
+        };
+        vec2f_t velocity;
+    };
 } secondary_projectile_vel_x_block_t;
 
 typedef struct secondary_projectile_pos_y_block_t {
@@ -464,17 +885,60 @@ typedef struct secondary_projectile_t {
     unsigned char _pad0[3];
     float angle;
     float life_timer;
-    float pos_x;
-    // Field grouping used to steer the decompiler away from float-bitpattern type ids.
-    //
-    // Native code frequently takes the address of `pos_y` / `vel_y` and then
-    // indexes into subsequent mixed-type fields.
-    secondary_projectile_pos_y_block_t pos;
+    union {
+        struct {
+            float pos_x;
+            // Field grouping used to steer the decompiler away from
+            // float-bitpattern type ids. Native code frequently takes the
+            // address of `pos_y` / `vel_y` and then indexes into subsequent
+            // mixed-type fields.
+            secondary_projectile_pos_y_block_t pos;
+        };
+        struct {
+            float pos_x;
+            float pos_y;
+            union {
+                struct {
+                    float vel_x;
+                    float vel_y;
+                };
+                vec2f_t velocity;
+            };
+            secondary_projectile_type_id_t type_id;
+            float trail_timer;
+            int target_id;
+            unsigned int unused_0x28;
+        } fields;
+        vec2f_t position;
+    };
 } secondary_projectile_t;
 
 typedef secondary_projectile_t secondary_projectile_pool_t[0x40];
 
 typedef struct fx_queue_entry_t {
+    int effect_id;
+    float rotation;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    union {
+        struct {
+            float height;
+            float width;
+        };
+        vec2f_t extent;
+    };
+    effect_color_t color;
+} fx_queue_entry_t;
+
+// Binary Ninja presentation view for the same 0x28-byte queue entry. The
+// compiler-facing type keeps vector/color aggregate assignments; this view
+// names each field after the optimizer carries an interior induction cursor.
+typedef struct fx_queue_entry_binja_t {
     int effect_id;
     float rotation;
     float pos_x;
@@ -485,19 +949,35 @@ typedef struct fx_queue_entry_t {
     float color_g;
     float color_b;
     float color_a;
-} fx_queue_entry_t;
+} fx_queue_entry_binja_t;
 
 typedef struct sprite_effect_t {
-    int active;
-    float color_r;
-    float color_g;
-    float color_b;
-    float color_a;
+    unsigned char active;
+    unsigned char _pad0[3];
+    union {
+        struct {
+            float color_r;
+            float color_g;
+            float color_b;
+            float color_a;
+        };
+        effect_color_t color;
+    };
     float rotation;
-    float pos_x;
-    float pos_y;
-    float vel_x;
-    float vel_y;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    union {
+        struct {
+            float vel_x;
+            float vel_y;
+        };
+        vec2f_t velocity;
+    };
     float scale;
 } sprite_effect_t;
 
@@ -506,81 +986,150 @@ typedef struct effect_id_entry_t {
     int frame;
 } effect_id_entry_t;
 
+typedef struct effect_vec2_t {
+    float x;
+    float y;
+} effect_vec2_t;
+
+typedef struct effect_vertex_t {
+    effect_vec2_t pos;
+    effect_vec2_t zrhw;
+    unsigned int color;
+    effect_vec2_t tex;
+} effect_vertex_t;
+
+// Interior cursor emitted by VC6 when initializing effect vertices. The
+// cursor starts at one vertex's zrhw and advances by the full 0x1c-byte vertex
+// stride, so its tail overlaps the next vertex's position.
+typedef struct effect_vertex_zrhw_cursor_t {
+    effect_vec2_t zrhw;
+    unsigned int color;
+    effect_vec2_t tex;
+    effect_vec2_t next_pos;
+} effect_vertex_zrhw_cursor_t;
+
 typedef struct effect_entry_t {
-    float pos_x;
-    float pos_y;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
     unsigned char effect_id;
     unsigned char _pad0[3];
-    float vel_x;
-    float vel_y;
+    union {
+        struct {
+            float vel_x;
+            float vel_y;
+        };
+        vec2f_t velocity;
+    };
     float rotation;
     float scale;
-    float half_width;
-    float half_height;
+    union {
+        struct {
+            float half_width;
+            float half_height;
+        };
+        vec2f_t half_extent;
+    };
     float age;
     float lifetime;
     int flags;
-    float color_r;
-    float color_g;
-    float color_b;
-    float color_a;
+    effect_color_t color;
     float rotation_step;
     float scale_step;
-    float quad_data[29];
+    effect_vertex_t vertices[4];
+    struct effect_entry_t *next_free;
 } effect_entry_t;
+
+typedef effect_entry_t effect_pool_t[0x200];
 
 typedef void (*ui_element_callback_t)(void);
 
-typedef struct ui_element_t {
-    unsigned char active;
-    unsigned char enabled;
-    unsigned char focus_disabled;
-    unsigned char _pad0;
-    int use_offset_render;
-    float render_offset_x;
-    float render_offset_y;
-    int timeline_end_ms;
-    int timeline_start_ms;
-    float pos_x;
-    float pos_y;
-    float hover_min_x;
-    float hover_min_y;
-    float hover_max_x;
-    float hover_max_y;
-    unsigned char _pad1[4];
-    ui_element_callback_t on_activate;
-    ui_element_callback_t on_update;
-    float quad0[14];
-    float quad1[14];
-    float quad2[14];
-    float quad3[14];
-    int texture_handle;
-    int quad_mode;
-    unsigned char _pad4[0xe0];
-    int counter_id;
-    unsigned char _pad5[0xec];
-    unsigned char hover_active;
-    unsigned char _pad5_tail[3];
-    int counter_value;
-    int counter_timer;
-    float render_scale;
-    float rot_m00;
-    float rot_m01;
-    float rot_m10;
-    float rot_m11;
-} ui_element_t;
+typedef struct ui_element_vertex_t {
+    union {
+        struct {
+            float x;
+            float y;
+        };
+        vec2f_t position;
+    };
+    float z;
+    float rhw;
+    union {
+        unsigned int color;
+        struct {
+            unsigned char color_b;
+            unsigned char color_g;
+            unsigned char color_r;
+            unsigned char color_a;
+        };
+    };
+    float u;
+    float v;
+} ui_element_vertex_t;
+
+// Binary Ninja presentation view for the same 0x1c-byte vertex. Keeping the
+// position and packed color unions in the compiler-facing record is useful for
+// recovered source; this flat view retains every byte while keeping ordinary
+// interior member accesses typed in HLIL.
+typedef struct ui_element_vertex_binja_t {
+    float x;
+    float y;
+    float z;
+    float rhw;
+    unsigned char color_b;
+    unsigned char color_g;
+    unsigned char color_r;
+    unsigned char color_a;
+    float u;
+    float v;
+} ui_element_vertex_binja_t;
+
+// Shifted view used by UI render loops that carry a pointer to the packed
+// alpha byte rather than to the start of each 0x1c-byte vertex.
+typedef struct ui_element_vertex_alpha_cursor_t {
+    unsigned char color_a;
+    unsigned char _vertex_tail[0x1b];
+} ui_element_vertex_alpha_cursor_t;
 
 // 0x1c-stride record copied/transformed in ui_menu_assets_init when building
 // ui_menu_item_subtemplate_block_01..06.
 typedef struct ui_menu_item_subtemplate_slot_t {
     float x;
     float y;
-    float field_0x08;
-    float field_0x0c;
-    float field_0x10;
-    float field_0x14;
-    float field_0x18;
+    float z;
+    float rhw;
+    union {
+        unsigned int color;
+        struct {
+            unsigned char color_b;
+            unsigned char color_g;
+            unsigned char color_r;
+            unsigned char color_a;
+        };
+    };
+    float u;
+    float v;
 } ui_menu_item_subtemplate_slot_t;
+
+// Binary Ninja presentation view for the same 0x1c-byte vertex. The packed
+// dword remains canonical for matching, while this flat byte view lets alpha
+// induction loops render as `color_a` instead of `color + 3`.
+typedef struct ui_menu_item_subtemplate_slot_binja_t {
+    float x;
+    float y;
+    float z;
+    float rhw;
+    unsigned char color_b;
+    unsigned char color_g;
+    unsigned char color_r;
+    unsigned char color_a;
+    float u;
+    float v;
+} ui_menu_item_subtemplate_slot_binja_t;
 
 // 0xe8-byte menu item subtemplate payload:
 // 8 slots (8 * 0x1c = 0xe0) + texture handle (+0xe0) + quad mode (+0xe4).
@@ -596,6 +1145,125 @@ typedef struct ui_menu_item_subtemplate_block_t {
     int texture_handle;
     int quad_mode;
 } ui_menu_item_subtemplate_block_t;
+
+typedef struct ui_element_t {
+    unsigned char active;
+    unsigned char enabled;
+    unsigned char focus_disabled;
+    unsigned char _pad0;
+    int use_offset_render;
+    float render_offset_x;
+    float render_offset_y;
+    int timeline_end_ms;
+    int timeline_start_ms;
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t pos;
+    };
+    union {
+        struct {
+            float hover_min_x;
+            float hover_min_y;
+        };
+        vec2f_t hover_min;
+    };
+    union {
+        struct {
+            float hover_max_x;
+            float hover_max_y;
+        };
+        vec2f_t hover_max;
+    };
+    int label_id;
+    ui_element_callback_t on_activate;
+    ui_element_callback_t on_update;
+    union {
+        struct {
+            ui_element_vertex_t vertices[8];
+            int texture_handle;
+            int vertex_count;
+            ui_element_vertex_t overlay_vertices[8];
+            int overlay_texture_handle;
+            unsigned char _pad5_head[4];
+            ui_element_vertex_t enabled_overlay_vertices[8];
+            int secondary_overlay_texture_handle;
+            unsigned char _pad5_end[4];
+        };
+        ui_menu_item_subtemplate_block_t layers[3];
+    };
+    unsigned char hover_enter_played;
+    unsigned char _pad_hover_enter_played[3];
+    int hover_amount;
+    int time_since_ready;
+    float render_scale;
+    float rot_m00;
+    float rot_m01;
+    float rot_m10;
+    float rot_m11;
+    unsigned char direction_flag;
+    unsigned char _pad6_tail[3];
+} ui_element_t;
+
+// Union-free Binary Ninja presentation view for the same 0x318-byte UI record.
+// The canonical compiler-facing type above preserves the three layer aliases;
+// this view instead exposes each physical layer directly and avoids rendering
+// physical overlay fields through the unrelated layers[] union alias.
+typedef struct ui_element_binja_t {
+    unsigned char active;
+    unsigned char enabled;
+    unsigned char focus_disabled;
+    unsigned char _pad0;
+    int use_offset_render;
+    float render_offset_x;
+    float render_offset_y;
+    int timeline_end_ms;
+    int timeline_start_ms;
+    float pos_x;
+    float pos_y;
+    float hover_min_x;
+    float hover_min_y;
+    float hover_max_x;
+    float hover_max_y;
+    int label_id;
+    ui_element_callback_t on_activate;
+    ui_element_callback_t on_update;
+    ui_element_vertex_binja_t vertices[8];
+    int texture_handle;
+    int vertex_count;
+    ui_element_vertex_binja_t overlay_vertices[8];
+    int overlay_texture_handle;
+    unsigned char _pad5_head[4];
+    ui_element_vertex_binja_t enabled_overlay_vertices[8];
+    int secondary_overlay_texture_handle;
+    unsigned char _pad5_end[4];
+    unsigned char hover_enter_played;
+    unsigned char _pad_hover_enter_played[3];
+    int hover_amount;
+    int time_since_ready;
+    float render_scale;
+    float rot_m00;
+    float rot_m01;
+    float rot_m10;
+    float rot_m11;
+    unsigned char direction_flag;
+    unsigned char _pad6_tail[3];
+} ui_element_binja_t;
+
+// Parent template containing three 0xe8-byte subtemplate payloads at +0x3c.
+typedef struct ui_menu_template_triplet_t {
+    unsigned char active;
+    unsigned char _pad0[0x33];
+    int head_state_34;
+    int head_state_38;
+    ui_menu_item_subtemplate_block_t blocks[3];
+    int field_2f4;
+    int tail_state_2f8;
+    unsigned char _pad1[0x18];
+    unsigned char tail_active_314;
+} ui_menu_template_triplet_t;
 
 // 0x10-byte text-item widget state consumed by ui_menu_item_update.
 typedef struct ui_menu_item_t {
@@ -641,6 +1309,17 @@ typedef struct ui_list_widget_t {
     unsigned char _pad1[3];
     int active_index;
 } ui_list_widget_t;
+
+// 0x38-byte shared list/scrollbar state consumed by ui_scrollbar_update.
+typedef struct ui_scrollbar_t {
+    float scroll_offset;
+    int hovered_index;
+    int selected_index;
+    int visible_rows;
+    int column_offsets[8];
+    char **items;
+    int item_count;
+} ui_scrollbar_t;
 
 // 0x14-byte text-input state consumed by ui_text_input_update.
 typedef struct ui_text_input_state_t {
@@ -715,19 +1394,17 @@ typedef struct crimson_cfg_t {
     unsigned char music_disabled;
     unsigned char highscore_date_mode;
     unsigned char highscore_duplicate_mode;
-    unsigned char direction_arrow_flags[2];
-    unsigned char reserved0_06[0x08];
-    unsigned char fx_detail_flag0;
-    unsigned char reserved0_0f;
-    unsigned char fx_detail_flag1;
-    unsigned char fx_detail_flag2;
-    unsigned char reserved0_12[2];
+    unsigned char direction_arrow_flags[10];
+    unsigned char shadows_enabled;
+    unsigned char sharp_ground_enabled;
+    unsigned char flame_glow_enabled;
+    unsigned char smoke_enabled;
+    unsigned char padding_12[2];
     int player_count;
     game_mode_id_t game_mode;
-    int player_mode_flags;
-    unsigned char reserved0_20[0x24];
-    int aim_scheme;
-    unsigned char reserved0_48[0x28];
+    int movement_schemes[10];
+    int aim_schemes[10];
+    int config_for;
     float texture_scale;
     char player_name_buf[12];
     int selected_saved_name_slot;
@@ -736,27 +1413,34 @@ typedef struct crimson_cfg_t {
     char saved_names[8][27];
     char player_name[32];
     int player_name_length;
-    unsigned char reserved1[0x14];
+    unsigned char reserved1_1a4[0x0c];
+    int aim_pov_right;
+    int aim_pov_left;
     int display_bpp;
     int screen_width;
     int screen_height;
-    int windowed;
-    int keybinds_p1[13];
-    unsigned char reserved2[0x0c];
-    int keybinds_p2[13];
-    unsigned char reserved3[0x0c];
-    unsigned char reserved4[0x200];
+    unsigned char windowed;
+    unsigned char reserved_windowed[3];
+    union {
+        player_input_config_t input_config[10];
+        int player_keys[160];
+    };
     unsigned char hardcore;
     unsigned char ui_info_texts;
-    unsigned char reserved5[2];
-    int perk_prompt_counter;
-    unsigned char reserved6[0x14];
+    unsigned char padding_hardcore_info[2];
+    int level_up_count;
+    int ten_tons_logging_completed;
+    int unique_id_1;
+    int unique_id_2;
+    int reserved_identity_word;
+    unsigned char sound_frequency_adjustment;
+    unsigned char padding_sound_frequency[3];
     float sfx_volume;
     float music_volume;
     unsigned char violence_disabled;
-    unsigned char score_load_gate;
+    unsigned char show_online_scores;
     unsigned char safe_mode_backend_enabled;
-    unsigned char reserved7_46f;
+    unsigned char padding_detail[1];
     int detail_preset;
     float mouse_sensitivity;
     int key_pick_perk;
@@ -772,9 +1456,24 @@ typedef struct game_status_t {
     unsigned int mode_play_rush;
     unsigned int mode_play_typo;
     unsigned int mode_play_other;
-    unsigned int game_sequence_id;
-    unsigned char reserved0[0x10];
+    unsigned int play_time_ms;
+    unsigned int reserved_seed_words[4];
 } game_status_t;
+
+// Layout-equivalent Binary Ninja view of the persisted status blob. Native
+// initialization writes the tail as four dwords.
+typedef struct game_status_binja_t {
+    unsigned short quest_unlock_index;
+    unsigned short quest_unlock_index_full;
+    unsigned int weapon_usage_counts[53];
+    unsigned int quest_play_counts[91];
+    unsigned int mode_play_survival;
+    unsigned int mode_play_rush;
+    unsigned int mode_play_typo;
+    unsigned int mode_play_other;
+    unsigned int play_time_ms;
+    unsigned int reserved_seed_words[4];
+} game_status_binja_t;
 
 // Sliding cursor view used by some quest builder loops.
 //
@@ -795,22 +1494,49 @@ typedef struct quest_spawn_entry_trigger_cursor_t {
     quest_spawn_entry_next_block_t next;
 } quest_spawn_entry_trigger_cursor_t;
 
-typedef struct quest_spawn_entry_t {
+typedef struct quest_spawn_entry_position_block_t {
     float pos_x;
-    // Field grouping used to steer the decompiler away from float-bitpattern ints.
-    //
-    // Quest builder code frequently takes the address of `pos_y` or `heading` and
-    // then indexes into subsequent (mixed-type) fields.
-    struct quest_spawn_entry_pos_y_block_t {
-        float pos_y;
-        struct quest_spawn_entry_heading_block_t {
-            float heading;
-            int template_id;
-            int trigger_time_ms;
-            int count;
-        } heading_block;
-    } pos_y_block;
+    float pos_y;
+    float heading;
+} quest_spawn_entry_position_block_t;
+
+// Binary Ninja presentation view for optimized loops whose induction pointer
+// is anchored at the current entry's template_id. The trailing block is the
+// position and heading of the next entry, making the 0x18-byte cursor stride
+// explicit without changing compiler-facing quest source.
+typedef struct quest_spawn_entry_template_cursor_t {
+    int template_id;
+    int trigger_time_ms;
+    int count;
+    quest_spawn_entry_position_block_t next;
+} quest_spawn_entry_template_cursor_t;
+
+typedef struct quest_spawn_entry_t {
+    union {
+        struct {
+            float pos_x;
+            float pos_y;
+        };
+        vec2f_t position;
+    };
+    float heading;
+    int template_id;
+    int trigger_time_ms;
+    int count;
 } quest_spawn_entry_t;
+
+// Binary Ninja presentation view for loops that emit two entries per
+// iteration. The compiler-facing source retains a quest_spawn_entry_t cursor.
+typedef struct quest_spawn_pair_binja_t {
+    quest_spawn_entry_t entries[2];
+} quest_spawn_pair_binja_t;
+
+// Binary Ninja presentation view for quest builder parameters. Native builders
+// receive the first element as `quest_spawn_entry_t *`, but direct displacements
+// beyond the first record otherwise degrade to raw `__offset(...)` accesses.
+typedef struct quest_spawn_entries_binja_t {
+    quest_spawn_entry_t entries[256];
+} quest_spawn_entries_binja_t;
 
 typedef void (*quest_builder_fn_t)(quest_spawn_entry_t *entries, int *count);
 
@@ -832,7 +1558,8 @@ typedef struct perk_meta_t {
     char *name;
     char *description;
     int flags;
-    int available;
+    unsigned char available;
+    unsigned char _pad_available[3];
     int prerequisite;
 } perk_meta_t;
 
@@ -874,22 +1601,53 @@ typedef struct bonus_entry_t {
     struct bonus_entry_time_block_t {
         float time_left;
         float time_max;
-        float pos_x;
-        float pos_y;
+        union {
+            struct {
+                float pos_x;
+                float pos_y;
+            };
+            vec2f_t position;
+        };
         int amount;
     } time;
 } bonus_entry_t;
 
 typedef bonus_entry_t bonus_pool_t[0x10];
 
+typedef struct effect_template_t {
+    union {
+        struct {
+            float vel_x;
+            float vel_y;
+        };
+        vec2f_t velocity;
+    };
+    float rotation;
+    float scale;
+    union {
+        struct {
+            float half_width;
+            float half_height;
+        };
+        vec2f_t half_extent;
+    };
+    float age;
+    float lifetime;
+    int flags;
+    effect_color_t color;
+    float rotation_step;
+    float scale_step;
+} effect_template_t;
+
 typedef struct bonus_hud_slot_slide_x_block_t {
     float slide_x;
-    float field_0x08;
+    // Constructor-only values with no native runtime reads.
+    float unused_one;
     float *timer_ptr;
     float *alt_timer_ptr;
     char *label;
     int icon_id;
-    float field_0x1c;
+    float unused_five;
 } bonus_hud_slot_slide_x_block_t;
 
 typedef struct bonus_hud_slot_t {
@@ -899,6 +1657,21 @@ typedef struct bonus_hud_slot_t {
 } bonus_hud_slot_t;
 
 typedef bonus_hud_slot_t bonus_hud_slot_table_t[0x10];
+
+// Layout-equivalent flat presentation view for Binary Ninja. Optimized loops
+// carry a cursor across the slide block and otherwise lose the owning active
+// byte behind negative pointer offsets.
+typedef struct bonus_hud_slot_binja_t {
+    unsigned char active;
+    unsigned char _pad0[3];
+    float slide_x;
+    float unused_one;
+    float *timer_ptr;
+    float *alt_timer_ptr;
+    char *label;
+    int icon_id;
+    float unused_five;
+} bonus_hud_slot_binja_t;
 
 typedef struct mod_info_t {
     char name[0x20];
@@ -995,15 +1768,17 @@ struct mod_interface_vtbl_t {
     unsigned char (*Frame)(mod_interface_t *self, int frame_dt_ms);
 };
 
+typedef struct mod_parms_fields_t {
+    unsigned char drawMouseCursor;
+    unsigned char onPause;
+    unsigned char reserved0[0x1a];
+    unsigned char request_exit;
+    unsigned char reserved1[0x3e3];
+} mod_parms_fields_t;
+
 typedef union mod_parms_t {
+    mod_parms_fields_t fields;
     int reserved[256];
-    struct {
-        unsigned char drawMouseCursor;
-        unsigned char onPause;
-        unsigned char reserved0[0x1a];
-        unsigned char request_exit;
-        unsigned char reserved1[0x3e3];
-    } fields;
 } mod_parms_t;
 
 struct mod_interface_t {
@@ -1011,6 +1786,15 @@ struct mod_interface_t {
     mod_api_t *cl;
     mod_parms_t parms;
 };
+
+// Binary Ninja presentation view for the same 0x408-byte interface. Native
+// code accesses the parameter bytes directly; exposing the fields here avoids
+// anonymous-union offsets such as `parms.fields.__offset(1)`.
+typedef struct mod_interface_binja_t {
+    mod_interface_vtbl_t *vtable;
+    mod_api_t *cl;
+    mod_parms_fields_t parms;
+} mod_interface_binja_t;
 
 typedef struct highscore_record_t {
     char player_name[0x20];
@@ -1023,7 +1807,8 @@ typedef struct highscore_record_t {
     unsigned int shots_fired;
     unsigned int shots_hit;
     unsigned int creature_kill_count;
-    unsigned char reserved0[0x08];
+    unsigned int random_tag;
+    unsigned char reserved0[0x04];
     unsigned char day;
     unsigned char date_checksum;
     unsigned char month;

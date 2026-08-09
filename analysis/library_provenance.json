@@ -1,0 +1,1336 @@
+{
+  "schema": 1,
+  "source_artifacts": [
+    {
+      "id": "directx-8.1-sdk-full",
+      "url": "https://web.archive.org/web/20040108202259id_/http://download.microsoft.com/download/whistler/dx/8.1/W982KMeXP/EN-US/DX81SDK_FULL.exe",
+      "size": 173778784,
+      "sha256": "73f6791e0ae7f8a1d74f71d8ebe517a79c0cbf03fd344424696fd7a3816d2d02",
+      "sha1": "61b5733209205e942f37431ee40da712e1f50e6a",
+      "md5": "28533018267fa278bb1c603a67d86d2f",
+      "members": [
+        {
+          "path": "DXF/DXSDK/lib/d3dx8.lib",
+          "size": 2150226,
+          "sha256": "39a8e21889a7c1f0b966f04a9e7d392de14ddebb3e091dfa1e5ce3e19564fc28"
+        },
+        {
+          "path": "DXF/DXSDK/lib/dinput8.lib",
+          "size": 19978,
+          "sha256": "1aefd62d9df8a26aa312817bd98b2fc3340477b238c918fc9edc04f7498a5b34"
+        },
+        {
+          "path": "DXF/DXSDK/lib/dxguid.lib",
+          "size": 104752,
+          "sha256": "73a147b9ff6e4527e543e9a436cb244adcdae4ad89b89df51a0634f9a8c13682"
+        }
+      ]
+    },
+    {
+      "id": "visual-cpp-6-sp6-media",
+      "url": "https://archive.org/download/vs6.iso/vs6sp6.iso.zip",
+      "size": 64778841,
+      "sha256": "5e631cd838a262ef8b72f44c0d9b83fb54c0fa7f24a93c4fa672c0fe444f3cb8",
+      "sha1": "7e8318c7fc998a3a80327ba927fa7bb7748b90dc",
+      "md5": "9ac85a7640a6b428d84ee45bc54e440f",
+      "members": [
+        {
+          "path": "vs6sp6.iso",
+          "size": 72144896,
+          "sha256": "23c43165661ed5e2678300b34c516c229348d8ca9d2f2762cadad7a21a928e80"
+        },
+        {
+          "path": "vs6sp6.iso/VS6sp61.cab",
+          "size": 28712960,
+          "sha256": "0c417d0e9b0fa32934994d21bee46fc3104ffaffdfdbcaa27ee5502a02fe0cd4"
+        },
+        {
+          "path": "vs6sp6.iso/VS6sp61.cab/vc98/lib/libcmt.lib",
+          "size": 934378,
+          "sha256": "a541c95e5ffdd6d5573d1976f5e5d0038f2c4fb0bcb02975c68948bf1d6e452a"
+        },
+        {
+          "path": "vs6sp6.iso/VS6sp61.cab/vc98/lib/msvcrt.lib",
+          "size": 235942,
+          "sha256": "3efc3ddf045a459a2b6403f0b821be2cb7c316ffca67dddddb346cea7a9e4f63"
+        }
+      ]
+    },
+    {
+      "id": "visual-studio-6-enterprise-rtm-devdays98",
+      "url": "https://archive.org/download/ms-vs60ent-devdays98/VSE600ENU1.ISO",
+      "size": 643289088,
+      "sha256": "a670cfb0a5ba6c89c2aa32fd884f21fa348e72cad9d4378b63d08e9da1708f15",
+      "sha1": "fc2f568db490d4115e301a400e15082888bf7296",
+      "members": [
+        {
+          "path": "VC98/BIN/CL.EXE",
+          "size": 65536,
+          "sha256": "d9220fdfaf355c81f26e7b03c5dc628ec72ff81c99dc38ed98b1ad4bdbbb309c"
+        },
+        {
+          "path": "VC98/BIN/C1.DLL",
+          "size": 667697,
+          "sha256": "ee14a2603a1339f95db2e396751f7e51b50e421731229fb2416a01f974689d80"
+        },
+        {
+          "path": "VC98/BIN/C1XX.DLL",
+          "size": 1183795,
+          "sha256": "4095e9e8de5ac4b13dbfe310abb8de711475b1a92c5f94375919947937f3237e"
+        },
+        {
+          "path": "VC98/BIN/C2.DLL",
+          "size": 737329,
+          "sha256": "45187b0b6288240f73272a7c61e6329c50048a76e57db3bb87b6f0229e09e27d"
+        },
+        {
+          "path": "COMMON/MSDEV98/BIN/MSPDB60.DLL",
+          "size": 180276,
+          "sha256": "7c90b80d42914562332e28c253415e72a80c6651003d08a9ffdc4ba6e27fc37c"
+        }
+      ]
+    },
+    {
+      "id": "xiph-ogg-vorbis-win32sdk-1.0",
+      "url": "https://web.archive.org/web/20030403114946id_/http://www.vorbis.com/files/1.0/windows/OggVorbis-win32sdk-1.0.zip",
+      "size": 1666042,
+      "sha256": "e40f25803224ce4fee102e74d97c1bf77231986a9acc33eb613232e860fee7fe",
+      "sha1": "73720546e3c59581ec211788e03eef6d5187b5c8",
+      "md5": "7ac318eb6ab3551059fa7232618be2ea",
+      "members": [
+        {
+          "path": "oggvorbis-win32sdk-1.0/bin/ogg.dll",
+          "size": 49152,
+          "sha256": "308540dbd488f3bceca2dbadefe02cf29d10a27c4ac096bb3da053e3e0b923ea"
+        },
+        {
+          "path": "oggvorbis-win32sdk-1.0/bin/vorbis.dll",
+          "size": 974848,
+          "sha256": "b4fa55cfe7547ade0a2d5b800ef085ce20cdd71f61898d2461ea61eb0241812b"
+        },
+        {
+          "path": "oggvorbis-win32sdk-1.0/bin/vorbisfile.dll",
+          "size": 28672,
+          "sha256": "f44472c6d9a64045c14583d12c0cfab5b4aa268aceb8bc9e3e1236b3008306f2"
+        }
+      ]
+    },
+    {
+      "id": "ijg-libjpeg-6a",
+      "url": "https://www.ijg.org/files/jpegsrc.v6a.tar.gz",
+      "size": 538910,
+      "sha256": "0e963fdd29d5049f61f3dc137bdc9437473a0ad505dbcfc8925f0fcad46c5929",
+      "members": [
+        {
+          "path": "jpeg-6a/jinclude.h",
+          "size": 3250,
+          "sha256": "a6433e5ea0030f4bffd41bcc2f064008afd79de4270cf28494bd43d2fbc5da06"
+        },
+        {
+          "path": "jpeg-6a/jpeglib.h",
+          "size": 44388,
+          "sha256": "8d12532e685e58429e8e973f3e7d3604673750e79f5bc23598afbb8030175eae"
+        },
+        {
+          "path": "jpeg-6a/jmorecfg.h",
+          "size": 12389,
+          "sha256": "30b9ea709a75a95340ce824cb53e7d05ab2518fc4b4c03926a4239b9de2abf82"
+        },
+        {
+          "path": "jpeg-6a/jerror.h",
+          "size": 13257,
+          "sha256": "641fd75fc7d5a0d61c63c86fde46b4d76369a4311aabade55b2326d5094c2636"
+        },
+        {
+          "path": "jpeg-6a/jversion.h",
+          "size": 357,
+          "sha256": "627a154dab9aa74de01d4b8a34b1ac2102fe865eb24f34f77c0590332c389f1f"
+        },
+        {
+          "path": "jpeg-6a/jpegint.h",
+          "size": 15527,
+          "sha256": "089ad98da28cdcabb4cf252607cff2e0ca73268818793d0795caaa9032c2da57"
+        },
+        {
+          "path": "jpeg-6a/jmemsys.h",
+          "size": 7847,
+          "sha256": "079586edfbbb27fe214f96ffb2fe72b2715de95c607ed9d02657e8c64d45e345"
+        },
+        {
+          "path": "jpeg-6a/jmemmgr.c",
+          "size": 40884,
+          "sha256": "daf660c78c28f21ad2fd9bb1c6e9d2e9ec172b08eaaa203766ee3b7fd6ead953"
+        },
+        {
+          "path": "jpeg-6a/jdct.h",
+          "size": 7041,
+          "sha256": "4cde9d7c12ffc920e1dd525c6b7f41f88a3ea573af8c66a4b6d0d6ed3d7fd770"
+        },
+        {
+          "path": "jpeg-6a/jdhuff.h",
+          "size": 8230,
+          "sha256": "9a465efa3cd690036c3e9ed649663ab9c5e5f5e18da8527c6ddd109f582d1824"
+        },
+        {
+          "path": "jpeg-6a/jidctred.c",
+          "size": 13442,
+          "sha256": "1b830678d15255131558240ed0565859513b85431cf2d6fb2c999997355798df"
+        },
+        {
+          "path": "jpeg-6a/jidctflt.c",
+          "size": 8418,
+          "sha256": "cd29042cf33e126ff99bae8e4304ee8d83e96fb226e0df635e053e4449a65e73"
+        },
+        {
+          "path": "jpeg-6a/jidctfst.c",
+          "size": 13104,
+          "sha256": "5eac120a649ee5996aae76cdbf8e6464a4d2093d944701e30e5ef46ca36ec85a"
+        },
+        {
+          "path": "jpeg-6a/jidctint.c",
+          "size": 14749,
+          "sha256": "2d13f6db2a55602e9a6a602c43644d1479eb23c508086e6f54abdff36956d7a1"
+        },
+        {
+          "path": "jpeg-6a/jdapimin.c",
+          "size": 12799,
+          "sha256": "3be80d91b6bfe9b64813d6243eddfd4b009b899d793e0c13e52b61704fb8d6f0"
+        },
+        {
+          "path": "jpeg-6a/jdapistd.c",
+          "size": 9348,
+          "sha256": "1b062e70e891819f4603f83baf49462ea737255a0c39df3ef941ef543f94fbab"
+        },
+        {
+          "path": "jpeg-6a/jdmarker.c",
+          "size": 30754,
+          "sha256": "85dc333850a72dff9eb1ecfa9613dea87a18a5fe3b27989e29b9a8b3816379d6"
+        },
+        {
+          "path": "jpeg-6a/jcomapi.c",
+          "size": 2746,
+          "sha256": "cfa950a2cd4361d4e68b76f2cc5bdddbf4733905b9c58270cef3f82b01e47546"
+        },
+        {
+          "path": "jpeg-6a/jerror.c",
+          "size": 6798,
+          "sha256": "5b7998534ff15e8ee99296f8fde1459d429ec0b636efd33a1578adcb73e07a67"
+        },
+        {
+          "path": "jpeg-6a/jdmaster.c",
+          "size": 19670,
+          "sha256": "c88155f021e403ddadfbd986a27df6d922d62ad39febd22afbbcd98a2d83d4b4"
+        },
+        {
+          "path": "jpeg-6a/jdinput.c",
+          "size": 13497,
+          "sha256": "a945a258e19ca01fbfe2159ce7f3aace89ec04c082c71e8cbc2be3d83aa884bb"
+        },
+        {
+          "path": "jpeg-6a/jdmainct.c",
+          "size": 20366,
+          "sha256": "f9a8331d0a58f6ae74bbfc27e9640d66afb067793586358e0bb47bdb7cb754df"
+        },
+        {
+          "path": "jpeg-6a/jdcoefct.c",
+          "size": 25137,
+          "sha256": "7c18cf3eb231e6998c5d743b3708798f4a7c5007380c366178826a64def85ddb"
+        },
+        {
+          "path": "jpeg-6a/jdhuff.c",
+          "size": 17563,
+          "sha256": "fd4268d83ec2102f01f4c45ad93ccf939c8b2ce7f054af3feb073a516c951754"
+        },
+        {
+          "path": "jpeg-6a/jdphuff.c",
+          "size": 19691,
+          "sha256": "04f101a77251edc8c8106c3e329dd44c39311123f33d61aa86d7ede33a4fe06a"
+        },
+        {
+          "path": "jpeg-6a/jddctmgr.c",
+          "size": 8293,
+          "sha256": "f50d9b1414b44782d4ef46761a53f930b06764468b4cbbf0bf0761ac0751defd"
+        },
+        {
+          "path": "jpeg-6a/jdpostct.c",
+          "size": 9723,
+          "sha256": "f873dd3a08eedee9a32c1e343cfbdc3380d2e245e1eab2c416d4e1a62cc9586e"
+        },
+        {
+          "path": "jpeg-6a/jdsample.c",
+          "size": 16381,
+          "sha256": "acca64d28c61b87e77993dd0bd51d089ecd68f8989f93e7d17156314ca58670d"
+        },
+        {
+          "path": "jpeg-6a/jdcolor.c",
+          "size": 12098,
+          "sha256": "92dcb25895bd1725159893baa39dc8a0870ef0e7d26d6f7c7a31d65c35af2166"
+        },
+        {
+          "path": "jpeg-6a/jdmerge.c",
+          "size": 13916,
+          "sha256": "a47ca108ebf955104abbe3f9a64383532be2c70c6f956b5844b412f151f50453"
+        },
+        {
+          "path": "jpeg-6a/jquant1.c",
+          "size": 31294,
+          "sha256": "556df5715cf5d915e5190066ff4e542a9911b651e45b34d322a6f6c2b0098fbc"
+        },
+        {
+          "path": "jpeg-6a/jquant2.c",
+          "size": 48429,
+          "sha256": "9b6844e18480d7003618e8f473a0900743d15fc8516aee7229a77adce470eb0b"
+        },
+        {
+          "path": "jpeg-6a/jutils.c",
+          "size": 5240,
+          "sha256": "2cab735c6ea1bca55f4c94a72c73035a0a161378403a6bd849b350df71db92d6"
+        },
+        {
+          "path": "jpeg-6a/jmemnobs.c",
+          "size": 2772,
+          "sha256": "0605c64556d298071473fc245fa9d83cf10b60022d5c5d2821a846b94aa1a9fb"
+        }
+      ]
+    },
+    {
+      "id": "libpng-1.0.5",
+      "url": "https://ftp.osuosl.org/pub/libpng/src/archive/gz/libpng10/libpng-1.0.5.tar.gz",
+      "size": 299401,
+      "sha256": "b253ab276870c43f9e0e3cb1084f92fd4d11d9d8d250be48504e04336974de63",
+      "members": [
+        {
+          "path": "libpng-1.0.5/png.h",
+          "size": 102656,
+          "sha256": "e368e66f9b28f41e759641f5dc32645d078a6feb9671b8c93f76bfe5e14b1730"
+        },
+        {
+          "path": "libpng-1.0.5/pngconf.h",
+          "size": 21841,
+          "sha256": "f88e056928fc2e45e94ad717d27c7b9df6bc9f4ea65bb89854b726c11f5668ef"
+        },
+        {
+          "path": "libpng-1.0.5/pngrutil.c",
+          "size": 66104,
+          "sha256": "d3668c8b64a7021d5798780997b002af0ef25dc23b73ff1857f68f037f173035"
+        }
+      ]
+    },
+    {
+      "id": "zlib-1.1.3",
+      "url": "https://zlib.net/fossils/zlib-1.1.3.tar.gz",
+      "size": 168463,
+      "sha256": "cae5847bc0e1cf113d3f70d037400da3e47c2e2b7b1c96b0b08447a5fbb906f4",
+      "members": [
+        {
+          "path": "zlib-1.1.3/adler32.c",
+          "size": 1245,
+          "sha256": "bb15ef9fda3d4d326b8b6e9e84e4a9f74b41576be421800a123d00478e914dbd"
+        },
+        {
+          "path": "zlib-1.1.3/crc32.c",
+          "size": 6974,
+          "sha256": "91517e3ec59a1af53370ab533af809a0a1cb5064de0b7f26c49460815a252580"
+        },
+        {
+          "path": "zlib-1.1.3/deflate.c",
+          "size": 48983,
+          "sha256": "ff820d58faed4323bae46aebf454d18c9b8dfd16050da3decd78ee2c546249a2"
+        },
+        {
+          "path": "zlib-1.1.3/deflate.h",
+          "size": 11607,
+          "sha256": "cd21f799dede43d2e38498cef3f022427f1866be826d3ed7bb99e7ec20df0e69"
+        },
+        {
+          "path": "zlib-1.1.3/infblock.c",
+          "size": 12352,
+          "sha256": "ba062cff2a248ce95062bc0f7f713f3fe70a276d13ba5566b0be51e8af1e7d18"
+        },
+        {
+          "path": "zlib-1.1.3/infblock.h",
+          "size": 1214,
+          "sha256": "c74668be73c56e1adda6ff9da06132330d9c4a7479232339dfc4e0f3bf703ff8"
+        },
+        {
+          "path": "zlib-1.1.3/infcodes.c",
+          "size": 7795,
+          "sha256": "77d7f9a0ca839931e3d1d2a16648233f4ea048292c183607d18ad90b9080ff33"
+        },
+        {
+          "path": "zlib-1.1.3/inffast.c",
+          "size": 5645,
+          "sha256": "dc25c1a8c7de256437605a9dcb4356b23ef6a785529fe9beb782abd23d0bb4be"
+        },
+        {
+          "path": "zlib-1.1.3/inffast.h",
+          "size": 488,
+          "sha256": "6f2bae64c1838cbec06bc481e6a7d0f36bf47ad7eb66c1777cd02754cde6dc4f"
+        },
+        {
+          "path": "zlib-1.1.3/inffixed.h",
+          "size": 8928,
+          "sha256": "2a28f6ec7a9042b31ee2f214aff62a8ae9ab079a584e278a8e7e0f156b329d9e"
+        },
+        {
+          "path": "zlib-1.1.3/inflate.c",
+          "size": 9656,
+          "sha256": "fac42b9bfdcd2ff4751e642a518dff921ae5a79a22f7eeda73845c803a89a623"
+        },
+        {
+          "path": "zlib-1.1.3/infcodes.h",
+          "size": 737,
+          "sha256": "83bbaf1225242b86b9ad4078993ba224a73eed777553955ad0c958a9cd840928"
+        },
+        {
+          "path": "zlib-1.1.3/inftrees.h",
+          "size": 2616,
+          "sha256": "c5fd84fc82e7aef32d4a7867cca4355d8ef50609449ce7e6a13b8348d29c2971"
+        },
+        {
+          "path": "zlib-1.1.3/inftrees.c",
+          "size": 16074,
+          "sha256": "ceb90191ca5b2bcccdfe3cfc3af92d3c6ebf6d4a2130c7c76989c32b6870c98b"
+        },
+        {
+          "path": "zlib-1.1.3/trees.c",
+          "size": 43672,
+          "sha256": "cfda553556f3c2461c2fae7cf7dcb6aa61a256d6694855694cd8709f93f9fb2b"
+        },
+        {
+          "path": "zlib-1.1.3/trees.h",
+          "size": 8444,
+          "sha256": "81579041310716219bbbf7c98849d91f5aeabdd7eadb1f8e9d7e2aa57724b58b"
+        },
+        {
+          "path": "zlib-1.1.3/infutil.c",
+          "size": 1999,
+          "sha256": "2b1cd432c533d614ab6cc0d36f1a1df24a42c4c77d63267f69d22fcc0d6a58b3"
+        },
+        {
+          "path": "zlib-1.1.3/infutil.h",
+          "size": 3679,
+          "sha256": "deeba500856766334ff3b8f7e0ba03fbf1aaaeb7ccf9325d93163dc25f9bbb53"
+        },
+        {
+          "path": "zlib-1.1.3/uncompr.c",
+          "size": 1981,
+          "sha256": "4f771ea1070726e0e2c3b16dfd95783049c5bca4b0218d23db8ddfdd87ba1e97"
+        },
+        {
+          "path": "zlib-1.1.3/zutil.c",
+          "size": 5232,
+          "sha256": "535eb344c5d7f87b69c8927264aff58e65f644ea43cbf99715b0e96f2bb34364"
+        },
+        {
+          "path": "zlib-1.1.3/zutil.h",
+          "size": 5560,
+          "sha256": "d8b262446485f4869caff5a51aaffa8662d50372a435fce2caf65dd6bd9ede6b"
+        }
+      ]
+    },
+    {
+      "id": "libogg-1.0",
+      "url": "https://downloads.xiph.org/releases/ogg/libogg-1.0.tar.gz",
+      "size": 222625,
+      "sha256": "920fa2a0924d66884825d36a2e843de069cfdf1af01945d05da25999bbd6396c"
+    },
+    {
+      "id": "libvorbis-1.0",
+      "url": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.0.tar.gz",
+      "size": 749064,
+      "sha256": "8ef7507c22aaddb9d99a4341c5b3e720932541f4b75b08f19fce473f054c620f"
+    }
+  ],
+  "derived_artifacts": [
+    {
+      "id": "crimsonland-recovered-platform-vc6-provider",
+      "path": "tools/native/providers/build/crimsonland-platform/crimsonland-platform.lib",
+      "size": 15334,
+      "sha256": "8b2cc07c8c4fbbcc7728b34674221593112dfbe5ec41a159acebd56869131fb3",
+      "recipe": "scripts/build_native_recovered_providers.py",
+      "source_artifacts": [
+        "visual-cpp-6-sp6-media"
+      ],
+      "tracked_sources": [
+        "tools/match/scratches/dx_get_version/scratch.cpp",
+        "tools/match/scratches/dx_get_version_from_dxdiag/scratch.cpp",
+        "tools/match/scratches/dx_get_version_fallback_from_files/scratch.cpp",
+        "tools/match/scratches/win32_file_get_version_words/scratch.cpp",
+        "tools/match/scratches/dx_version_pack_4x16/scratch.cpp",
+        "tools/match/scratches/dx_version_compare_4x16/scratch.cpp",
+        "tools/match/scratches/reg_read_dword_default/scratch.c",
+        "tools/match/scratches/reg_write_dword/scratch.c"
+      ],
+      "validation": "Every archive member must remain an exact all-scope instruction and reference match.",
+      "normalization": [
+        "zero archive member timestamps",
+        "zero COFF TimeDateStamp fields"
+      ],
+      "tools": {
+        "lib_sha256": "2a2b5c23b1ca784f6b62fdd2e9d29ce10bc85e95f47117bda03767f02d68f2f6",
+        "wibo_sha256": "e81ef773fb511e3780bbd8dcf324ffec2497f52805f10fa20d6e4a29bc0f94bc"
+      }
+    },
+    {
+      "id": "grim-recovered-platform-vc6-provider",
+      "path": "tools/native/providers/build/grim-platform/grim-platform.lib",
+      "size": 100246,
+      "sha256": "192b49592a7671b265dd43f481d4965071abb2306cf0be099b39b3c03b799fe3",
+      "recipe": "scripts/build_native_recovered_providers.py",
+      "source_artifacts": [
+        "visual-cpp-6-sp6-media"
+      ],
+      "tracked_sources": [
+        "tools/match/scratches/grim_advanced_config_dialog_proc/scratch.cpp",
+        "tools/match/scratches/grim_apply_config/scratch.cpp",
+        "tools/match/scratches/grim_app_cleanup/scratch.cpp",
+        "tools/match/scratches/grim_app_init/scratch.cpp",
+        "tools/match/scratches/grim_app_pump/scratch.cpp",
+        "tools/match/scratches/grim_app_shutdown/scratch.cpp",
+        "tools/match/scratches/grim_app_tick/scratch.cpp",
+        "tools/match/scratches/grim_backup_textures/scratch.cpp",
+        "tools/match/scratches/grim_config_blob_load/scratch.cpp",
+        "tools/match/scratches/grim_config_blob_save/scratch.cpp",
+        "tools/match/scratches/grim_config_dialog_populate_display_modes/scratch.cpp",
+        "tools/match/scratches/grim_config_dialog_proc/scratch.cpp",
+        "tools/match/scratches/grim_parental_lock_dialog_proc/scratch.cpp",
+        "tools/match/scratches/grim_create_geometry_buffers/scratch.cpp",
+        "tools/match/scratches/grim_d3d_init/scratch.cpp",
+        "tools/match/scratches/grim_d3d_shutdown/scratch.cpp",
+        "tools/match/scratches/grim_joystick_configure_axis/scratch.cpp",
+        "tools/match/scratches/grim_joystick_button_down/scratch.cpp",
+        "tools/match/scratches/grim_joystick_enum_device/scratch.cpp",
+        "tools/match/scratches/grim_joystick_init/scratch.cpp",
+        "tools/match/scratches/grim_joystick_poll/scratch.cpp",
+        "tools/match/scratches/grim_joystick_shutdown/scratch.cpp",
+        "tools/match/scratches/grim_keyboard_init/scratch.cpp",
+        "tools/match/scratches/grim_keyboard_key_down/scratch.cpp",
+        "tools/match/scratches/grim_keyboard_poll/scratch.cpp",
+        "tools/match/scratches/grim_keyboard_shutdown/scratch.cpp",
+        "tools/match/scratches/grim_mouse_button_down/scratch.cpp",
+        "tools/match/scratches/grim_mouse_init/scratch.cpp",
+        "tools/match/scratches/grim_mouse_poll/scratch.cpp",
+        "tools/match/scratches/grim_mouse_shutdown/scratch.cpp",
+        "tools/match/scratches/grim_release_geometry_buffers/scratch.cpp",
+        "tools/match/scratches/grim_restore_device_after_activation/scratch.cpp",
+        "tools/match/scratches/grim_restore_textures/scratch.cpp",
+        "tools/match/scratches/grim_save_screenshot/scratch.cpp",
+        "tools/match/scratches/grim_save_texture/scratch.cpp",
+        "tools/match/scratches/grim_window_create/scratch.cpp",
+        "tools/match/scratches/grim_window_destroy/scratch.cpp",
+        "tools/match/scratches/grim_run_loop/scratch.cpp",
+        "tools/match/scratches/grim_try_reset_device/scratch.cpp",
+        "tools/native/providers/sources/grim_app_on_tick/scratch.cpp",
+        "tools/native/data_definitions/grim.dll.json"
+      ],
+      "validation": "Every function member must remain an exact all-scope instruction and reference match; provider-only data dependencies must be fully specified and disjoint from the primary native data object.",
+      "normalization": [
+        "zero archive member timestamps",
+        "zero COFF TimeDateStamp fields"
+      ],
+      "tools": {
+        "lib_sha256": "2a2b5c23b1ca784f6b62fdd2e9d29ce10bc85e95f47117bda03767f02d68f2f6",
+        "wibo_sha256": "e81ef773fb511e3780bbd8dcf324ffec2497f52805f10fa20d6e4a29bc0f94bc"
+      }
+    },
+    {
+      "id": "ijg-libjpeg-6a-vc6-jaz-provider",
+      "path": "tools/native/providers/build/ijg-libjpeg-6a/libjpeg.lib",
+      "size": 152452,
+      "sha256": "c0bf240e27e8684357c676030e3cb8913d04e6b1e14f8000f069b43b17de6869",
+      "recipe": "scripts/build_native_codec_providers.py",
+      "source_artifacts": [
+        "ijg-libjpeg-6a"
+      ],
+      "configuration": {
+        "source_member": "jpeg-6a/jmorecfg.h",
+        "change": "typedef int boolean; -> typedef unsigned char boolean;",
+        "evidence_member": "jpeg-6a/install.doc",
+        "note": "IJG documents this Windows compatibility typedef; it reproduces Grim's 0x1a8 jpeg_decompress_struct ABI."
+      },
+      "objects": [
+        {
+          "source_members": [
+            "jpeg-6a/jdapimin.c",
+            "jpeg-6a/jdapistd.c",
+            "jpeg-6a/jdtrans.c",
+            "jpeg-6a/jdatasrc.c",
+            "jpeg-6a/jdmaster.c",
+            "jpeg-6a/jdinput.c",
+            "jpeg-6a/jdhuff.c",
+            "jpeg-6a/jdphuff.c",
+            "jpeg-6a/jdmainct.c",
+            "jpeg-6a/jdcoefct.c",
+            "jpeg-6a/jdpostct.c",
+            "jpeg-6a/jddctmgr.c",
+            "jpeg-6a/jidctfst.c",
+            "jpeg-6a/jidctflt.c",
+            "jpeg-6a/jidctint.c",
+            "jpeg-6a/jidctred.c",
+            "jpeg-6a/jdsample.c",
+            "jpeg-6a/jdcolor.c",
+            "jpeg-6a/jquant1.c",
+            "jpeg-6a/jquant2.c",
+            "jpeg-6a/jdmerge.c",
+            "jpeg-6a/jutils.c",
+            "jpeg-6a/jerror.c",
+            "jpeg-6a/jmemmgr.c",
+            "jpeg-6a/jmemnobs.c"
+          ],
+          "cflags": "/O2 /GB /W3 /MD"
+        },
+        {
+          "source_members": [
+            "jpeg-6a/jdmarker.c",
+            "jpeg-6a/jcomapi.c"
+          ],
+          "source": "tools/native/providers/sources/ijg-libjpeg-6a/grim_jpeg_memory_src.c",
+          "cflags": "/O2 /G6 /W3 /MD"
+        }
+      ],
+      "normalization": [
+        "zero archive member timestamps",
+        "zero COFF TimeDateStamp fields"
+      ],
+      "tools": {
+        "cl_sha256": "1bf99f206271ecdbd13da2829192ea2c02e2a44c740b8d72935d5d9cb753b156",
+        "lib_sha256": "2a2b5c23b1ca784f6b62fdd2e9d29ce10bc85e95f47117bda03767f02d68f2f6",
+        "wibo_sha256": "e81ef773fb511e3780bbd8dcf324ffec2497f52805f10fa20d6e4a29bc0f94bc"
+      }
+    },
+    {
+      "id": "zlib-1.1.3-vc6-provider",
+      "path": "tools/native/providers/build/zlib-1.1.3/zlib.lib",
+      "size": 80832,
+      "sha256": "6b44ac2a8a67123b929cb9286c343730af5f6777609a54e12e402e5ac7e503b0",
+      "recipe": "scripts/build_native_codec_providers.py",
+      "source_artifacts": [
+        "zlib-1.1.3"
+      ],
+      "cflags": "/O2 /GB /W3 /MD",
+      "normalization": [
+        "zero archive member timestamps",
+        "zero COFF TimeDateStamp fields"
+      ],
+      "tools": {
+        "cl_sha256": "1bf99f206271ecdbd13da2829192ea2c02e2a44c740b8d72935d5d9cb753b156",
+        "lib_sha256": "2a2b5c23b1ca784f6b62fdd2e9d29ce10bc85e95f47117bda03767f02d68f2f6",
+        "wibo_sha256": "e81ef773fb511e3780bbd8dcf324ffec2497f52805f10fa20d6e4a29bc0f94bc"
+      }
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "crimsonland.exe",
+      "path": "game_bins/crimsonland/1.9.93-gog/crimsonland.exe",
+      "sha256": "771531fe72c36dbcb7ca8d8a391f00884ced8240fbb17080ffc3e0e59482c4f4",
+      "size": 532480,
+      "components": [
+        {
+          "id": "d3dx8",
+          "version": "DirectX 8.1 SDK release d3dx8.lib (2001-10-16)",
+          "linkage": "static",
+          "confidence": "archive-confirmed",
+          "source_artifact": "directx-8.1-sdk-full",
+          "archive_member": "DXF/DXSDK/lib/d3dx8.lib",
+          "ranges": [
+            {
+              "start": "0x00452EF0",
+              "end": "0x00460CB8"
+            }
+          ],
+          "fingerprints": [
+            {
+              "address": "0x0046F838",
+              "encoding": "ascii",
+              "value": "Software\\Microsoft\\Direct3D"
+            },
+            {
+              "address": "0x0046F864",
+              "encoding": "ascii",
+              "value": "DisableD3DXPSGP"
+            }
+          ],
+          "imports": [
+            {
+              "module": "d3d8",
+              "symbols": [
+                "Direct3DCreate8"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "msvc6-crt",
+          "version": "Visual C++ 6.0 SP6 multithreaded static CRT (LIBCMT.LIB)",
+          "linkage": "static",
+          "confidence": "archive-confirmed",
+          "source_artifact": "visual-cpp-6-sp6-media",
+          "archive_member": "vs6sp6.iso/VS6sp61.cab/vc98/lib/libcmt.lib",
+          "ranges": [
+            {
+              "start": "0x00460CB8",
+              "end": "0x0046E920"
+            }
+          ]
+        },
+        {
+          "id": "libvorbisfile",
+          "version": "Ogg Vorbis Win32 SDK 1.0",
+          "linkage": "dynamic",
+          "confidence": "binary-dependency-confirmed",
+          "dependency_artifact": "vorbisfile.dll",
+          "imports": [
+            {
+              "module": "vorbisfile",
+              "symbols": [
+                "ov_clear",
+                "ov_info",
+                "ov_open_callbacks",
+                "ov_pcm_seek",
+                "ov_pcm_total",
+                "ov_read"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "grim.dll",
+      "path": "game_bins/crimsonland/1.9.93-gog/grim.dll",
+      "sha256": "373f1304511c2cdb06a36447cc96f281a270bfe96957ca8ff03e19cf03dc8e70",
+      "size": 581632,
+      "components": [
+        {
+          "id": "d3dx8",
+          "version": "DirectX 8.1 SDK release d3dx8.lib (2001-10-16)",
+          "linkage": "static",
+          "confidence": "archive-confirmed",
+          "source_artifact": "directx-8.1-sdk-full",
+          "archive_member": "DXF/DXSDK/lib/d3dx8.lib",
+          "ranges": [
+            {
+              "start": "0x1000AAA6",
+              "end": "0x1004B5B0"
+            }
+          ],
+          "fingerprints": [
+            {
+              "address": "0x1004CE00",
+              "encoding": "ascii",
+              "value": "Software\\Microsoft\\Direct3D"
+            },
+            {
+              "address": "0x1004CE38",
+              "encoding": "ascii",
+              "value": "DisableD3DXPSGP"
+            },
+            {
+              "address": "0x10053A60",
+              "encoding": "ascii",
+              "value": "D3D: Could not init DirectX 8.1, (re)install it."
+            }
+          ],
+          "imports": [
+            {
+              "module": "d3d8",
+              "symbols": [
+                "Direct3DCreate8"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "msvc6-crt",
+          "version": "Visual C++ 6.0 SP6 DLL CRT import and startup library (MSVCRT.LIB)",
+          "linkage": "dynamic-crt-startup",
+          "confidence": "archive-confirmed",
+          "source_artifact": "visual-cpp-6-sp6-media",
+          "archive_member": "vs6sp6.iso/VS6sp61.cab/vc98/lib/msvcrt.lib",
+          "ranges": [
+            {
+              "start": "0x1000A8D0",
+              "end": "0x1000AAA6"
+            }
+          ],
+          "imports": [
+            {
+              "module": "msvcrt",
+              "symbols": []
+            }
+          ]
+        },
+        {
+          "id": "libjpeg",
+          "version": "IJG 6a",
+          "linkage": "static-inside-d3dx8",
+          "confidence": "version-confirmed",
+          "source_artifact": "ijg-libjpeg-6a",
+          "source": "https://www.ijg.org/files/jpegsrc.v6a.tar.gz",
+          "fingerprints": [
+            {
+              "address": "0x1004D724",
+              "encoding": "ascii",
+              "value": "6a  7-Feb-96"
+            },
+            {
+              "address": "0x1004D734",
+              "encoding": "ascii",
+              "value": "Copyright (C) 1996, Thomas G. Lane"
+            },
+            {
+              "address": "0x10057754",
+              "encoding": "ascii",
+              "value": "6a  7-Feb-96"
+            }
+          ]
+        },
+        {
+          "id": "libpng",
+          "version": "1.0.5",
+          "linkage": "static-inside-d3dx8",
+          "confidence": "version-confirmed",
+          "source_artifact": "libpng-1.0.5",
+          "source": "https://ftp.osuosl.org/pub/libpng/src/archive/gz/libpng10/libpng-1.0.5.tar.gz",
+          "fingerprints": [
+            {
+              "address": "0x1004E1C0",
+              "encoding": "ascii",
+              "value": "0123456789ABCDEF1.0.5"
+            }
+          ]
+        },
+        {
+          "id": "zlib",
+          "version": "1.1.3",
+          "linkage": "static-inside-d3dx8",
+          "confidence": "version-confirmed",
+          "source_artifact": "zlib-1.1.3",
+          "source": "https://zlib.net/fossils/zlib-1.1.3.tar.gz",
+          "fingerprints": [
+            {
+              "address": "0x1004E288",
+              "encoding": "ascii",
+              "value": "1.1.3"
+            },
+            {
+              "address": "0x10050971",
+              "encoding": "ascii",
+              "value": "deflate 1.1.3"
+            },
+            {
+              "address": "0x100514A1",
+              "encoding": "ascii",
+              "value": "inflate 1.1.3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ogg.dll",
+      "path": "game_bins/crimsonland/1.9.93-gog/ogg.dll",
+      "sha256": "308540dbd488f3bceca2dbadefe02cf29d10a27c4ac096bb3da053e3e0b923ea",
+      "size": 49152,
+      "components": [
+        {
+          "id": "libogg",
+          "version": "Ogg Vorbis Win32 SDK 1.0",
+          "linkage": "dynamic",
+          "confidence": "binary-identical",
+          "source_artifact": "xiph-ogg-vorbis-win32sdk-1.0",
+          "source_member": "oggvorbis-win32sdk-1.0/bin/ogg.dll",
+          "source": "https://downloads.xiph.org/releases/ogg/libogg-1.0.tar.gz"
+        }
+      ]
+    },
+    {
+      "id": "vorbis.dll",
+      "path": "game_bins/crimsonland/1.9.93-gog/vorbis.dll",
+      "sha256": "b4fa55cfe7547ade0a2d5b800ef085ce20cdd71f61898d2461ea61eb0241812b",
+      "size": 974848,
+      "components": [
+        {
+          "id": "libvorbis",
+          "version": "Ogg Vorbis Win32 SDK 1.0",
+          "linkage": "dynamic",
+          "confidence": "binary-identical",
+          "source_artifact": "xiph-ogg-vorbis-win32sdk-1.0",
+          "source_member": "oggvorbis-win32sdk-1.0/bin/vorbis.dll",
+          "source": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.0.tar.gz",
+          "fingerprints": [
+            {
+              "file_offset": "0x14460",
+              "encoding": "ascii",
+              "value": "Xiph.Org libVorbis I 20020717"
+            }
+          ],
+          "imports": [
+            {
+              "module": "ogg",
+              "symbols": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vorbisfile.dll",
+      "path": "game_bins/crimsonland/1.9.93-gog/vorbisfile.dll",
+      "sha256": "f44472c6d9a64045c14583d12c0cfab5b4aa268aceb8bc9e3e1236b3008306f2",
+      "size": 28672,
+      "components": [
+        {
+          "id": "libvorbisfile",
+          "version": "Ogg Vorbis Win32 SDK 1.0",
+          "linkage": "dynamic",
+          "confidence": "binary-identical",
+          "source_artifact": "xiph-ogg-vorbis-win32sdk-1.0",
+          "source_member": "oggvorbis-win32sdk-1.0/bin/vorbisfile.dll",
+          "source": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.0.tar.gz",
+          "imports": [
+            {
+              "module": "ogg",
+              "symbols": []
+            },
+            {
+              "module": "vorbis",
+              "symbols": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "archive_matches": [
+    {
+      "component": "d3dx8",
+      "source_artifact": "directx-8.1-sdk-full",
+      "member": "DXF/DXSDK/lib/d3dx8.lib",
+      "sha256": "39a8e21889a7c1f0b966f04a9e7d392de14ddebb3e091dfa1e5ce3e19564fc28",
+      "archive_members": 149,
+      "coff_members": 146,
+      "object_functions": 2912,
+      "targets": [
+        {
+          "artifact": "crimsonland.exe",
+          "start": "0x00452EF0",
+          "end": "0x00460CB8",
+          "target_functions": 225,
+          "target_bytes": 51362,
+          "matched_functions": 172,
+          "matched_bytes": 40098,
+          "unique_functions": 118,
+          "unique_bytes": 37697
+        },
+        {
+          "artifact": "grim.dll",
+          "start": "0x1000AAA6",
+          "end": "0x1004B5B0",
+          "target_functions": 928,
+          "target_bytes": 250077,
+          "matched_functions": 683,
+          "matched_bytes": 156379,
+          "unique_functions": 548,
+          "unique_bytes": 151687
+        }
+      ]
+    },
+    {
+      "component": "msvc6-crt",
+      "source_artifact": "visual-cpp-6-sp6-media",
+      "member": "vs6sp6.iso/VS6sp61.cab/vc98/lib/libcmt.lib",
+      "sha256": "a541c95e5ffdd6d5573d1976f5e5d0038f2c4fb0bcb02975c68948bf1d6e452a",
+      "archive_members": 641,
+      "coff_members": 598,
+      "object_functions": 1465,
+      "targets": [
+        {
+          "artifact": "crimsonland.exe",
+          "start": "0x00460CB8",
+          "end": "0x0046E920",
+          "target_functions": 366,
+          "target_bytes": 54038,
+          "matched_functions": 299,
+          "matched_bytes": 43754,
+          "unique_functions": 254,
+          "unique_bytes": 41813
+        },
+        {
+          "artifact": "grim.dll",
+          "start": "0x1000A8D0",
+          "end": "0x1000AAA6",
+          "target_functions": 17,
+          "target_bytes": 468,
+          "matched_functions": 15,
+          "matched_bytes": 253,
+          "unique_functions": 2,
+          "unique_bytes": 175
+        }
+      ]
+    },
+    {
+      "component": "msvc6-dll-crt",
+      "source_artifact": "visual-cpp-6-sp6-media",
+      "member": "vs6sp6.iso/VS6sp61.cab/vc98/lib/msvcrt.lib",
+      "sha256": "3efc3ddf045a459a2b6403f0b821be2cb7c316ffca67dddddb346cea7a9e4f63",
+      "archive_members": 898,
+      "coff_members": 43,
+      "object_functions": 92,
+      "targets": [
+        {
+          "artifact": "grim.dll",
+          "start": "0x1000A8D0",
+          "end": "0x1000AAA6",
+          "target_functions": 17,
+          "target_bytes": 468,
+          "matched_functions": 4,
+          "matched_bytes": 390,
+          "unique_functions": 4,
+          "unique_bytes": 390
+        }
+      ]
+    }
+  ],
+  "synced_files": [
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jinclude.h",
+      "path": "third_party/headers/jinclude.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jpeglib.h",
+      "path": "third_party/headers/jpeglib.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jmorecfg.h",
+      "path": "third_party/headers/jmorecfg.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jerror.h",
+      "path": "third_party/headers/jerror.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jversion.h",
+      "path": "third_party/headers/jversion.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jpegint.h",
+      "path": "third_party/headers/jpegint.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jmemsys.h",
+      "path": "third_party/headers/jmemsys.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jmemmgr.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jmemmgr.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdct.h",
+      "path": "third_party/headers/jdct.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdhuff.h",
+      "path": "third_party/headers/jdhuff.h"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jidctred.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jidctred.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jidctflt.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jidctflt.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jidctfst.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jidctfst.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jidctint.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jidctint.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdapimin.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdapimin.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdapistd.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdapistd.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdmarker.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdmarker.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jcomapi.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jcomapi.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jerror.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jerror.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdmaster.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdmaster.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdinput.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdinput.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdmainct.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdmainct.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdcoefct.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdcoefct.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdhuff.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdhuff.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdphuff.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdphuff.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jddctmgr.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jddctmgr.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdpostct.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdpostct.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdsample.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdsample.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdcolor.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdcolor.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jdmerge.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jdmerge.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jquant1.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jquant1.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jquant2.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jquant2.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jutils.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jutils.c"
+    },
+    {
+      "source_artifact": "ijg-libjpeg-6a",
+      "member": "jpeg-6a/jmemnobs.c",
+      "path": "third_party/sources/ijg-libjpeg-6a/jmemnobs.c"
+    },
+    {
+      "source_artifact": "libpng-1.0.5",
+      "member": "libpng-1.0.5/png.h",
+      "path": "third_party/headers/png.h"
+    },
+    {
+      "source_artifact": "libpng-1.0.5",
+      "member": "libpng-1.0.5/pngconf.h",
+      "path": "third_party/headers/pngconf.h"
+    },
+    {
+      "source_artifact": "libpng-1.0.5",
+      "member": "libpng-1.0.5/pngrutil.c",
+      "path": "third_party/sources/libpng-1.0.5/pngrutil.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/uncompr.c",
+      "path": "third_party/sources/zlib-1.1.3/uncompr.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/zutil.h",
+      "path": "third_party/headers/zutil.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/adler32.c",
+      "path": "third_party/sources/zlib-1.1.3/adler32.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/crc32.c",
+      "path": "third_party/sources/zlib-1.1.3/crc32.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/zutil.c",
+      "path": "third_party/sources/zlib-1.1.3/zutil.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infblock.h",
+      "path": "third_party/headers/infblock.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infcodes.h",
+      "path": "third_party/headers/infcodes.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inftrees.h",
+      "path": "third_party/headers/inftrees.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infutil.h",
+      "path": "third_party/headers/infutil.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infutil.c",
+      "path": "third_party/sources/zlib-1.1.3/infutil.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inflate.c",
+      "path": "third_party/sources/zlib-1.1.3/inflate.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inffast.h",
+      "path": "third_party/headers/inffast.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inffast.c",
+      "path": "third_party/sources/zlib-1.1.3/inffast.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infblock.c",
+      "path": "third_party/sources/zlib-1.1.3/infblock.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/infcodes.c",
+      "path": "third_party/sources/zlib-1.1.3/infcodes.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inffixed.h",
+      "path": "third_party/headers/inffixed.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/inftrees.c",
+      "path": "third_party/sources/zlib-1.1.3/inftrees.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/deflate.h",
+      "path": "third_party/headers/deflate.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/trees.h",
+      "path": "third_party/headers/trees.h"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/deflate.c",
+      "path": "third_party/sources/zlib-1.1.3/deflate.c"
+    },
+    {
+      "source_artifact": "zlib-1.1.3",
+      "member": "zlib-1.1.3/trees.c",
+      "path": "third_party/sources/zlib-1.1.3/trees.c"
+    }
+  ],
+  "cross_image_matches": [
+    {
+      "component": "d3dx8",
+      "left": {
+        "artifact": "crimsonland.exe",
+        "name": "float_near_equal",
+        "start": "0x00452EF0",
+        "end": "0x00452F1D"
+      },
+      "right": {
+        "artifact": "grim.dll",
+        "name": "float_near_equal",
+        "start": "0x1000CBFF",
+        "end": "0x1000CC2C"
+      }
+    },
+    {
+      "component": "d3dx8",
+      "left": {
+        "artifact": "crimsonland.exe",
+        "name": "D3DXCpuOptimizations",
+        "start": "0x004566D3",
+        "end": "0x004567B0"
+      },
+      "right": {
+        "artifact": "grim.dll",
+        "name": "D3DXCpuOptimizations",
+        "start": "0x1001C188",
+        "end": "0x1001C265"
+      }
+    },
+    {
+      "component": "d3dx8",
+      "left": {
+        "artifact": "crimsonland.exe",
+        "name": "mat4_invert",
+        "start": "0x0045E40A",
+        "end": "0x0045E73E"
+      },
+      "right": {
+        "artifact": "grim.dll",
+        "name": "x3d_matrix_inverse_inline",
+        "start": "0x1002CE9A",
+        "end": "0x1002D1CE"
+      }
+    }
+  ]
+}

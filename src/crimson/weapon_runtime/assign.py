@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import msgspec
 
-from ..math_parity import f32
+from ..math_parity import f32, x87_pc24_mul
 from ..perks import PerkId
 from ..perks.helpers import perk_active
 from ..sim.state_types import GameplayState, PlayerState, WeaponSlot
@@ -90,17 +90,25 @@ def most_used_weapon_id_for_player(
     player_index: int,
     fallback_weapon_id: WeaponId,
 ) -> WeaponId:
-    """Return a weapon id for the player's most-used weapon."""
+    """Return native's most-used weapon from the global equipped-time table."""
 
-    idx = int(player_index)
-    if 0 <= idx < len(state.weapon_shots_fired):
-        counts = state.weapon_shots_fired[idx]
-        if counts:
-            start = 1 if len(counts) > 1 else 0
-            best = max(range(start, len(counts)), key=lambda i: int(counts[i]))
-            if int(counts[best]) > 0:
-                return WeaponId(best)
-    return WeaponId(fallback_weapon_id)
+    _ = player_index
+    times = state.weapon_usage_time
+    if len(times) < 2:
+        return WeaponId(fallback_weapon_id)
+
+    def signed_time(weapon_id: int) -> int:
+        value = int(times[weapon_id]) & 0xFFFFFFFF
+        return value - 0x100000000 if value & 0x80000000 else value
+
+    best = 1
+    for weapon_id in range(2, min(len(times), 64)):
+        if signed_time(weapon_id) > signed_time(best):
+            best = weapon_id
+    try:
+        return WeaponId(best)
+    except ValueError:
+        return WeaponId(fallback_weapon_id)
 
 
 def player_swap_alt_weapon(player: PlayerState) -> bool:
@@ -112,25 +120,34 @@ def player_swap_alt_weapon(player: PlayerState) -> bool:
     return True
 
 
-def player_start_reload(player: PlayerState, state: GameplayState) -> None:
+def player_start_reload(
+    player: PlayerState,
+    state: GameplayState,
+    *,
+    players: Sequence[PlayerState] | None = None,
+) -> None:
     """Start or refresh a reload timer (`player_start_reload` @ 0x00413430)."""
 
+    # Native queries the global perk table through `perk_count_get` (and reads
+    # Fastloader directly from slot zero) even while mutating another overlay
+    # player. Corrected mode keeps the intuitive per-player policy.
+    perk_player = players[0] if state.preserve_bugs and players else player
+
     if player.weapon.reload_active and (
-        perk_active(player, PerkId.AMMUNITION_WITHIN) or perk_active(player, PerkId.REGRESSION_BULLETS)
+        perk_active(perk_player, PerkId.AMMUNITION_WITHIN) or perk_active(perk_player, PerkId.REGRESSION_BULLETS)
     ):
         return
 
     weapon = weapon_entry(player.weapon.weapon_id)
-    reload_time = float(weapon.reload_time)
+    reload_time = f32(weapon.reload_time)
 
     if not player.weapon.reload_active:
         player.weapon.reload_active = True
 
-    if perk_active(player, PerkId.FASTLOADER):
-        reload_time *= 0.7
+    player.weapon.reload_timer = reload_time
+    if perk_active(perk_player, PerkId.FASTLOADER):
+        player.weapon.reload_timer = x87_pc24_mul(reload_time, f32(0.7))
     if state.bonuses.weapon_power_up > 0.0:
-        reload_time *= 0.6
+        player.weapon.reload_timer = x87_pc24_mul(player.weapon.reload_timer, f32(0.6))
 
-    # Native reload_timer is a float32 field; spill once on the store.
-    player.weapon.reload_timer = float(f32(max(0.0, reload_time)))
     player.weapon.reload_timer_max = player.weapon.reload_timer

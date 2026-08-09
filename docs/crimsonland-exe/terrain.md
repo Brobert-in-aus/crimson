@@ -47,7 +47,7 @@ These are the **world dimensions** used everywhere (spawns, camera clamp, UV sca
 
 ### Terrain resolution scaling (important)
 
-Config float: `config_blob.reserved0._112_4_` (I’ll call it `terrain_scale`).
+Config float: `config_blob.texture_scale` (the terrain scale used by the native build).
 
 * Clamped to **[0.5, 4.0]**
 * Render target size is:
@@ -68,7 +68,7 @@ Crucial: when sampling the texture on screen, UV math uses **1024** (world size)
 
 ## 3) Asset mapping: terrain texture handles array
 
-There is a contiguous array of 8 terrain stamp textures at `DAT_0048f548`:
+There is a contiguous array of 8 terrain stamp textures at `terrain_texture_handles`:
 
 Index → texture name loaded in stage 5:
 
@@ -102,7 +102,7 @@ Fallback mode loads **different** textures:
 
 These indices select entries from the terrain texture handle array above.
 
-In the quest database init helper (`FUN_00430a20`), for tier `t = arg2` and quest-in-tier `q = arg3`:
+In the quest database init helper (`quest_meta_init_entry`), for tier `t = arg2` and quest-in-tier `q = arg3`:
 
 ```c
 base = t*2 - 2;   // 0,2,4,6 for t=1..4
@@ -629,7 +629,7 @@ v1 = (screen_height / 1024.0f) + v0;
 ```
 
 5. `grim_set_uv(u0,v0,u1,v1)`
-6. draw one fullscreen quad (`grim_draw_fullscreen_quad()`):
+6. draw one fullscreen quad (`grim_draw_fullscreen_quad(0)`):
 
 * geometry is screen-sized
 * UV picks the camera window out of the big terrain texture
@@ -719,7 +719,11 @@ It internally stores:
 * Else it computes:
 
   * `center = (x+w/2, y+h/2)`
-  * `half_diag = 0.5 * sqrt(w*w + h*h)`
+  * `length_sq = w*w + h*h`
+  * `inv = inverse_sqrt(length_sq)` using the `0x5f3759df` seed and one
+    Newton refinement
+  * `half_diag = 0.5 * length_sq * inv` (an approximation of
+    `0.5 * sqrt(length_sq)`, with no CRT `sqrt` call)
   * `dx = cos(r+π/4) * half_diag`
   * `dy = sin(r+π/4) * half_diag`
   * corners:

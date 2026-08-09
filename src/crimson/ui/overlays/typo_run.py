@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
-from typing import TypeAlias
 
 from grim.geom import Vec2
 from grim.raylib_api import rl
@@ -20,9 +19,9 @@ TYPING_PROMPT = ">"
 TYPING_CURSOR = "_"
 TYPING_CURSOR_X_OFFSET = 14.0
 
-DrawUiText: TypeAlias = Callable[[str, Vec2, rl.Color, float], None]
-MeasureUiTextWidth: TypeAlias = Callable[[str, float], float]
-WorldToScreen: TypeAlias = Callable[[Vec2], Vec2]
+type DrawUiText = Callable[[str, Vec2, rl.Color, float], None]
+type MeasureUiTextWidth = Callable[[str, float], float]
+type WorldToScreen = Callable[[Vec2], Vec2]
 
 
 def draw_typo_name_labels(
@@ -46,9 +45,9 @@ def draw_typo_name_labels(
             continue
 
         label_alpha = 1.0
-        hitbox = float(creature.lifecycle_stage)
-        if hitbox < 0.0:
-            label_alpha = max(0.0, min(1.0, (hitbox + 10.0) * 0.1))
+        lifecycle_stage = float(creature.lifecycle_stage)
+        if lifecycle_stage < 0.0:
+            label_alpha = max(0.0, min(1.0, (lifecycle_stage + 10.0) * 0.1))
         if label_alpha <= 1e-3:
             continue
 

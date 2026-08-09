@@ -1,62 +1,923 @@
 # Matching Status
 
-Regenerate with `uv run crimson match status --write tools/match/STATUS.md`.
+Scope: `port` from `analysis/matching_scope.json`.
 
-**19/2161** functions matched, **459/675651** code bytes (**0.1%**). Byte totals are manifest function extents with terminal padding trimmed.
+Regenerate with `uv run crimson match checkpoint`.
+
+**718/810** functions matched exactly, **138197/341970** code bytes (**40.4%**). Byte totals are manifest function extents with terminal padding trimmed.
+
+Fuzzy-weighted alignment is **305353/341970** code bytes (**89.3%**).
+
+Reproducible candidates cover **810/810** functions and **341970/341970** code bytes (**100.0%**). Candidate coverage includes exact matches and WIPs; it does not claim byte identity.
+
+## Native linking
+
+Generated from `analysis/native/<image>/{objects,closure,data}.json`. Artifact state is `current` only when all three reports share and reproduce one audit digest, their recorded inputs still match the repository, and the generated `objects.txt` and `exports.def` companions still match their recorded hashes. Gate values in `stale` rows are historical snapshots, not current pass claims.
+
+| image | artifacts | functions | objects | TU clusters | ABI | function closure | game-owned closure | all refs closed | hard duplicates | resolved | unresolved |
+|---|---|---:|---:|---:|---|---|---|---|---:|---:|---:|
+| crimsonland.exe | stale | 671 | 663 | 3 | passed | yes | yes | no | 0 | 1354 | 97 |
+| grim.dll | current | 139 | 133 | 3 | passed | yes | yes | no | 0 | 268 | 54 |
+
+| image | unresolved by category | game-data unresolved | data entries | typed | explicit sizes | explicit alignments | explicit initializers |
+|---|---|---:|---:|---:|---:|---:|---:|
+| crimsonland.exe | excluded_function=71, game_data=0, import=25, toolchain=1 | 0 | 1788 | 1788 | 1788 | 1788 | 1788 |
+| grim.dll | excluded_function=39, game_data=0, import=13, toolchain=2 | 0 | 478 | 428 | 350 | 350 | 350 |
+
+Artifact freshness issues:
+- `crimsonland.exe`: **stale** — 66 recorded file inputs changed or missing
+
+## Function dispositions
+
+57 audited functions (48 platform-replaced, 9 third-party) are omitted from this score and from default shards. Their analysis and archived scratches remain available with `--scope all`.
+
+| image | function | address | disposition | reason |
+|---|---|---:|---|---|
+| crimsonland.exe | dx_get_version | 0x0041ccb0 | platform-replaced | Legacy DirectX version startup gate; the host renderer supplies capability checks. |
+| crimsonland.exe | dx_get_version_from_dxdiag | 0x0041cdb0 | platform-replaced | COM DxDiag probe used only by the legacy DirectX version startup gate. |
+| crimsonland.exe | dx_get_version_fallback_from_files | 0x0041cfe0 | platform-replaced | Win32 version-resource fallback used only by the legacy DirectX version startup gate. |
+| crimsonland.exe | win32_file_get_version_words | 0x0041db50 | platform-replaced | Win32 version-resource helper used only by the legacy DirectX version startup gate. |
+| crimsonland.exe | dx_version_pack_4x16 | 0x0041dc10 | platform-replaced | Version tuple helper used only by the legacy DirectX version-resource fallback. |
+| crimsonland.exe | dx_version_compare_4x16 | 0x0041dc50 | platform-replaced | Version tuple helper used only by the legacy DirectX version-resource fallback. |
+| crimsonland.exe | reg_read_dword_default | 0x0042a980 | platform-replaced | Win32 registry persistence leaf; the port owns its settings storage backend. |
+| crimsonland.exe | reg_write_dword | 0x0042a9c0 | platform-replaced | Win32 registry persistence leaf; the port owns its settings storage backend. |
+| grim.dll | grim_advanced_config_dialog_proc | 0x10001170 | platform-replaced | Win32 advanced-renderer dialog; the port supplies its own settings UI. |
+| grim.dll | grim_config_blob_save | 0x100019f0 | platform-replaced | Legacy crimson.cfg blob persistence used only by the Win32 launcher dialogs. |
+| grim.dll | grim_config_blob_load | 0x10001a30 | platform-replaced | Legacy crimson.cfg blob persistence used only by the Win32 launcher dialogs. |
+| grim.dll | grim_parental_lock_dialog_proc | 0x10001ad0 | platform-replaced | Win32 parental-lock dialog; the port supplies its own settings UI. |
+| grim.dll | grim_config_dialog_populate_display_modes | 0x10001e90 | platform-replaced | Direct3D adapter-mode population for the Win32 launcher UI. |
+| grim.dll | grim_config_dialog_proc | 0x10002120 | platform-replaced | Win32 launcher dialog; the port supplies its own settings UI. |
+| grim.dll | grim_window_create | 0x10002680 | platform-replaced | Win32 window creation and class registration; the host engine owns the window. |
+| grim.dll | grim_window_destroy | 0x10002880 | platform-replaced | Win32 window teardown; the host engine owns the window. |
+| grim.dll | grim_backup_textures | 0x100028d0 | platform-replaced | Direct3D 8 lost-device texture backup; the host renderer owns resource lifetime. |
+| grim.dll | grim_restore_textures | 0x10002b40 | platform-replaced | Direct3D 8 lost-device texture restore; the host renderer owns resource lifetime. |
+| grim.dll | grim_try_reset_device | 0x10002cf0 | platform-replaced | Direct3D 8 lost-device reset loop; the host renderer owns device recovery. |
+| grim.dll | grim_app_cleanup | 0x10002f60 | platform-replaced | Win32 application-loop cleanup adapter; the host engine owns lifecycle. |
+| grim.dll | grim_app_tick | 0x10002f80 | platform-replaced | Win32 application-loop timer adapter; the host engine owns scheduling. |
+| grim.dll | grim_app_init | 0x10002fc0 | platform-replaced | Win32 application-loop initialization adapter; the host engine owns lifecycle. |
+| grim.dll | grim_app_shutdown | 0x10003080 | platform-replaced | Win32 application-loop shutdown adapter; the host engine owns lifecycle. |
+| grim.dll | grim_app_pump | 0x10003090 | platform-replaced | Win32 application-loop pump adapter; the host engine owns scheduling. |
+| grim.dll | grim_restore_device_after_activation | 0x100030b0 | platform-replaced | Direct3D 8 reactivation recovery; the host renderer owns device recovery. |
+| grim.dll | grim_window_proc | 0x100033b0 | platform-replaced | Win32 message dispatch and device-activation adapter; the host engine owns events. |
+| grim.dll | grim_run_loop | 0x10003c00 | platform-replaced | Win32 message and Direct3D presentation loop; the host engine owns the frame loop. |
+| grim.dll | grim_d3d_init | 0x10003e60 | platform-replaced | Direct3D 8 device and window initialization; the host renderer owns startup. |
+| grim.dll | grim_d3d_shutdown | 0x10004280 | platform-replaced | Direct3D 8 device teardown; the host renderer owns resource lifetime. |
+| grim.dll | grim_create_geometry_buffers | 0x10004350 | platform-replaced | Direct3D 8 vertex and index buffer allocation; the host renderer owns geometry buffers. |
+| grim.dll | grim_release_geometry_buffers | 0x100044e0 | platform-replaced | Direct3D 8 vertex and index buffer teardown; the host renderer owns geometry buffers. |
+| grim.dll | grim_save_screenshot | 0x10005cb0 | platform-replaced | D3DX front-buffer export; the host renderer supplies screenshot capture. |
+| grim.dll | grim_apply_config | 0x10005d40 | platform-replaced | Direct3D capability probe and Win32 launcher entry; the port supplies its own settings UI. |
+| grim.dll | grim_save_texture | 0x10007750 | platform-replaced | D3DX texture export; the host renderer supplies image export. |
+| grim.dll | grim_jaz_jpeg_create_decompress | 0x10009a50 | third-party | Plain-C IJG libjpeg 6a jdapimin entrypoint in Grim's separately linked JAZ decoder cluster; the DirectX 8.1 archive copy is namespaced and byte-distinct. |
+| grim.dll | grim_jpeg_destroy_decompress | 0x10009b20 | third-party | Plain-C IJG libjpeg 6a decompressor teardown wrapper in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_read_header | 0x10009b30 | third-party | Plain-C IJG libjpeg 6a header parser entrypoint in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_consume_input | 0x10009ba0 | third-party | Plain-C IJG libjpeg 6a input-state dispatcher in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_default_decompress_parms | 0x10009c60 | third-party | Plain-C IJG libjpeg 6a default output-parameter initializer in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_finish_decompress | 0x10009e00 | third-party | Plain-C IJG libjpeg 6a decompressor completion entrypoint in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_start_decompress | 0x10009ec0 | third-party | Plain-C IJG libjpeg 6a output-pass startup entrypoint in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_output_pass_setup | 0x10009fa0 | third-party | Plain-C IJG libjpeg 6a output-pass helper in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_jaz_jpeg_read_scanlines | 0x1000a070 | third-party | Plain-C IJG libjpeg 6a scanline decode entrypoint in Grim's separately linked JAZ decoder cluster. |
+| grim.dll | grim_joystick_enum_device | 0x1000a110 | platform-replaced | Raw DirectInput joystick enumeration; the host input backend owns device discovery. |
+| grim.dll | grim_joystick_configure_axis | 0x1000a150 | platform-replaced | Raw DirectInput axis setup; the host input backend owns device configuration. |
+| grim.dll | grim_joystick_init | 0x1000a1c0 | platform-replaced | Raw DirectInput joystick initialization; the host input backend owns devices. |
+| grim.dll | grim_joystick_poll | 0x1000a2b0 | platform-replaced | Raw DirectInput joystick polling; the host input backend supplies state. |
+| grim.dll | grim_joystick_button_down | 0x1000a310 | platform-replaced | Raw DirectInput joystick-state accessor; the host input backend supplies state. |
+| grim.dll | grim_joystick_shutdown | 0x1000a330 | platform-replaced | Raw DirectInput joystick teardown; the host input backend owns devices. |
+| grim.dll | grim_keyboard_key_down | 0x1000a370 | platform-replaced | Raw DirectInput keyboard-state accessor; the host input backend supplies state. |
+| grim.dll | grim_keyboard_init | 0x1000a390 | platform-replaced | Raw DirectInput keyboard initialization; the host input backend owns devices. |
+| grim.dll | grim_keyboard_poll | 0x1000a4a0 | platform-replaced | Raw DirectInput keyboard polling; the host input backend supplies state. |
+| grim.dll | grim_keyboard_shutdown | 0x1000a550 | platform-replaced | Raw DirectInput keyboard teardown; the host input backend owns devices. |
+| grim.dll | grim_mouse_button_down | 0x1000a590 | platform-replaced | Raw DirectInput mouse-state accessor; the host input backend supplies state. |
+| grim.dll | grim_mouse_init | 0x1000a5a0 | platform-replaced | Raw DirectInput mouse initialization; the host input backend owns devices. |
+| grim.dll | grim_mouse_poll | 0x1000a670 | platform-replaced | Raw DirectInput mouse polling and accumulation; the host input backend supplies state. |
+| grim.dll | grim_mouse_shutdown | 0x1000a7d0 | platform-replaced | Raw DirectInput mouse teardown; the host input backend owns devices. |
 
 ## Images
 
-| image | functions | bytes | code | scratches |
-|---|---:|---:|---:|---:|
-| crimsonland.exe | 12/986 | 345/385754 | 0.1% | 12/29 |
-| grim.dll | 7/1175 | 114/289897 | 0.0% | 7/7 |
+| image | exact functions | exact bytes | exact code | fuzzy-weighted bytes | fuzzy code | candidate functions | candidate bytes | candidate code | scratches |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| crimsonland.exe | 585/671 | 123253/320805 | 38.4% | 284547/320805 | 88.7% | 671/671 | 320805/320805 | 100.0% | 585/671 |
+| grim.dll | 133/139 | 14944/21165 | 70.6% | 20807/21165 | 98.3% | 139/139 | 21165/21165 | 100.0% | 133/139 |
 
 ## crimsonland.exe
 
-**12/986** functions, **345/385754** bytes (**0.1%**), **12/29** scratches at 100%.
+**585/671** functions, **123253/320805** bytes (**38.4%**), **284547/320805** fuzzy-weighted bytes (**88.7%**), **671/671** reproducible candidates covering **320805/320805** bytes (**100.0%**), **585/671** scratches verified.
 
-| state | function | address | bytes | insns | match | prefix | build | note |
-|---|---|---|---:|---:|---:|---:|---|---|
-| match | console_input_clear | 0x00401030 | 18 | 5/5 | 100.00% | 5/5 |  | smoke |
-| match | console_input_buffer | 0x00401050 | 6 | 2/2 | 100.00% | 2/2 |  | smoke |
-| match | console_cmd_argc_get | 0x00401150 | 6 | 2/2 | 100.00% | 2/2 |  | smoke |
-| wip | bonus_apply | 0x00409890 | 2693 | 661/668 | 64.41% | 6/668 |  | gameplay-bonus-switch |
-| wip | player_start_reload | 0x00413430 | 263 | 67/67 | 94.03% | 29/67 |  | gameplay-reload |
-| wip | player_heading_approach_target | 0x00413540 | 354 | 93/95 | 57.45% | 1/95 |  | gameplay-angle-x87 |
-| match | vec2_length | 0x00417660 | 26 | 12/12 | 100.00% | 12/12 |  | x87-fsqrt |
-| match | game_sequence_get | 0x0041df60 | 6 | 2/2 | 100.00% | 2/2 |  | smoke |
-| wip | player_apply_move_with_spawn_avoidance | 0x0041e290 | 356 | 135/131 | 64.66% | 1/131 |  | gameplay-movement |
-| match | bonus_alloc_slot | 0x0041f580 | 46 | 14/14 | 100.00% | 14/14 |  | gameplay-bonus-pool |
-| match | weapon_table_entry | 0x0041fc60 | 19 | 6/6 | 100.00% | 6/6 |  | gameplay-weapon-table |
-| wip | creature_find_nearest | 0x00420040 | 225 | 91/89 | 65.56% | 7/89 |  | gameplay-target-search |
-| wip | fx_spawn_secondary_projectile | 0x00420360 | 218 | 67/65 | 69.70% | 0/65 |  | gameplay-secondary-projectile |
-| wip | projectile_spawn | 0x00420440 | 400 | 118/126 | 64.75% | 0/126 |  | gameplay-projectile |
-| match | projectile_reset_pools | 0x004205d0 | 37 | 11/11 | 100.00% | 11/11 |  | gameplay-pool-reset |
-| wip | creatures_apply_radius_damage | 0x00420600 | 159 | 58/57 | 74.78% | 11/57 |  | gameplay-radius-damage |
-| wip | creature_find_in_radius | 0x004206a0 | 133 | 51/47 | 40.82% | 0/47 |  | gameplay-target-search |
-| wip | player_find_in_radius | 0x00420730 | 133 | 54/54 | 64.81% | 9/54 |  | gameplay-target-search |
-| wip | player_take_damage | 0x00425e50 | 969 | 265/267 | 75.56% | 9/267 |  | gameplay-player-damage |
-| wip | creature_reset_all | 0x004281e0 | 46 | 12/13 | 80.00% | 2/13 |  | gameplay-creature-reset |
-| match | creatures_none_active | 0x00428210 | 40 | 12/12 | 100.00% | 12/12 | msvc6.5pp /O2 /G6 /W3 /GR- | gameplay-creature-scan |
-| wip | creature_spawn | 0x00428240 | 334 | 78/79 | 73.89% | 5/79 |  | gameplay-creature-spawn |
-| match | bonus_label_for_entry | 0x00429580 | 99 | 30/30 | 100.00% | 30/30 |  | gameplay-bonus-label |
-| wip | perk_select_random | 0x0042fbd0 | 89 | 32/32 | 96.88% | 28/32 | msvc6.5pp /O2 /G6 /W3 /GR- | gameplay-perk-rng |
-| match | perk_count_get | 0x0042fcf0 | 12 | 3/3 | 100.00% | 3/3 |  | gameplay-perk-count |
-| match | creature_spawn_slot_alloc | 0x00430ad0 | 30 | 10/10 | 100.00% | 10/10 | msvc6.5pp /O2 /G6 /W3 /GR- | gameplay-spawn-slots |
-| wip | creature_spawn_template | 0x00430af0 | 14099 | 2731/3159 | 57.28% | 20/3159 |  | gameplay-spawn-switch |
-| wip | weapon_pick_random_available | 0x00452cd0 | 107 | 36/36 | 97.22% | 6/36 |  | gameplay-weapon-rng |
-| wip | weapon_refresh_available | 0x00452e40 | 161 | 48/48 | 93.75% | 10/48 |  | gameplay-weapon-unlocks |
+| state | function | address | bytes | fuzzy bytes | fuzzy gap | insns | match | prefix | refs ok/?/! | build | note |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| match | console_input_clear | 0x00401030 | 18 | 18/18 | 0 | 5/5 | 100.00% | 5/5 | 3/0/0 |  | smoke |
+| match | console_input_buffer | 0x00401050 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | console_input_poll | 0x00401060 | 139 | 139/139 | 0 | 41/41 | 100.00% | 41/41 | 15/0/0 |  | console-input-buffer-policy |
+| match | invoke_callback_n | 0x004010f0 | 42 | 42/42 | 0 | 21/21 | 100.00% | 21/21 | 0/0/0 |  | member-callback-array-iterator |
+| match | console_cmd_arg_get | 0x00401120 | 36 | 36/36 | 0 | 12/12 | 100.00% | 12/12 | 3/0/0 |  | console-command-arguments |
+| match | console_cmd_argc_get | 0x00401150 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | console_global_construct_and_register | 0x00401160 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | console-global-lifetime-registration |
+| match | console_global_init | 0x00401170 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | console-global-constructor-thunk |
+| match | console_register_global_destructor_atexit | 0x00401180 | 12 | 12/12 | 0 | 4/4 | 100.00% | 4/4 | 2/0/0 |  | console-global-destructor-registration |
+| match | console_global_destroy | 0x00401190 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | console-global-destructor-thunk |
+| match | console_clear_log | 0x004011a0 | 78 | 78/78 | 0 | 28/28 | 100.00% | 28/28 | 7/0/0 |  | console-log-clear |
+| match | console_log_node_free | 0x004011f0 | 68 | 68/68 | 0 | 24/24 | 100.00% | 24/24 | 2/0/0 |  | console-log-node-destructor |
+| match | console_cmd_quit | 0x00401240 | 8 | 8/8 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | console-quit-command |
+| match | console_cmd_exec | 0x00401250 | 236 | 236/236 | 0 | 72/72 | 100.00% | 72/72 | 28/0/0 |  | console-script-execution |
+| match | console_cmd_extend | 0x00401340 | 17 | 17/17 | 0 | 4/4 | 100.00% | 4/4 | 3/0/0 |  | console-height-extend |
+| match | console_cmd_minimize | 0x00401360 | 11 | 11/11 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | console-minimize-command |
+| match | console_cmdlist | 0x00401370 | 65 | 65/65 | 0 | 24/24 | 100.00% | 24/24 | 7/0/0 |  | console-command-list |
+| match | console_vars | 0x004013c0 | 65 | 65/65 | 0 | 24/24 | 100.00% | 24/24 | 7/0/0 |  | console-cvar-list |
+| match | console_echo | 0x00401410 | 245 | 245/245 | 0 | 93/93 | 100.00% | 93/93 | 17/0/0 |  | console-echo-command |
+| match | console_cmd_set | 0x00401510 | 77 | 77/77 | 0 | 22/22 | 100.00% | 22/22 | 11/0/0 |  | console-cvar-set-command |
+| match | console_init | 0x00401560 | 382 | 382/382 | 0 | 107/107 | 100.00% | 107/107 | 44/0/0 |  | console-queue-constructor |
+| match | console_destroy | 0x004016e0 | 187 | 187/187 | 0 | 77/77 | 100.00% | 77/77 | 10/0/0 |  | console-owned-list-destruction |
+| match | console_push_line | 0x004017a0 | 193 | 193/193 | 0 | 68/68 | 100.00% | 68/68 | 5/0/0 |  | console-log-insertion-and-eviction |
+| match | console_printf | 0x00401870 | 49 | 49/49 | 0 | 17/17 | 100.00% | 17/17 | 4/0/0 |  | console-formatted-output |
+| match | console_set_open | 0x004018b0 | 26 | 26/26 | 0 | 7/7 | 100.00% | 7/7 | 2/0/0 |  | console-open-state |
+| match | console_history_apply | 0x004018d0 | 99 | 99/99 | 0 | 42/42 | 100.00% | 42/42 | 4/0/0 |  | console-history-navigation |
+| match | console_exec_line | 0x00401940 | 254 | 254/254 | 0 | 90/90 | 100.00% | 90/90 | 19/0/0 |  | console-command-dispatch |
+| wip | console_update | 0x00401a40 | 904 | 814/904 | 90 | 297/296 | 90.05% | 6/296 | 64/0/0 |  | console-input-history-and-animation-update |
+| wip | console_render | 0x00401dd0 | 1408 | 1401/1408 | 7 | 400/400 | 99.50% | 23/400 | 61/0/0 |  | console-background-log-input-and-caret-rendering |
+| match | console_register_cvar | 0x00402350 | 295 | 295/295 | 0 | 118/118 | 100.00% | 118/118 | 12/0/0 |  | console-cvar-registration |
+| match | console_cvar_find | 0x00402480 | 92 | 92/92 | 0 | 47/47 | 100.00% | 47/47 | 0/0/0 |  | console-cvar-lookup |
+| match | console_cvar_unregister | 0x004024e0 | 72 | 72/72 | 0 | 32/32 | 100.00% | 32/32 | 1/0/0 |  | console-cvar-unlink |
+| match | console_command_unregister | 0x00402530 | 74 | 74/74 | 0 | 32/32 | 100.00% | 32/32 | 1/0/0 |  | console-command-unlink |
+| match | console_tokenize_line | 0x00402580 | 161 | 161/161 | 0 | 55/55 | 100.00% | 55/55 | 10/0/0 |  | console-command-tokenization |
+| match | console_cvar_autocomplete | 0x00402630 | 164 | 164/164 | 0 | 83/83 | 100.00% | 83/83 | 1/0/0 |  | console-cvar-autocomplete |
+| match | console_register_command | 0x004026e0 | 99 | 99/99 | 0 | 38/38 | 100.00% | 38/38 | 2/0/0 |  | console-command-register |
+| match | console_command_find | 0x00402750 | 93 | 93/93 | 0 | 47/47 | 100.00% | 47/47 | 0/0/0 |  | console-command-lookup |
+| match | console_command_autocomplete | 0x004027b0 | 165 | 165/165 | 0 | 83/83 | 100.00% | 83/83 | 1/0/0 |  | console-command-autocomplete |
+| match | console_flush_log | 0x00402860 | 121 | 121/121 | 0 | 56/56 | 100.00% | 56/56 | 6/0/0 |  | console-log-file-flush |
+| match | config_init_defaults_thunk | 0x004028e0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-config-defaults |
+| wip | config_init_defaults | 0x004028f0 | 734 | 729/734 | 5 | 140/140 | 99.29% | 21/140 | 83/0/0 |  | config-defaults-and-input-bindings |
+| match | game_build_path | 0x00402bd0 | 34 | 34/34 | 0 | 9/9 | 100.00% | 9/9 | 5/0/0 |  | game-path-builder |
+| match | register_core_cvars | 0x00402c00 | 326 | 326/326 | 0 | 66/66 | 100.00% | 66/66 | 65/0/0 |  | core-console-variable-registration |
+| match | ui_render_loading | 0x00402d50 | 375 | 375/375 | 0 | 107/107 | 100.00% | 107/107 | 15/0/0 |  | ui-loading-panel-renderer |
+| match | demo_setup_variant_0 | 0x00402ed0 | 263 | 263/263 | 0 | 70/70 | 100.00% | 70/70 | 10/0/0 |  | demo-spider-corridor-setup |
+| match | demo_setup_variant_2 | 0x00402fe0 | 271 | 271/271 | 0 | 81/81 | 100.00% | 81/81 | 7/0/0 |  | demo-zombie-column-setup |
+| match | demo_setup_variant_1 | 0x004030f0 | 338 | 338/338 | 0 | 88/88 | 100.00% | 88/88 | 17/0/0 |  | demo-green-spider-setup |
+| match | demo_setup_variant_3 | 0x00403250 | 278 | 278/278 | 0 | 78/78 | 100.00% | 78/78 | 13/0/0 |  | demo-green-alien-setup |
+| match | demo_purchase_interstitial_begin | 0x00403370 | 18 | 18/18 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | demo-purchase-interstitial |
+| match | demo_mode_start | 0x00403390 | 155 | 155/155 | 0 | 40/40 | 100.00% | 40/40 | 17/0/0 |  | demo-attract-mode-cycle |
+| match | ui_mouse_inside_rect_with_padding | 0x00403430 | 104 | 104/104 | 0 | 32/32 | 100.00% | 32/32 | 7/0/0 |  | ui-mouse-hit-test |
+| match | ui_mouse_inside_rect | 0x004034a0 | 92 | 92/92 | 0 | 30/30 | 100.00% | 30/30 | 5/0/0 |  | ui-mouse-hit-test |
+| match | game_core_init | 0x00403500 | 73 | 73/73 | 0 | 17/17 | 100.00% | 17/17 | 12/0/0 |  | game-core-initialization |
+| match | perk_prompt_update_and_render | 0x00403550 | 378 | 378/378 | 0 | 93/93 | 100.00% | 93/93 | 35/0/0 |  | ui-perk-prompt-animation |
+| match | input_key_name | 0x004036d0 | 2970 | 2970/2970 | 0 | 1097/1097 | 100.00% | 1097/1097 | 256/0/0 |  | input-device-key-label-policy |
+| match | perks_generate_choices | 0x004045a0 | 535 | 535/535 | 0 | 139/139 | 100.00% | 139/139 | 54/0/0 |  | perk-choice-generation-policy |
+| wip | demo_trial_overlay_render | 0x004047c0 | 2413 | 2274/2413 | 139 | 616/636 | 94.25% | 205/636 | 171/0/0 |  | demo-trial-overlay-render-and-actions |
+| match | demo_trial_already_paid_button_destroy | 0x00405130 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | demo-overlay-already-paid-button-empty-destructor |
+| match | demo_trial_purchase_button_destroy | 0x00405140 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | demo-overlay-purchase-button-empty-destructor |
+| match | demo_trial_maybe_later_button_destroy | 0x00405150 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | demo-overlay-maybe-later-button-empty-destructor |
+| match | ui_render_keybind_help | 0x00405160 | 1142 | 1142/1142 | 0 | 324/324 | 100.00% | 324/324 | 80/0/0 |  | pause-keybind-help-panel |
+| wip | perk_apply | 0x004055e0 | 885 | 570/885 | 315 | 243/241 | 64.46% | 2/241 | 66/0/0 |  | perk-immediate-effect-dispatch |
+| match | gameplay_render_world | 0x00405960 | 625 | 625/625 | 0 | 184/184 | 100.00% | 184/184 | 56/0/0 |  | gameplay-world-render-coordinator |
+| wip | perk_selection_screen_update | 0x00405be0 | 1347 | 1171/1347 | 176 | 314/314 | 86.94% | 0/314 | 117/0/0 |  | perk-choice-menu-and-selection-flow |
+| match | perk_selection_select_button_destroy | 0x00406130 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | perk-selection-select-button-empty-destructor |
+| match | perk_selection_cancel_button_destroy | 0x00406140 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | perk-selection-cancel-button-empty-destructor |
+| match | perk_selection_choice_items_destroy | 0x00406150 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | perk-selection-choice-array-empty-destructor |
+| match | perk_selection_hover_color_destroy | 0x00406160 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | perk-selection-hover-color-empty-destructor |
+| match | perk_selection_idle_color_destroy | 0x00406170 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | perk-selection-idle-color-empty-destructor |
+| match | format_ordinal | 0x00406180 | 96 | 96/96 | 0 | 33/33 | 100.00% | 33/33 | 8/0/0 |  | ui-ordinal-format |
+| match | ui_draw_clock_gauge | 0x004061e0 | 362 | 362/362 | 0 | 99/99 | 100.00% | 99/99 | 17/0/0 |  | ui-clock-gauge-renderer |
+| match | game_update_victory_screen | 0x00406350 | 1883 | 1883/1883 | 0 | 447/447 | 100.00% | 447/447 | 189/0/0 |  | final-quest-victory-message-and-mode-actions |
+| match | game_completed_main_menu_button_destroy | 0x00406ab0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | victory-main-menu-button-empty-destructor |
+| match | game_completed_typo_button_destroy | 0x00406ac0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | victory-typo-button-empty-destructor |
+| match | game_completed_rush_button_destroy | 0x00406ad0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | victory-rush-button-empty-destructor |
+| match | game_completed_survival_button_destroy | 0x00406ae0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | victory-survival-button-empty-destructor |
+| match | game_update_generic_menu | 0x00406af0 | 72 | 72/72 | 0 | 19/19 | 100.00% | 19/19 | 9/0/0 |  | generic-menu-render-coordinator |
+| match | perks_update_effects | 0x00406b40 | 1437 | 1437/1437 | 0 | 352/352 | 100.00% | 352/352 | 136/0/0 |  | perk-runtime-effects |
+| match | quest_mode_update | 0x004070e0 | 455 | 455/455 | 0 | 108/108 | 100.00% | 108/108 | 52/0/0 |  | quest-completion-transition-coordinator |
+| match | rush_mode_update | 0x004072b0 | 594 | 594/594 | 0 | 136/136 | 100.00% | 136/136 | 51/0/0 |  | rush-mode-edge-wave-spawn-update |
+| match | survival_spawn_creature | 0x00407510 | 1973 | 1973/1973 | 0 | 517/517 | 100.00% | 517/517 | 85/0/0 |  | survival-random-creature-stats-and-rare-variants |
+| wip | survival_update | 0x00407cd0 | 2102 | 2064/2102 | 38 | 504/504 | 98.21% | 102/504 | 139/0/0 |  | survival-handouts-milestones-and-edge-wave-spawns |
+| match | tutorial_prompt_dialog | 0x00408530 | 1084 | 1084/1084 | 0 | 254/254 | 100.00% | 254/254 | 80/0/0 |  | tutorial-prompt-actions |
+| match | tutorial_primary_button_destroy | 0x00408970 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-tutorial-primary-button-destroy |
+| match | tutorial_repeat_button_destroy | 0x00408980 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-tutorial-repeat-button-destroy |
+| wip | tutorial_timeline_update | 0x00408990 | 2907 | 2231/2907 | 676 | 686/695 | 76.76% | 6/695 | 169/0/1 |  | tutorial-script-prompts-hints-and-spawns |
+| match | camera_update | 0x00409500 | 910 | 910/910 | 0 | 249/249 | 100.00% | 249/249 | 76/0/0 |  | camera-shake-focus-and-clamp |
+| match | bonus_apply | 0x00409890 | 2693 | 2693/2693 | 0 | 668/668 | 100.00% | 668/668 | 216/0/0 |  | gameplay-bonus-switch |
+| match | bonus_update | 0x0040a320 | 416 | 416/416 | 0 | 115/115 | 100.00% | 115/115 | 37/0/0 |  | gameplay-bonus-update |
+| match | ui_draw_clock_gauge_at | 0x0040a4c0 | 70 | 70/70 | 0 | 22/22 | 100.00% | 22/22 | 6/0/0 |  | ui-clock-gauge-wrapper |
+| match | ui_render_aim_indicators | 0x0040a510 | 1402 | 1402/1402 | 0 | 343/343 | 100.00% | 343/343 | 105/0/0 |  | ui-aim-reload-and-direction-indicators |
+| match | ui_render_aim_lifetime_destroy | 0x0040aa90 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-aim-second-static-empty-destructor |
+| match | ui_render_aim_screen_destroy | 0x0040aaa0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-aim-screen-vector-empty-destructor |
+| match | gameplay_update_and_render | 0x0040aab0 | 2840 | 2840/2840 | 0 | 713/713 | 100.00% | 713/713 | 291/0/0 |  | core-gameplay-frame-coordinator |
+| match | plugin_runtime_clear_pools | 0x0040b5d0 | 89 | 89/89 | 0 | 24/24 | 100.00% | 24/24 | 8/0/0 |  | plugin-runtime-pool-reset |
+| match | plugin_runtime_update_and_render | 0x0040b630 | 265 | 265/265 | 0 | 67/67 | 100.00% | 67/67 | 33/0/0 |  | plugin-runtime-frame-lifecycle |
+| wip | demo_purchase_screen_update | 0x0040b740 | 2642 | 2465/2642 | 177 | 698/691 | 93.30% | 136/691 | 187/0/0 |  | demo-purchase-screen-complete-flow |
+| match | demo_purchase_purchase_button_destroy | 0x0040c1a0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | demo-purchase-purchase-button-empty-destructor |
+| match | demo_purchase_maybe_later_button_destroy | 0x0040c1b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | demo-purchase-maybe-later-button-empty-destructor |
+| wip | game_frame_update | 0x0040c1c0 | 3588 | 3568/3588 | 20 | 905/905 | 99.45% | 363/905 | 317/0/0 |  | core-frame-timing-input-and-state-dispatch |
+| match | credits_line_table_global_init_thunk | 0x0040cfd0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | credits-line-table-global-initialization-thunk |
+| match | credits_line_table_global_init | 0x0040cfe0 | 24 | 24/24 | 0 | 9/9 | 100.00% | 9/9 | 1/0/0 |  | credits-line-table-global-initialization |
+| match | credits_line_set | 0x0040d000 | 64 | 64/64 | 0 | 18/18 | 100.00% | 18/18 | 6/0/0 |  | credits-line-storage |
+| match | credits_line_clear_flag | 0x0040d040 | 66 | 66/66 | 0 | 20/20 | 100.00% | 20/20 | 5/0/0 |  | credits-secret-penalty |
+| match | credits_build_lines | 0x0040d090 | 1897 | 1897/1897 | 0 | 544/544 | 100.00% | 544/544 | 261/0/0 |  | credits-line-table-population |
+| wip | credits_screen_update | 0x0040d800 | 1857 | 1837/1857 | 20 | 454/454 | 98.90% | 48/454 | 175/0/0 |  | credits-scroll-and-secret-puzzle |
+| match | credits_secret_button_destroy | 0x0040df50 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | credits-secret-button-empty-destructor |
+| match | credits_back_button_destroy | 0x0040df60 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | credits-back-button-empty-destructor |
+| match | crimson_crt_empty_initializer_slot_05_thunk | 0x0040df70 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-05-thunk |
+| match | crimson_crt_empty_initializer_slot_05 | 0x0040df80 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-05 |
+| match | mod_api_init_thunk | 0x0040df90 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-mod-api-init |
+| match | mod_api_init | 0x0040dfa0 | 21 | 21/21 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | mod-api-global-constructor |
+| match | mod_api_core_printf | 0x0040dfc0 | 52 | 52/52 | 0 | 14/14 | 100.00% | 14/14 | 7/0/0 |  | mod-api-core-console-output |
+| match | mod_api_debug_printf | 0x0040e000 | 50 | 50/50 | 0 | 14/14 | 100.00% | 14/14 | 2/0/0 |  | mod-api-debug-output |
+| match | mod_api_core_get_var | 0x0040e040 | 61 | 61/61 | 0 | 21/21 | 100.00% | 21/21 | 5/0/0 |  | mod-api-core-cvar-view |
+| match | mod_api_core_del_var | 0x0040e080 | 18 | 18/18 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | mod-api-core-cvar-delete |
+| match | mod_api_core_execute | 0x0040e0a0 | 18 | 18/18 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | mod-api-core-console-execute |
+| match | mod_api_core_add_command | 0x0040e0c0 | 23 | 23/23 | 0 | 7/7 | 100.00% | 7/7 | 2/0/0 |  | mod-api-core-command-register |
+| match | mod_api_core_del_command | 0x0040e0e0 | 18 | 18/18 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | mod-api-core-command-delete |
+| match | mod_api_core_get_extension | 0x0040e100 | 233 | 233/233 | 0 | 101/101 | 100.00% | 101/101 | 5/0/0 |  | mod-api-core-extension-query |
+| match | mod_api_gfx_clear | 0x0040e1f0 | 34 | 34/34 | 0 | 12/12 | 100.00% | 12/12 | 1/0/0 |  | mod-api-graphics-clear |
+| match | mod_api_gfx_get_string_width | 0x0040e220 | 22 | 22/22 | 0 | 6/6 | 100.00% | 6/6 | 1/0/0 |  | mod-api-graphics-text-width |
+| match | mod_api_gfx_printf | 0x0040e240 | 53 | 53/53 | 0 | 16/16 | 100.00% | 16/16 | 4/0/0 |  | mod-api-graphics-formatted-text |
+| match | mod_api_gfx_load_texture | 0x0040e280 | 83 | 83/83 | 0 | 23/23 | 100.00% | 23/23 | 5/0/0 |  | mod-api-graphics-texture-load |
+| match | mod_api_gfx_free_texture | 0x0040e2e0 | 24 | 24/24 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | mod-api-graphics-texture-free |
+| match | mod_api_gfx_set_texture | 0x0040e300 | 24 | 24/24 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | mod-api-graphics-texture-bind |
+| match | mod_api_gfx_set_color | 0x0040e320 | 37 | 37/37 | 0 | 12/12 | 100.00% | 12/12 | 1/0/0 |  | mod-api-graphics-color |
+| match | mod_api_gfx_set_subset | 0x0040e350 | 37 | 37/37 | 0 | 12/12 | 100.00% | 12/12 | 1/0/0 |  | mod-api-graphics-uv-subset |
+| match | mod_api_gfx_set_texture_filter | 0x0040e380 | 27 | 27/27 | 0 | 9/9 | 100.00% | 9/9 | 1/0/0 |  | mod-api-graphics-texture-filter |
+| match | mod_api_gfx_set_blend_mode | 0x0040e3a0 | 51 | 51/51 | 0 | 17/17 | 100.00% | 17/17 | 2/0/0 |  | mod-api-graphics-blend-mode |
+| match | mod_api_gfx_begin | 0x0040e3e0 | 22 | 22/22 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | mod-api-graphics-batch |
+| match | mod_api_gfx_end | 0x0040e400 | 22 | 22/22 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | mod-api-graphics-batch |
+| match | mod_api_gfx_quad | 0x0040e420 | 76 | 76/76 | 0 | 22/22 | 100.00% | 22/22 | 4/0/0 |  | mod-api-graphics-quad |
+| match | mod_api_gfx_quad_rot | 0x0040e470 | 79 | 79/79 | 0 | 23/23 | 100.00% | 23/23 | 4/0/0 |  | mod-api-graphics-rotated-quad |
+| match | mod_api_gfx_draw_quads | 0x0040e4c0 | 100 | 100/100 | 0 | 26/26 | 100.00% | 26/26 | 5/0/0 |  | mod-api-graphics-quad-batch |
+| match | mod_api_sfx_load_sample | 0x0040e530 | 45 | 45/45 | 0 | 12/12 | 100.00% | 12/12 | 3/0/0 |  | mod-api-audio-sample-load |
+| match | mod_api_sfx_free_sample | 0x0040e560 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | mod-api-audio-sample-release |
+| match | mod_api_sfx_play_sample | 0x0040e570 | 51 | 51/51 | 0 | 14/14 | 100.00% | 14/14 | 2/0/0 |  | mod-api-audio-sample-play |
+| match | mod_api_sfx_load_tune | 0x0040e5b0 | 45 | 45/45 | 0 | 12/12 | 100.00% | 12/12 | 3/0/0 |  | mod-api-audio-tune-load |
+| match | mod_api_sfx_free_tune | 0x0040e5e0 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | mod-api-audio-tune-release |
+| match | mod_api_sfx_play_tune | 0x0040e5f0 | 14 | 14/14 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | mod-api-audio-tune-play |
+| match | mod_api_sfx_stop_tune | 0x0040e600 | 14 | 14/14 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | mod-api-audio-tune-stop |
+| match | mod_api_inp_get_pressed_char | 0x0040e610 | 11 | 11/11 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | mod-api-input-character |
+| match | mod_api_inp_get_analog | 0x0040e620 | 54 | 54/54 | 0 | 14/14 | 100.00% | 14/14 | 3/0/0 |  | mod-api-input-analog |
+| match | mod_api_inp_key_down | 0x0040e660 | 32 | 32/32 | 0 | 10/10 | 100.00% | 10/10 | 1/0/0 |  | mod-api-input-key-state |
+| match | mod_api_inp_get_key_name | 0x0040e680 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | mod-api-input-key-name |
+| match | mod_api_cl_enter_menu | 0x0040e690 | 99 | 99/99 | 0 | 37/37 | 100.00% | 37/37 | 4/0/0 |  | mod-api-pause-menu |
+| match | mod_load_info | 0x0040e700 | 332 | 332/332 | 0 | 91/91 | 100.00% | 91/91 | 36/0/0 |  | mod-metadata-dll-loader |
+| match | mod_info_destroy | 0x0040e850 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-mod-info-destroy |
+| match | mod_load_mod | 0x0040e860 | 219 | 219/219 | 0 | 61/61 | 100.00% | 61/61 | 24/0/0 |  | mod-interface-dll-loader |
+| match | mods_any_available | 0x0040e940 | 87 | 87/87 | 0 | 33/33 | 100.00% | 33/33 | 4/0/0 |  | mods-dll-presence |
+| wip | mods_menu_update | 0x0040e9a0 | 2607 | 2458/2607 | 149 | 648/648 | 94.29% | 0/648 | 183/0/0 |  | mods-browser-metadata-and-plugin-launch |
+| match | mods_menu_launch_button_destroy | 0x0040f3d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | mods-menu-launch-button-empty-destructor |
+| match | mods_menu_main_menu_button_destroy | 0x0040f3e0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | mods-menu-main-menu-button-empty-destructor |
+| match | mods_menu_scrollbar_destroy | 0x0040f3f0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | mods-menu-scrollbar-empty-destructor |
+| match | credits_secret_match3_find | 0x0040f400 | 230 | 230/230 | 0 | 96/96 | 100.00% | 96/96 | 0/0/0 |  | credits-secret-match3-scan |
+| wip | credits_secret_alien_zookeeper_update | 0x0040f4f0 | 2612 | 2190/2612 | 422 | 638/638 | 83.86% | 15/638 | 154/0/0 |  | credits-secret-match3-board-timer-scoring-and-navigation |
+| match | credits_secret_back_button_destroy | 0x0040ff30 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-credits-secret-back-button-destroy |
+| match | credits_secret_reset_button_destroy | 0x0040ff40 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-credits-secret-reset-button-destroy |
+| match | time_format_mm_ss | 0x0040ff50 | 105 | 105/105 | 0 | 37/37 | 100.00% | 37/37 | 8/0/0 |  | ui-time-format |
+| match | game_over_screen_update | 0x0040ffc0 | 1999 | 1999/1999 | 0 | 471/471 | 100.00% | 471/471 | 215/0/0 |  | game-over-highscore-entry-and-navigation |
+| match | game_over_main_menu_button_destroy | 0x00410790 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | game-over-main-menu-button-empty-destructor |
+| match | game_over_highscores_button_destroy | 0x004107a0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | game-over-highscores-button-empty-destructor |
+| match | game_over_play_again_button_destroy | 0x004107b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | game-over-play-again-button-empty-destructor |
+| match | game_over_name_input_state_destroy | 0x004107c0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | game-over-name-input-empty-destructor |
+| match | game_over_name_submit_button_destroy | 0x004107d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | game-over-name-submit-button-empty-destructor |
+| match | quest_failed_screen_update | 0x004107e0 | 1261 | 1261/1261 | 0 | 292/292 | 100.00% | 292/292 | 151/0/0 |  | quest-failed-highscore-and-retry-actions |
+| match | quest_failed_main_menu_button_destroy | 0x00410cf0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-failed-main-menu-button-empty-destructor |
+| match | quest_failed_play_another_button_destroy | 0x00410d00 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-failed-play-another-button-empty-destructor |
+| match | quest_failed_play_again_button_destroy | 0x00410d10 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-failed-play-again-button-empty-destructor |
+| wip | quest_results_screen_update | 0x00410d20 | 4857 | 4591/4857 | 266 | 1168/1168 | 94.52% | 66/1168 | 460/0/0 |  | quest-time-breakdown-highscore-entry-unlocks-and-routing |
+| match | quest_results_main_menu_button_destroy | 0x00412020 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-main-menu-button-empty-destructor |
+| match | quest_results_highscores_button_destroy | 0x00412030 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-highscores-button-empty-destructor |
+| match | quest_results_play_again_button_destroy | 0x00412040 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-play-again-button-empty-destructor |
+| match | quest_results_play_next_button_destroy | 0x00412050 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-play-next-button-empty-destructor |
+| match | quest_results_name_input_state_destroy | 0x00412060 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-name-input-empty-destructor |
+| match | quest_results_name_submit_button_destroy | 0x00412070 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-results-name-submit-button-empty-destructor |
+| match | crimson_crt_empty_initializer_slot_07_thunk | 0x00412080 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-07-thunk |
+| match | crimson_crt_empty_initializer_slot_07 | 0x00412090 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-07 |
+| match | gameplay_run_state_init_thunk | 0x004120a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-gameplay-run-state-init |
+| match | gameplay_run_state_init | 0x004120b0 | 172 | 172/172 | 0 | 44/44 | 100.00% | 44/44 | 20/0/0 |  | gameplay-run-initialization |
+| match | crimson_crt_empty_initializer_slot_09_thunk | 0x00412160 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-09-thunk |
+| match | crimson_crt_empty_initializer_slot_09 | 0x00412170 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-09 |
+| match | quest_meta_global_construct_and_register | 0x00412180 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | quest-metadata-global-lifecycle |
+| match | quest_meta_init | 0x00412190 | 25 | 25/25 | 0 | 7/7 | 100.00% | 7/7 | 4/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | quest-metadata-array-construction |
+| match | quest_meta_entry_init | 0x004121b0 | 45 | 45/45 | 0 | 13/13 | 100.00% | 13/13 | 0/0/0 |  | quest-metadata-entry-defaults |
+| match | quest_meta_entry_release | 0x004121e0 | 15 | 15/15 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | quest-metadata-owned-name-release |
+| match | quest_meta_register_atexit | 0x004121f0 | 12 | 12/12 | 0 | 4/4 | 100.00% | 4/4 | 2/0/0 |  | quest-metadata-destructor-registration |
+| match | quest_meta_table_destroy | 0x00412200 | 20 | 20/20 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | quest-metadata-array-destruction |
+| match | bonus_pool_global_init_thunk | 0x00412220 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | bonus-pool-global-initialization-thunk |
+| match | bonus_pool_global_init | 0x00412230 | 23 | 23/23 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | bonus-pool-global-initialization |
+| match | creature_spawn_slot_table_global_init_thunk | 0x00412250 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | creature-spawn-slot-global-initialization-thunk |
+| match | creature_spawn_slot_table_global_init | 0x00412260 | 45 | 45/45 | 0 | 12/12 | 100.00% | 12/12 | 1/0/0 |  | creature-spawn-slot-global-initialization |
+| match | game_status_global_init_thunk | 0x00412290 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | game-status-global-init-thunk |
+| match | game_status_global_init | 0x004122a0 | 171 | 171/171 | 0 | 45/45 | 100.00% | 45/45 | 18/0/0 |  | game-status-global-constructor |
+| match | highscore_init_sentinels_thunk | 0x00412350 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-highscore-sentinel-init |
+| match | highscore_init_sentinels | 0x00412360 | 96 | 96/96 | 0 | 38/38 | 100.00% | 38/38 | 3/0/0 |  | highscore-sentinels |
+| match | bonus_meta_global_construct_and_register | 0x004123c0 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | bonus-metadata-global-lifecycle |
+| match | bonus_meta_table_init | 0x004123d0 | 25 | 25/25 | 0 | 7/7 | 100.00% | 7/7 | 4/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | bonus-metadata-array-construction |
+| match | bonus_meta_entry_init | 0x004123f0 | 27 | 27/27 | 0 | 8/8 | 100.00% | 8/8 | 0/0/0 |  | bonus-metadata-entry-defaults |
+| match | bonus_meta_entry_release | 0x00412410 | 36 | 36/36 | 0 | 16/16 | 100.00% | 16/16 | 2/0/0 |  | metadata-owned-string-release |
+| match | bonus_meta_register_atexit | 0x00412440 | 12 | 12/12 | 0 | 4/4 | 100.00% | 4/4 | 2/0/0 |  | bonus-metadata-destructor-registration |
+| match | bonus_meta_table_destroy | 0x00412450 | 20 | 20/20 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | bonus-metadata-array-destruction |
+| wip | bonus_pick_random_type | 0x00412470 | 484 | 367/484 | 117 | 162/162 | 75.93% | 55/162 | 20/0/0 |  | gameplay-bonus-selection |
+| match | bonus_metadata_init | 0x00412660 | 735 | 735/735 | 0 | 131/131 | 100.00% | 131/131 | 109/0/0 |  | bonus-metadata-initialization |
+| match | bonus_reset_availability | 0x00412940 | 26 | 26/26 | 0 | 7/7 | 100.00% | 7/7 | 3/0/0 |  | gameplay-bonus-availability-reset |
+| match | game_mode_label | 0x00412960 | 176 | 176/176 | 0 | 69/69 | 100.00% | 69/69 | 12/0/0 |  | game-mode-display-label |
+| match | play_time_load | 0x00412a10 | 101 | 101/101 | 0 | 32/32 | 100.00% | 32/32 | 7/0/0 |  | status-play-time-registry-load |
+| match | game_save_status | 0x00412a80 | 399 | 399/399 | 0 | 123/123 | 100.00% | 123/123 | 36/0/0 |  | game-status-save-transform |
+| match | game_load_status | 0x00412c10 | 420 | 420/420 | 0 | 134/134 | 100.00% | 134/134 | 43/0/0 |  | game-status-load-transform |
+| wip | gameplay_reset_state | 0x00412dc0 | 1639 | 1623/1639 | 16 | 307/307 | 99.02% | 165/307 | 213/0/0 |  | gameplay-session-state-reset |
+| match | player_start_reload | 0x00413430 | 263 | 263/263 | 0 | 67/67 | 100.00% | 67/67 | 28/0/0 |  | gameplay-reload |
+| match | player_heading_approach_target | 0x00413540 | 354 | 354/354 | 0 | 95/95 | 100.00% | 95/95 | 27/0/0 |  | gameplay-angle-x87 |
+| wip | player_update | 0x004136b0 | 16257 | 10182/16257 | 6075 | 4052/4206 | 62.63% | 7/4206 | 800/0/2 |  | core-player-simulation |
+| match | vec2_sub | 0x00417640 | 26 | 26/26 | 0 | 9/9 | 100.00% | 9/9 | 0/0/0 |  | x87-vector-subtract |
+| match | vec2_length | 0x00417660 | 26 | 26/26 | 0 | 12/12 | 100.00% | 12/12 | 0/0/0 |  | x87-fsqrt |
+| match | ui_menu_template_pool_init_thunk | 0x00417680 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-ui-template-init |
+| match | ui_menu_template_pool_init | 0x00417690 | 336 | 336/336 | 0 | 92/92 | 100.00% | 92/92 | 42/0/0 |  | ui-template-pool-construction |
+| match | ui_element_globals_init_thunk | 0x004177e0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | ui-element-global-init-thunk |
+| match | ui_element_globals_init | 0x004177f0 | 662 | 662/662 | 0 | 135/135 | 100.00% | 135/135 | 121/0/0 |  | ui-element-global-construction |
+| match | ui_template_slot_ctor_noop | 0x00417a90 | 3 | 3/3 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 |  | ui-template-trivial-slot-constructor |
+| match | ui_template_block_set_mode4 | 0x00417aa0 | 13 | 13/13 | 0 | 3/3 | 100.00% | 3/3 | 0/0/0 |  | ui-subtemplate-mode-init |
+| match | ui_template_triplet_reset_and_seed_modes | 0x00417ab0 | 48 | 48/48 | 0 | 12/12 | 100.00% | 12/12 | 0/0/0 |  | ui-template-triplet-init |
+| match | ui_draw_textured_quad | 0x00417ae0 | 158 | 158/158 | 0 | 46/46 | 100.00% | 46/46 | 6/0/0 |  | ui-textured-quad |
+| match | terrain_generate | 0x00417b80 | 1569 | 1569/1569 | 0 | 408/408 | 100.00% | 408/408 | 88/0/0 |  | terrain-render-target-scatter-generation |
+| match | terrain_generate_random | 0x004181b0 | 1764 | 1764/1764 | 0 | 465/465 | 100.00% | 465/465 | 110/0/0 |  | random-terrain-selector-and-scatter-generation |
+| match | terrain_render | 0x004188a0 | 693 | 693/693 | 0 | 200/200 | 100.00% | 200/200 | 32/0/0 |  | terrain-backbuffer-render |
+| wip | creature_render_type | 0x00418b60 | 2834 | 2223/2834 | 611 | 757/765 | 78.45% | 25/765 | 136/0/5 |  | creature-atlas-animation-tint-and-lifecycle-rendering |
+| match | creature_render_all | 0x00419680 | 1302 | 1302/1302 | 0 | 349/349 | 100.00% | 349/349 | 87/0/0 |  | creature-overlay-species-and-freeze-render-passes |
+| match | ui_element_set_rect | 0x00419ba0 | 348 | 348/348 | 0 | 91/91 | 100.00% | 91/91 | 6/0/0 |  | ui-subtemplate-quad-geometry |
+| match | ui_element_load | 0x00419d00 | 207 | 207/207 | 0 | 67/67 | 100.00% | 67/67 | 10/0/0 |  | ui-element-texture-load |
+| match | ui_menu_assets_init | 0x00419dd0 | 551 | 551/551 | 0 | 110/110 | 100.00% | 110/110 | 66/0/0 |  | ui-menu-template-assets |
+| match | reserved_color_global_init_thunk | 0x0041a000 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-global-initializer |
+| match | reserved_color_global_init | 0x0041a010 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | reserved-four-float-global-initializer |
+| wip | ui_cursor_render | 0x0041a040 | 730 | 722/730 | 8 | 177/177 | 98.87% | 158/177 | 57/0/0 |  | ui-cursor-particle-renderer |
+| match | ui_render_aim_enhancement | 0x0041a320 | 518 | 518/518 | 0 | 131/131 | 100.00% | 131/131 | 35/0/0 |  | ui-aim-enhancement-overlay |
+| match | ui_elements_update_and_render | 0x0041a530 | 409 | 409/409 | 0 | 103/103 | 100.00% | 103/103 | 41/0/0 |  | ui-transition-update-render |
+| match | ui_draw_progress_bar | 0x0041a6d0 | 237 | 237/237 | 0 | 66/66 | 100.00% | 66/66 | 11/0/0 |  | ui-progress-bar |
+| match | bonus_hud_slot_table_global_init_thunk | 0x0041a7c0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | bonus-hud-slot-table-global-init-thunk |
+| match | bonus_hud_slot_table_global_init | 0x0041a7d0 | 56 | 56/56 | 0 | 13/13 | 100.00% | 13/13 | 2/0/0 |  | bonus-hud-slot-table-global-constructor |
+| match | bonus_hud_slot_activate | 0x0041a810 | 159 | 159/159 | 0 | 54/54 | 100.00% | 54/54 | 8/0/0 |  | bonus-hud-slot-allocation |
+| wip | bonus_hud_slot_update_and_render | 0x0041a8b0 | 1566 | 1250/1566 | 316 | 407/405 | 79.80% | 5/405 | 72/0/0 |  | bonus-hud-slot-animation-and-rendering |
+| wip | ui_render_hud | 0x0041aed0 | 7081 | 6252/7081 | 829 | 1823/1824 | 88.29% | 42/1824 | 390/0/0 |  | gameplay-hud-health-ammo-quest-xp-and-bonus-overlay |
+| match | ui_hud_progress_color_destroy | 0x0041ca80 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-hud-static-progress-color-destructor |
+| match | hud_update_and_render | 0x0041ca90 | 531 | 531/531 | 0 | 126/126 | 100.00% | 126/126 | 49/0/0 |  | gameplay-hud-coordinator |
+| match | grim_load_interface | 0x0041dc80 | 83 | 83/83 | 0 | 36/36 | 100.00% | 36/36 | 5/0/0 |  | grim-interface-loader |
+| match | vorbis_mem_read | 0x0041dce0 | 88 | 88/88 | 0 | 37/37 | 100.00% | 37/37 | 0/0/0 |  | vorbis-memory-read-callback |
+| match | vorbis_mem_seek | 0x0041dd40 | 66 | 66/66 | 0 | 22/22 | 100.00% | 22/22 | 0/0/0 |  | vorbis-memory-seek-callback |
+| match | vorbis_mem_close_callback | 0x0041dd90 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 |  | vorbis-memory-close-callback |
+| match | vorbis_mem_tell | 0x0041dda0 | 8 | 8/8 | 0 | 3/3 | 100.00% | 3/3 | 0/0/0 |  | vorbis-memory-tell-callback |
+| match | vorbis_pcm_seek | 0x0041ddb0 | 22 | 22/22 | 0 | 8/8 | 100.00% | 8/8 | 1/0/0 |  | vorbis-pcm-seek-wrapper |
+| match | vorbis_mem_open | 0x0041ddd0 | 260 | 260/260 | 0 | 91/91 | 100.00% | 91/91 | 13/0/0 |  | vorbis-memory-stream-open |
+| match | vorbis_mem_close | 0x0041dee0 | 29 | 29/29 | 0 | 11/11 | 100.00% | 11/11 | 2/0/0 |  | vorbis-memory-stream-close |
+| match | vorbis_read_pcm16 | 0x0041df00 | 55 | 55/55 | 0 | 22/22 | 100.00% | 22/22 | 1/0/0 |  | vorbis-pcm16-decode |
+| match | game_is_full_version | 0x0041df40 | 3 | 3/3 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 |  | full-version-constant |
+| match | demo_trial_time_limit_ms | 0x0041df50 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 |  | demo-trial-duration |
+| match | play_time_get | 0x0041df60 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | unused_fx_queue_random_prefix_color_global_init_thunk | 0x0041df70 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-fx-queue-prefix-color-constructor-thunk |
+| match | unused_fx_queue_random_prefix_color_global_init | 0x0041df80 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | unused-fx-queue-prefix-color-constructor |
+| match | unused_fx_rotated_effect_id_prefix_color_global_init_thunk | 0x0041dfb0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-fx-rotated-effect-id-prefix-color-constructor-thunk |
+| match | unused_fx_rotated_effect_id_prefix_color_global_init | 0x0041dfc0 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | unused-fx-rotated-effect-id-prefix-color-constructor |
+| match | unused_aim64_prefix_color_global_init_thunk | 0x0041dff0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-aim64-prefix-color-constructor-thunk |
+| match | unused_aim64_prefix_color_global_init | 0x0041e000 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | unused-aim64-prefix-color-constructor |
+| match | unused_fx_rotated_scale_prefix_color_global_init_thunk | 0x0041e030 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-fx-rotated-scale-prefix-color-constructor-thunk |
+| match | unused_fx_rotated_scale_prefix_color_global_init | 0x0041e040 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | unused-fx-rotated-scale-prefix-color-constructor |
+| match | render_tint_color_global_init_thunk | 0x0041e070 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | render-tint-color-global-init-thunk |
+| match | render_tint_color_global_init | 0x0041e080 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | render-tint-color-global-constructor |
+| match | unused_global_noop_init_thunk | 0x0041e0b0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-global-empty-constructor-thunk |
+| match | unused_global_noop_init | 0x0041e0c0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | unused-global-empty-constructor |
+| match | unused_particle_pool_suffix_color_global_init_thunk | 0x0041e0d0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-particle-pool-suffix-color-constructor-thunk |
+| match | unused_particle_pool_suffix_color_global_init | 0x0041e0e0 | 41 | 41/41 | 0 | 5/5 | 100.00% | 5/5 | 4/0/0 |  | unused-particle-pool-suffix-color-constructor |
+| match | unused_effect_uv8_prefix_state_global_init_thunk | 0x0041e110 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-effect-prefix-default-state-thunk |
+| match | unused_effect_uv8_prefix_state_global_init | 0x0041e120 | 28 | 28/28 | 0 | 6/6 | 100.00% | 6/6 | 4/0/0 |  | unused-effect-prefix-default-state |
+| match | unused_effect_uv16_prefix_vec2_global_init_thunk | 0x0041e140 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-effect-uv16-prefix-vec2-thunk |
+| match | unused_effect_uv16_prefix_vec2_global_init | 0x0041e150 | 21 | 21/21 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | unused-effect-uv16-prefix-vec2 |
+| match | unused_effect_uv_strip16_prefix_vec2_global_init_thunk | 0x0041e170 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-effect-strip16-prefix-vec2-thunk |
+| match | unused_effect_uv_strip16_prefix_vec2_global_init | 0x0041e180 | 21 | 21/21 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | unused-effect-strip16-prefix-vec2 |
+| match | fx_queue_global_init_thunk | 0x0041e1a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | fx-queue-global-init-thunk |
+| match | fx_queue_global_init | 0x0041e1b0 | 147 | 147/147 | 0 | 42/42 | 100.00% | 42/42 | 1/0/0 |  | fx-queue-global-constructor |
+| match | crimson_crt_empty_initializer_slot_31_thunk | 0x0041e250 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-31-thunk |
+| match | crimson_crt_empty_initializer_slot_31 | 0x0041e260 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-31 |
+| match | vec2_add | 0x0041e270 | 26 | 26/26 | 0 | 10/10 | 100.00% | 10/10 | 0/0/0 |  | x87-vector-add |
+| match | player_apply_move_with_spawn_avoidance | 0x0041e290 | 356 | 356/356 | 0 | 131/131 | 100.00% | 131/131 | 8/0/0 |  | gameplay-movement |
+| match | vec2_add_inplace | 0x0041e400 | 26 | 26/26 | 0 | 10/10 | 100.00% | 10/10 | 0/0/0 |  | x87-vector-add |
+| match | unused_fx_queue_random_prefix_vec2_global_init_thunk | 0x0041e420 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | unused-random-fx-prefix-vec2-thunk |
+| match | unused_fx_queue_random_prefix_vec2_global_init | 0x0041e430 | 21 | 21/21 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | unused-random-fx-prefix-vec2 |
+| match | secondary_projectile_pool_global_init_thunk | 0x0041e450 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | secondary-projectile-pool-global-init-thunk |
+| match | secondary_projectile_pool_global_init | 0x0041e460 | 41 | 41/41 | 0 | 12/12 | 100.00% | 12/12 | 1/0/0 |  | secondary-projectile-pool-global-constructor |
+| match | sprite_effect_pool_global_init_thunk | 0x0041e490 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | sprite-effect-pool-global-init-thunk |
+| match | sprite_effect_pool_global_init | 0x0041e4a0 | 97 | 97/97 | 0 | 30/30 | 100.00% | 30/30 | 1/0/0 |  | sprite-effect-pool-global-constructor |
+| match | particle_pool_global_init_thunk | 0x0041e510 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | particle-pool-global-init-thunk |
+| match | particle_pool_global_init | 0x0041e520 | 159 | 159/159 | 0 | 44/44 | 100.00% | 44/44 | 3/0/0 |  | particle-pool-global-constructor |
+| match | player_state_table_global_init_thunk | 0x0041e5c0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | player-state-table-global-init-thunk |
+| match | player_state_table_global_init | 0x0041e5d0 | 227 | 227/227 | 0 | 50/50 | 100.00% | 50/50 | 1/0/0 |  | player-state-table-global-constructor |
+| match | creature_pool_global_init_thunk | 0x0041e6c0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | creature-pool-global-init-thunk |
+| match | creature_pool_global_init | 0x0041e6d0 | 60 | 60/60 | 0 | 17/17 | 100.00% | 17/17 | 1/0/0 |  | creature-pool-global-constructor |
+| match | crimson_crt_empty_initializer_slot_38_thunk | 0x0041e710 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-38-thunk |
+| match | crimson_crt_empty_initializer_slot_38 | 0x0041e720 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-38 |
+| match | crimson_crt_empty_initializer_slot_39_thunk | 0x0041e730 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-39-thunk |
+| match | crimson_crt_empty_initializer_slot_39 | 0x0041e740 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-39 |
+| match | projectile_pool_global_init_thunk | 0x0041e750 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | projectile-pool-global-init-thunk |
+| match | projectile_pool_global_init | 0x0041e760 | 51 | 51/51 | 0 | 16/16 | 100.00% | 16/16 | 1/0/0 |  | projectile-pool-global-constructor |
+| match | crimson_crt_empty_initializer_slot_41_thunk | 0x0041e7a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-41-thunk |
+| match | crimson_crt_empty_initializer_slot_41 | 0x0041e7b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-41 |
+| match | crimson_crt_empty_initializer_slot_42_thunk | 0x0041e7c0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-42-thunk |
+| match | crimson_crt_empty_initializer_slot_42 | 0x0041e7d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-42 |
+| match | crimson_crt_empty_initializer_slot_43_thunk | 0x0041e7e0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-43-thunk |
+| match | crimson_crt_empty_initializer_slot_43 | 0x0041e7f0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-43 |
+| match | crimson_crt_empty_initializer_slot_44_thunk | 0x0041e800 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-44-thunk |
+| match | crimson_crt_empty_initializer_slot_44 | 0x0041e810 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-44 |
+| match | crimson_crt_empty_initializer_slot_45_thunk | 0x0041e820 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-45-thunk |
+| match | crimson_crt_empty_initializer_slot_45 | 0x0041e830 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-45 |
+| wip | fx_queue_add | 0x0041e840 | 140 | 136/140 | 4 | 39/39 | 97.44% | 22/39 | 9/0/0 |  | gameplay-fx-queue |
+| match | input_aim_pov_left_active | 0x0041e8d0 | 32 | 32/32 | 0 | 10/10 | 100.00% | 10/10 | 2/0/0 |  | input-aim-pov-left |
+| match | input_aim_pov_right_active | 0x0041e8f0 | 32 | 32/32 | 0 | 10/10 | 100.00% | 10/10 | 2/0/0 |  | input-aim-pov-right |
+| wip | creature_handle_death | 0x0041e910 | 834 | 734/834 | 100 | 203/204 | 87.96% | 6/204 | 82/0/0 |  | creature-death-side-effects |
+| match | config_sync_from_grim | 0x0041ec60 | 1225 | 1225/1225 | 0 | 277/277 | 100.00% | 277/277 | 37/0/0 |  | grim-config-sync-and-legacy-migration |
+| match | config_ensure_file | 0x0041f130 | 112 | 112/112 | 0 | 36/36 | 100.00% | 36/36 | 13/0/0 |  | config-file-bootstrap |
+| wip | config_load_presets | 0x0041f1a0 | 653 | 580/653 | 73 | 178/178 | 88.76% | 67/178 | 50/0/3 |  | config-file-load-and-runtime-sync |
+| wip | angle_approach | 0x0041f430 | 299 | 283/299 | 16 | 100/101 | 94.53% | 73/101 | 9/0/0 |  | gameplay-angle-x87 |
+| match | bonus_pool_sentinel_global_init_thunk | 0x0041f560 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | bonus-pool-sentinel-global-initialization-thunk |
+| match | bonus_pool_sentinel_global_init | 0x0041f570 | 11 | 11/11 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | bonus-pool-sentinel-global-initialization |
+| match | bonus_alloc_slot | 0x0041f580 | 46 | 46/46 | 0 | 14/14 | 100.00% | 14/14 | 4/0/0 |  | gameplay-bonus-pool |
+| match | bonus_spawn_at | 0x0041f5b0 | 479 | 479/479 | 0 | 128/128 | 100.00% | 128/128 | 28/0/0 |  | gameplay-bonus-spawn |
+| match | bonus_spawn_at_pos | 0x0041f790 | 309 | 309/309 | 0 | 99/99 | 100.00% | 99/99 | 15/0/0 |  | gameplay-bonus-spawn |
+| match | bonus_try_spawn_on_kill | 0x0041f8d0 | 730 | 730/730 | 0 | 207/207 | 100.00% | 207/207 | 47/0/0 |  | gameplay-bonus-drop |
+| match | fx_spawn_sprite | 0x0041fbb0 | 175 | 175/175 | 0 | 48/48 | 100.00% | 48/48 | 16/0/0 |  | gameplay-sprite-effect-spawn |
+| match | weapon_table_entry | 0x0041fc60 | 19 | 19/19 | 0 | 6/6 | 100.00% | 6/6 | 1/0/0 |  | gameplay-weapon-table |
+| wip | player_reset_all | 0x0041fc80 | 584 | 536/584 | 48 | 130/127 | 91.83% | 94/127 | 57/0/1 | msvc6.5 /O2 /GB /W3 /GR- /TP | gameplay-player-reset |
+| match | effect_uv_tables_init | 0x0041fed0 | 356 | 356/356 | 0 | 109/109 | 100.00% | 109/109 | 15/0/0 |  | gameplay-effect-atlas-uv-init |
+| wip | creature_find_nearest | 0x00420040 | 225 | 210/225 | 15 | 91/89 | 93.33% | 51/89 | 5/0/0 |  | gameplay-target-search |
+| match | fx_spawn_particle | 0x00420130 | 264 | 264/264 | 0 | 67/67 | 100.00% | 67/67 | 18/0/0 |  | gameplay-particle-spawn |
+| match | fx_spawn_particle_slow | 0x00420240 | 274 | 274/274 | 0 | 67/67 | 100.00% | 67/67 | 19/0/0 |  | gameplay-particle-spawn |
+| match | fx_spawn_secondary_projectile | 0x00420360 | 218 | 218/218 | 0 | 65/65 | 100.00% | 65/65 | 13/0/0 |  | gameplay-secondary-projectile |
+| wip | projectile_spawn | 0x00420440 | 400 | 287/400 | 113 | 114/126 | 71.67% | 0/126 | 13/0/0 |  | gameplay-projectile |
+| match | projectile_reset_pools | 0x004205d0 | 37 | 37/37 | 0 | 11/11 | 100.00% | 11/11 | 4/0/0 |  | gameplay-pool-reset |
+| match | creatures_apply_radius_damage | 0x00420600 | 159 | 159/159 | 0 | 57/57 | 100.00% | 57/57 | 6/0/0 |  | gameplay-radius-damage |
+| match | creature_find_in_radius | 0x004206a0 | 133 | 133/133 | 0 | 47/47 | 100.00% | 47/47 | 5/0/0 |  | gameplay-target-search |
+| match | player_find_in_radius | 0x00420730 | 133 | 133/133 | 0 | 54/54 | 100.00% | 54/54 | 5/0/0 |  | gameplay-target-search |
+| wip | creature_apply_damage | 0x004207c0 | 963 | 865/963 | 98 | 237/237 | 89.87% | 11/237 | 80/0/0 |  | creature-damage-and-lethal-effects |
+| wip | projectile_update | 0x00420b90 | 8409 | 5199/8409 | 3210 | 2174/2203 | 61.82% | 0/2203 | 416/0/18 |  | core-projectile-simulation |
+| wip | projectile_render | 0x00422c70 | 12551 | 7219/12551 | 5332 | 2880/3021 | 57.52% | 0/3021 | 444/0/10 |  | laser-primary-plasma-beam-plague-and-secondary-projectile-passes |
+| match | plaguebearer_spread_infection | 0x00425d80 | 203 | 203/203 | 0 | 64/64 | 100.00% | 64/64 | 14/0/0 |  | gameplay-plaguebearer-spread |
+| match | player_take_damage | 0x00425e50 | 969 | 969/969 | 0 | 267/267 | 100.00% | 267/267 | 73/0/0 |  | gameplay-player-damage |
+| wip | creature_update_all | 0x00426220 | 5330 | 2920/5330 | 2410 | 1298/1338 | 54.78% | 0/1338 | 225/0/2 |  | creature-ai-movement-attacks-and-corpse-lifecycle |
+| match | fx_queue_add_random | 0x00427700 | 291 | 291/291 | 0 | 73/73 | 100.00% | 73/73 | 23/0/0 |  | gameplay-random-fx-queue |
+| match | fx_queue_random_color_destroy | 0x00427830 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | fx-random-color-trivial-destructor |
+| match | fx_queue_add_rotated | 0x00427840 | 210 | 210/210 | 0 | 55/55 | 100.00% | 55/55 | 18/0/0 |  | gameplay-rotated-fx-queue |
+| match | fx_queue_render | 0x00427920 | 2076 | 2076/2076 | 0 | 543/543 | 100.00% | 543/543 | 162/0/0 |  | terrain-fx-and-corpse-render-passes |
+| match | creature_alloc_slot | 0x00428140 | 145 | 145/145 | 0 | 39/39 | 100.00% | 39/39 | 14/0/0 |  |  |
+| match | creature_reset_all | 0x004281e0 | 46 | 46/46 | 0 | 13/13 | 100.00% | 13/13 | 3/0/0 |  | gameplay-creature-reset |
+| match | creatures_none_active | 0x00428210 | 40 | 40/40 | 0 | 12/12 | 100.00% | 12/12 | 4/0/0 |  | gameplay-creature-scan |
+| wip | creature_spawn | 0x00428240 | 334 | 287/334 | 47 | 79/79 | 86.08% | 7/79 | 27/0/0 |  | gameplay-creature-spawn |
+| wip | player_render_overlays | 0x00428390 | 4582 | 3904/4582 | 678 | 1136/1148 | 85.20% | 9/1148 | 325/0/0 |  | player-sprites-shield-flash-and-native-residual-target-trail |
+| match | bonus_label_for_entry | 0x00429580 | 99 | 99/99 | 0 | 30/30 | 100.00% | 30/30 | 11/0/0 |  | gameplay-bonus-label |
+| wip | bonus_render | 0x004295f0 | 4088 | 3643/4088 | 445 | 1087/1088 | 89.10% | 14/1088 | 221/0/8 |  | bonus-icons-telekinetic-pickup-and-effect-pool-rendering |
+| match | audio_resume_all | 0x0042a5f0 | 54 | 54/54 | 0 | 14/14 | 100.00% | 14/14 | 7/0/0 |  | audio-suspend-resume |
+| match | audio_suspend_all | 0x0042a630 | 52 | 52/52 | 0 | 14/14 | 100.00% | 14/14 | 7/0/0 |  | audio-suspend-resume |
+| match | texture_get_or_load | 0x0042a670 | 133 | 133/133 | 0 | 44/44 | 100.00% | 44/44 | 11/0/0 |  | texture-cache-load |
+| match | texture_get_or_load_alt | 0x0042a700 | 126 | 126/126 | 0 | 40/40 | 100.00% | 40/40 | 11/0/0 |  | texture-cache-load-legacy |
+| match | console_cmd_load_texture | 0x0042a780 | 60 | 60/60 | 0 | 19/19 | 100.00% | 19/19 | 7/0/0 |  | console-texture-load-command |
+| match | console_cmd_set_resource_paq | 0x0042a7c0 | 158 | 158/158 | 0 | 51/51 | 100.00% | 51/51 | 18/0/0 |  | console-resource-pack-command |
+| match | console_cmd_tell_time_survived | 0x0042a860 | 37 | 37/37 | 0 | 9/9 | 100.00% | 9/9 | 6/0/0 |  | console-survival-time |
+| match | console_cmd_open_url | 0x0042a890 | 151 | 151/151 | 0 | 43/43 | 100.00% | 43/43 | 14/0/0 |  | console-open-url-command |
+| match | console_cmd_snd_freq_adjustment | 0x0042a930 | 58 | 58/58 | 0 | 16/16 | 100.00% | 16/16 | 8/0/0 |  | console-sound-frequency-toggle |
+| match | console_cmd_generate_terrain | 0x0042a970 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | console-terrain-generation-command |
+| match | init_audio_and_terrain | 0x0042a9f0 | 480 | 480/480 | 0 | 116/116 | 100.00% | 116/116 | 65/0/0 |  | audio-and-terrain-startup |
+| match | load_textures_step | 0x0042abd0 | 1203 | 1203/1203 | 0 | 252/252 | 100.00% | 252/252 | 209/0/0 |  | startup-staged-texture-loading |
+| match | game_startup_init_prelude | 0x0042b090 | 435 | 435/435 | 0 | 113/113 | 100.00% | 113/113 | 45/0/0 |  | startup-core-prelude |
+| match | startup_audio_load_thread | 0x0042b250 | 63 | 63/63 | 0 | 14/14 | 100.00% | 14/14 | 11/0/0 |  | startup-audio-thread |
+| match | game_startup_init | 0x0042b290 | 4303 | 4303/4303 | 0 | 1126/1126 | 100.00% | 1126/1126 | 334/0/0 |  | startup-loading-intro-and-frame-callback |
+| match | console_cmd_snd_add_game_tune | 0x0042c360 | 100 | 100/100 | 0 | 29/29 | 100.00% | 29/29 | 9/0/0 |  | console-music-queue-command |
+| match | console_cmd_set_gamma_ramp | 0x0042c3d0 | 116 | 116/116 | 0 | 35/35 | 100.00% | 35/35 | 13/0/0 |  | console-gamma-command |
+| wip | crimsonland_main | 0x0042c450 | 3214 | 3164/3214 | 50 | 832/832 | 98.44% | 684/832 | 393/0/2 |  | primary-game-bootstrap-and-shutdown |
+| wip | highscore_sync_worker | 0x0042d0e0 | 1970 | 1320/1970 | 650 | 517/519 | 66.99% | 26/519 | 107/0/0 |  | online-highscore-submit-receive-worker |
+| wip | statistics_update_check_worker | 0x0042d8a0 | 1364 | 1056/1364 | 308 | 373/361 | 77.38% | 22/361 | 106/0/0 |  | statistics-version-update-check-worker |
+| match | effect_pool_vertices_global_init_thunk | 0x0042de00 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | effect-pool-vertex-global-init-thunk |
+| match | effect_pool_vertices_global_init | 0x0042de10 | 39 | 39/39 | 0 | 15/15 | 100.00% | 15/15 | 3/0/0 |  | effect-pool-vertex-global-construction |
+| match | crimson_crt_empty_initializer_slot_48_thunk | 0x0042de40 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-48-thunk |
+| match | crimson_crt_empty_initializer_slot_48 | 0x0042de50 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-48 |
+| match | crimson_crt_empty_initializer_slot_49_thunk | 0x0042de60 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-49-thunk |
+| match | crimson_crt_empty_initializer_slot_49 | 0x0042de70 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-49 |
+| match | effect_init_entry | 0x0042de80 | 143 | 143/143 | 0 | 36/36 | 100.00% | 36/36 | 0/0/0 |  | gameplay-effect-pool |
+| match | effect_defaults_reset | 0x0042df10 | 355 | 355/355 | 0 | 59/59 | 100.00% | 59/59 | 29/0/0 |  | gameplay-effect-pool-reset |
+| match | effect_free | 0x0042e080 | 29 | 29/29 | 0 | 6/6 | 100.00% | 6/6 | 2/0/0 |  | gameplay-effect-pool |
+| match | effect_select_texture | 0x0042e0a0 | 113 | 113/113 | 0 | 35/35 | 100.00% | 35/35 | 6/0/0 |  | gameplay-effect-texture |
+| match | effect_spawn | 0x0042e120 | 1507 | 1507/1507 | 0 | 350/350 | 100.00% | 350/350 | 90/0/0 |  | gameplay-effect-allocation-and-quad-build |
+| match | effects_update | 0x0042e710 | 267 | 267/267 | 0 | 85/85 | 100.00% | 85/85 | 10/0/0 |  | gameplay-effect-lifecycle |
+| wip | effects_render | 0x0042e820 | 740 | 687/740 | 53 | 195/195 | 92.82% | 37/195 | 38/0/0 |  | gameplay-effect-render-passes |
+| match | effect_spawn_blood_splatter | 0x0042eb10 | 361 | 361/361 | 0 | 82/82 | 100.00% | 82/82 | 27/0/0 |  | gameplay-blood-splatter-effect |
+| match | effect_spawn_freeze_shard | 0x0042ec80 | 376 | 376/376 | 0 | 81/81 | 100.00% | 81/81 | 33/0/0 |  | gameplay-freeze-shard-effect |
+| match | effect_spawn_freeze_shatter | 0x0042ee00 | 339 | 339/339 | 0 | 79/79 | 100.00% | 79/79 | 27/0/0 |  | gameplay-freeze-shatter-effect |
+| match | effect_spawn_burst | 0x0042ef60 | 282 | 282/282 | 0 | 61/61 | 100.00% | 61/61 | 21/0/0 |  | gameplay-effect-burst |
+| match | effect_spawn_shrinkifier_hit | 0x0042f080 | 482 | 482/482 | 0 | 92/92 | 100.00% | 92/92 | 38/0/0 |  | gameplay-shrinkifier-impact |
+| match | effect_spawn_ion_hit_core | 0x0042f270 | 191 | 191/191 | 0 | 32/32 | 100.00% | 32/32 | 16/0/0 |  | gameplay-effect-spawn |
+| match | effect_spawn_plasma_hit_core | 0x0042f330 | 185 | 185/185 | 0 | 31/31 | 100.00% | 31/31 | 15/0/0 |  | gameplay-effect-spawn |
+| match | effect_spawn_splitter_hit_burst | 0x0042f3f0 | 333 | 333/333 | 0 | 75/75 | 100.00% | 75/75 | 23/0/0 |  | gameplay-effect-spawn |
+| match | effect_spawn_ion_hit_sparks | 0x0042f540 | 378 | 378/378 | 0 | 86/86 | 100.00% | 86/86 | 31/0/0 |  | gameplay-ion-hit-sparks |
+| match | effect_spawn_explosion_burst | 0x0042f6c0 | 964 | 964/964 | 0 | 182/182 | 100.00% | 182/182 | 75/0/0 |  | gameplay-explosion-burst |
+| match | perk_meta_global_construct_and_register | 0x0042fa90 | 10 | 10/10 | 0 | 2/2 | 100.00% | 2/2 | 2/0/0 |  | perk-metadata-global-lifecycle |
+| match | perk_meta_table_init | 0x0042faa0 | 28 | 28/28 | 0 | 7/7 | 100.00% | 7/7 | 4/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | perk-metadata-array-construction |
+| match | perk_meta_entry_init | 0x0042fac0 | 27 | 27/27 | 0 | 8/8 | 100.00% | 8/8 | 0/0/0 |  | perk-metadata-entry-defaults |
+| match | perk_meta_register_atexit | 0x0042fae0 | 12 | 12/12 | 0 | 4/4 | 100.00% | 4/4 | 2/0/0 |  | perk-metadata-destructor-registration |
+| match | perk_meta_table_destroy | 0x0042faf0 | 23 | 23/23 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | perk-metadata-array-destruction |
+| match | perk_can_offer | 0x0042fb10 | 185 | 185/185 | 0 | 55/55 | 100.00% | 55/55 | 17/0/0 |  | gameplay-perk-eligibility |
+| match | perk_select_random | 0x0042fbd0 | 89 | 89/89 | 0 | 32/32 | 100.00% | 32/32 | 8/0/0 |  | gameplay-perk-rng |
+| wip | perks_rebuild_available | 0x0042fc30 | 181 | 174/181 | 7 | 52/52 | 96.15% | 38/52 | 18/0/0 |  | gameplay-perk-unlocks |
+| match | perk_count_get | 0x0042fcf0 | 12 | 12/12 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | gameplay-perk-count |
+| match | wrap_text_to_width_alloc | 0x0042fd00 | 143 | 143/143 | 0 | 62/62 | 100.00% | 62/62 | 2/0/0 |  | text-wrap-allocation |
+| match | perks_init_database | 0x0042fd90 | 3211 | 3211/3211 | 0 | 588/588 | 100.00% | 588/588 | 443/0/0 |  | perk-id-and-metadata-database |
+| match | quest_meta_init_entry | 0x00430a20 | 170 | 170/170 | 0 | 51/51 | 100.00% | 51/51 | 7/0/0 |  | quest-metadata-initialization |
+| match | creature_spawn_slot_alloc | 0x00430ad0 | 30 | 30/30 | 0 | 10/10 | 100.00% | 10/10 | 2/0/0 |  | creature-spawn-slot-pool |
+| wip | creature_spawn_template | 0x00430af0 | 14099 | 12363/14099 | 1736 | 3161/3159 | 87.69% | 23/3159 | 352/0/1 |  | gameplay-spawn-switch |
+| match | quest_spawn_table_empty | 0x00434220 | 39 | 39/39 | 0 | 16/16 | 100.00% | 16/16 | 2/0/0 |  | quest-spawn-table-exhaustion |
+| wip | quest_spawn_timeline_update | 0x00434250 | 368 | 336/368 | 32 | 113/115 | 91.23% | 51/115 | 13/0/0 |  | quest-spawn-timeline-dispatch |
+| match | quest_database_advance_slot | 0x004343c0 | 30 | 30/30 | 0 | 12/12 | 100.00% | 12/12 | 0/0/0 |  | quest-database-slot-advance |
+| match | quest_build_fallback | 0x004343e0 | 150 | 150/150 | 0 | 32/32 | 100.00% | 32/32 | 7/0/0 |  | quest-fallback-append-count |
+| wip | quest_build_nagolipoli | 0x00434480 | 983 | 667/983 | 316 | 258/258 | 67.83% | 32/258 | 14/0/0 |  | quest-nagolipoli-rings-waves-lines |
+| match | quest_build_monster_blues | 0x00434860 | 348 | 348/348 | 0 | 95/95 | 100.00% | 95/95 | 4/0/0 |  | quest-monster-blues-append-prefix |
+| wip | quest_build_the_gathering | 0x004349c0 | 725 | 649/725 | 76 | 134/134 | 89.55% | 12/134 | 0/0/0 |  | quest-the-gathering-fixed-table |
+| match | quest_build_army_of_three | 0x00434ca0 | 608 | 608/608 | 0 | 116/116 | 100.00% | 116/116 | 0/0/0 |  | quest-army-of-three-fixed-formations |
+| wip | quest_build_knee_deep_in_the_dead | 0x00434f00 | 541 | 537/541 | 4 | 141/141 | 99.29% | 20/141 | 18/0/0 |  | quest-knee-deep-direct-opening |
+| wip | quest_build_the_gang_wars | 0x00435120 | 424 | 419/424 | 5 | 92/92 | 98.91% | 33/92 | 8/0/0 |  | quest-gang-wars-append-prefix |
+| match | quest_build_the_fortress | 0x004352d0 | 429 | 429/429 | 0 | 102/102 | 100.00% | 102/102 | 8/0/0 |  | quest-fortress-field-cursor-grid |
+| match | quest_build_cross_fire | 0x00435480 | 390 | 390/390 | 0 | 76/76 | 100.00% | 76/76 | 2/0/0 |  | quest-cross-fire-fixed-table |
+| wip | quest_build_the_beating | 0x00435610 | 649 | 504/649 | 145 | 166/166 | 77.71% | 39/166 | 7/0/0 |  | quest-the-beating-append-count |
+| wip | quest_build_the_spanking_of_the_dead | 0x004358a0 | 391 | 358/391 | 33 | 94/94 | 91.49% | 31/94 | 5/0/0 |  | quest-spanking-of-the-dead-tail-construction |
+| match | quest_build_hidden_evil | 0x00435a30 | 407 | 407/407 | 0 | 101/101 | 100.00% | 101/101 | 10/0/0 |  | quest-hidden-evil-append-count |
+| wip | quest_build_land_hostile | 0x00435bd0 | 239 | 234/239 | 5 | 53/53 | 98.11% | 37/53 | 2/0/0 |  | quest-land-hostile-split-publication |
+| match | quest_build_minor_alien_breach | 0x00435cc0 | 466 | 466/466 | 0 | 135/135 | 100.00% | 135/135 | 7/0/0 |  | quest-minor-alien-breach-append-count |
+| wip | quest_build_alien_squads | 0x00435ea0 | 507 | 502/507 | 5 | 108/108 | 99.07% | 80/108 | 0/0/0 |  | quest-alien-squads-alternating-metadata |
+| match | quest_build_zombie_masters | 0x004360a0 | 128 | 128/128 | 0 | 31/31 | 100.00% | 31/31 | 2/0/0 |  | quest-zombie-masters |
+| match | quest_build_8_legged_terror | 0x00436120 | 213 | 213/213 | 0 | 68/68 | 100.00% | 68/68 | 4/0/0 |  | quest-eight-legged-terror-append-builder |
+| match | quest_build_ghost_patrols | 0x00436200 | 334 | 334/334 | 0 | 90/90 | 100.00% | 90/90 | 5/0/0 |  | quest-ghost-patrols-indexed-publication |
+| match | quest_build_the_random_factor | 0x00436350 | 237 | 237/237 | 0 | 74/74 | 100.00% | 74/74 | 7/0/0 |  | quest-random-factor-indexed-publication |
+| match | quest_build_spider_wave_syndrome | 0x00436440 | 95 | 95/95 | 0 | 31/31 | 100.00% | 31/31 | 2/0/0 |  | quest-spider-wave-syndrome-indexed-publication |
+| wip | quest_build_nesting_grounds | 0x004364a0 | 626 | 621/626 | 5 | 138/138 | 99.28% | 10/138 | 15/0/0 |  | quest-nesting-grounds-fixed-nests |
+| match | quest_build_alien_dens | 0x00436720 | 249 | 249/249 | 0 | 60/60 | 100.00% | 60/60 | 1/0/0 |  | quest-alien-dens-append-count |
+| wip | quest_build_arachnoid_farm | 0x00436820 | 382 | 358/382 | 24 | 112/112 | 93.75% | 12/112 | 10/0/0 |  | quest-arachnoid-farm-three-spawner-lines |
+| wip | quest_build_gauntlet | 0x004369a0 | 614 | 604/614 | 10 | 182/182 | 98.35% | 120/182 | 26/0/0 |  | quest-gauntlet-rings-and-edges |
+| match | quest_build_syntax_terror | 0x00436c10 | 339 | 339/339 | 0 | 104/104 | 100.00% | 104/104 | 6/0/0 |  | quest-syntax-terror-polynomial-spawners |
+| match | quest_build_spider_spawns | 0x00436d70 | 365 | 365/365 | 0 | 73/73 | 100.00% | 73/73 | 0/0/0 |  | quest-spider-spawns-fixed-table |
+| match | quest_build_two_fronts | 0x00436ee0 | 383 | 383/383 | 0 | 112/112 | 100.00% | 112/112 | 3/0/0 |  | quest-two-fronts-cardinal-waves |
+| wip | quest_build_survival_of_the_fastest | 0x00437060 | 861 | 548/861 | 313 | 218/228 | 63.68% | 5/228 | 0/0/0 |  | quest-survival-fastest-shared-index-path |
+| wip | quest_build_spideroids | 0x004373c0 | 224 | 220/224 | 4 | 62/62 | 98.39% | 5/62 | 3/0/0 |  | quest-spideroids-builder |
+| match | quest_build_evil_zombies_at_large | 0x004374a0 | 244 | 244/244 | 0 | 81/81 | 100.00% | 81/81 | 6/0/0 |  | quest-evil-zombies-at-large-builder |
+| wip | quest_build_everred_pastures | 0x004375a0 | 367 | 341/367 | 26 | 114/114 | 92.98% | 30/114 | 7/0/0 |  | quest-everred-pastures-cardinal-waves |
+| wip | quest_build_lizard_kings | 0x00437710 | 254 | 227/254 | 27 | 66/66 | 89.39% | 38/66 | 6/0/0 |  | quest-lizard-kings-staged-prefix |
+| wip | quest_build_sweep_stakes | 0x00437810 | 258 | 238/258 | 20 | 76/76 | 92.11% | 30/76 | 7/0/0 |  | quest-sweep-stakes-append-count |
+| match | quest_build_deja_vu | 0x00437920 | 209 | 209/209 | 0 | 63/63 | 100.00% | 63/63 | 4/0/0 |  | quest-deja-vu-split-publication |
+| match | quest_build_target_practice | 0x00437a00 | 240 | 240/240 | 0 | 69/69 | 100.00% | 69/69 | 8/0/0 |  | quest-target-practice-indexed-builder |
+| wip | quest_build_major_alien_breach | 0x00437af0 | 167 | 164/167 | 3 | 48/48 | 97.92% | 12/48 | 0/0/0 |  | quest-major-alien-breach-builder |
+| match | quest_build_land_of_lizards | 0x00437ba0 | 204 | 204/204 | 0 | 46/46 | 100.00% | 46/46 | 0/0/0 |  | quest-land-of-lizards |
+| wip | quest_build_the_lizquidation | 0x00437c70 | 245 | 217/245 | 28 | 79/79 | 88.61% | 7/79 | 5/0/0 | msvc6.5 /O2 /G6 /W3 /GR- | quest-the-lizquidation-builder |
+| match | quest_build_zombie_time | 0x00437d70 | 152 | 152/152 | 0 | 50/50 | 100.00% | 50/50 | 3/0/0 |  | quest-zombie-time-indexed-publication |
+| wip | quest_build_frontline_assault | 0x00437e10 | 285 | 240/285 | 45 | 82/84 | 84.34% | 18/84 | 1/0/0 |  | quest-frontline-assault-builder |
+| match | quest_build_the_collaboration | 0x00437f30 | 286 | 286/286 | 0 | 86/86 | 100.00% | 86/86 | 8/0/0 |  | quest-the-collaboration-indexed-publication |
+| match | quest_build_the_blighting | 0x00438050 | 624 | 624/624 | 0 | 190/190 | 100.00% | 190/190 | 11/0/0 |  | quest-the-blighting-append-prefix |
+| match | quest_build_the_annihilation | 0x004382c0 | 278 | 278/278 | 0 | 77/77 | 100.00% | 77/77 | 1/0/0 |  | quest-the-annihilation-builder |
+| match | quest_build_the_massacre | 0x004383e0 | 184 | 184/184 | 0 | 61/61 | 100.00% | 61/61 | 4/0/0 |  | quest-the-massacre-builder |
+| match | quest_build_the_killing | 0x004384a0 | 602 | 602/602 | 0 | 173/173 | 100.00% | 173/173 | 14/0/0 |  | quest-the-killing-discarded-rng-cycle |
+| match | quest_build_lizard_zombie_pact | 0x00438700 | 311 | 311/311 | 0 | 95/95 | 100.00% | 95/95 | 3/0/0 |  | quest-lizard-zombie-pact-builder |
+| match | quest_build_lizard_raze | 0x00438840 | 254 | 254/254 | 0 | 77/77 | 100.00% | 77/77 | 3/0/0 |  | quest-lizard-raze-builder |
+| match | quest_build_surrounded_by_reptiles | 0x00438940 | 242 | 242/242 | 0 | 68/68 | 100.00% | 68/68 | 4/0/0 |  | quest-surrounded-by-reptiles-builder |
+| wip | quest_build_the_unblitzkrieg | 0x00438a40 | 975 | 844/975 | 131 | 298/291 | 86.59% | 40/291 | 0/0/0 |  | quest-unblitzkrieg-perimeter-sweeps |
+| match | quest_build_the_end_of_all | 0x00438e10 | 692 | 692/692 | 0 | 174/174 | 100.00% | 174/174 | 18/0/0 |  | quest-the-end-of-all-append-count |
+| wip | quest_build_spiders_inc | 0x004390d0 | 346 | 308/346 | 38 | 106/105 | 89.10% | 17/105 | 8/0/0 |  | quest-spiders-inc-staged-publication |
+| match | quest_database_init | 0x00439230 | 5466 | 5466/5466 | 0 | 1384/1384 | 100.00% | 1384/1384 | 503/0/0 |  | quest-content-database-initialization |
+| wip | quest_start_selected | 0x0043a790 | 434 | 397/434 | 37 | 116/116 | 91.38% | 80/116 | 47/0/0 |  | quest-start-state-and-spawn-table |
+| match | highscore_date_checksum | 0x0043a950 | 262 | 262/262 | 0 | 97/97 | 100.00% | 97/97 | 0/0/0 |  | highscore-iso-week-checksum |
+| match | highscore_submit_full_version_guard | 0x0043aa60 | 38 | 38/38 | 0 | 12/12 | 100.00% | 12/12 | 4/0/0 |  | highscore-submit-validation |
+| match | highscore_record_pack_for_submit | 0x0043aa90 | 113 | 113/113 | 0 | 44/44 | 100.00% | 44/44 | 0/0/0 |  | highscore-submit-packing |
+| match | highscore_read_record | 0x0043ab10 | 179 | 179/179 | 0 | 80/80 | 100.00% | 80/80 | 5/0/0 |  | highscore-record-read-validation |
+| match | highscore_record_equals | 0x0043abd0 | 151 | 151/151 | 0 | 74/74 | 100.00% | 74/74 | 0/0/0 |  | highscore-record-equality |
+| match | highscore_update_record | 0x0043ac70 | 255 | 255/255 | 0 | 95/95 | 100.00% | 95/95 | 13/0/0 |  | highscore-record-in-place-update |
+| match | highscore_write_record | 0x0043ad70 | 318 | 318/318 | 0 | 103/103 | 100.00% | 103/103 | 13/0/0 |  | highscore-record-write-encoding |
+| match | highscore_compare_survival_score_desc | 0x0043aeb0 | 32 | 32/32 | 0 | 13/13 | 100.00% | 13/13 | 0/0/0 |  | highscore-survival-score-order |
+| match | highscore_compare_rush_field32_desc | 0x0043aed0 | 32 | 32/32 | 0 | 13/13 | 100.00% | 13/13 | 0/0/0 |  | highscore-rush-time-order |
+| match | highscore_compare_quest_field32_asc_nonzero_first | 0x0043aef0 | 53 | 53/53 | 0 | 22/22 | 100.00% | 22/22 | 0/0/0 |  | highscore-quest-time-order |
+| match | highscore_find_name_entry | 0x0043af30 | 101 | 101/101 | 0 | 48/48 | 100.00% | 48/48 | 2/0/0 |  | highscore-name-lookup |
+| match | highscore_load_table | 0x0043afa0 | 1198 | 1198/1198 | 0 | 354/354 | 100.00% | 354/354 | 59/0/0 |  | highscore-table-load-filter-sort |
+| match | highscore_save_record | 0x0043b450 | 182 | 182/182 | 0 | 70/70 | 100.00% | 70/70 | 16/0/0 |  | highscore-record-save-coordinator |
+| match | highscore_save_active | 0x0043b510 | 12 | 12/12 | 0 | 4/4 | 100.00% | 4/4 | 2/0/0 |  | highscore-active-record-save |
+| wip | highscore_rank_index | 0x0043b520 | 133 | 78/133 | 55 | 51/51 | 58.82% | 4/51 | 4/0/0 |  | highscore-rank-lookup |
+| match | highscore_build_path | 0x0043b5b0 | 402 | 402/402 | 0 | 104/104 | 100.00% | 104/104 | 54/0/0 | msvc6.5 /O2 /GB /W3 /GR- /TP | highscore-mode-path-builder |
+| match | highscore_record_init | 0x0043b750 | 165 | 165/165 | 0 | 46/46 | 100.00% | 46/46 | 17/0/0 |  | highscore-record-finalization |
+| match | highscore_load_table_thunk | 0x0043b800 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-highscore-loader |
+| match | sfx_entry_reset_runtime_state | 0x0043b810 | 54 | 54/54 | 0 | 19/19 | 100.00% | 19/19 | 0/0/0 |  | audio-entry-initialization |
+| match | buffer_reader_init | 0x0043b850 | 30 | 30/30 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 |  | resource-buffer-reader |
+| match | buffer_reader_seek | 0x0043b870 | 10 | 10/10 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | resource-buffer-reader |
+| match | buffer_reader_read_u16 | 0x0043b880 | 25 | 25/25 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 |  | resource-buffer-reader |
+| match | buffer_reader_read_u32 | 0x0043b8a0 | 24 | 24/24 | 0 | 6/6 | 100.00% | 6/6 | 3/0/0 |  | resource-buffer-reader |
+| match | buffer_reader_skip | 0x0043b8c0 | 19 | 19/19 | 0 | 5/5 | 100.00% | 5/5 | 2/0/0 |  | resource-buffer-reader |
+| match | buffer_reader_find_tag | 0x0043b8e0 | 87 | 87/87 | 0 | 41/41 | 100.00% | 41/41 | 4/0/0 |  | resource-buffer-reader |
+| match | resource_pack_read_cstring | 0x0043b940 | 62 | 62/62 | 0 | 24/24 | 100.00% | 24/24 | 3/0/0 |  | resource-pack-cstring |
+| match | resource_pack_set | 0x0043b980 | 95 | 95/95 | 0 | 37/37 | 100.00% | 37/37 | 7/0/0 |  | resource-pack-selection |
+| match | resource_open_read | 0x0043b9e0 | 233 | 233/233 | 0 | 88/88 | 100.00% | 88/88 | 21/0/0 |  | resource-pack-lookup |
+| match | resource_close | 0x0043bad0 | 17 | 17/17 | 0 | 7/7 | 100.00% | 7/7 | 2/0/0 |  | resource-file-lifecycle |
+| match | dsound_init | 0x0043baf0 | 289 | 289/289 | 0 | 102/102 | 100.00% | 102/102 | 6/0/0 |  | audio-directsound-initialization |
+| match | dsound_shutdown | 0x0043bc20 | 26 | 26/26 | 0 | 8/8 | 100.00% | 8/8 | 2/0/0 |  | audio-directsound-lifecycle |
+| match | dsound_restore_buffer | 0x0043bc40 | 81 | 81/81 | 0 | 34/34 | 100.00% | 34/34 | 3/0/0 |  | audio-directsound-buffer-restore |
+| match | resource_read_alloc | 0x0043bca0 | 75 | 75/75 | 0 | 33/33 | 100.00% | 33/33 | 5/0/0 |  | resource-owned-read |
+| wip | sfx_entry_load_ogg | 0x0043bcf0 | 304 | 298/304 | 6 | 99/99 | 97.98% | 78/99 | 10/0/0 |  | audio-ogg-resident-load |
+| match | sfx_entry_seek | 0x0043be20 | 56 | 56/56 | 0 | 24/24 | 100.00% | 24/24 | 1/0/0 |  | audio-entry-playback |
+| wip | sfx_entry_start_playback | 0x0043be60 | 215 | 171/215 | 44 | 93/93 | 79.57% | 20/93 | 7/0/0 |  | audio-entry-voice-start |
+| match | sfx_entry_resume | 0x0043bf40 | 27 | 27/27 | 0 | 12/12 | 100.00% | 12/12 | 0/0/0 |  | audio-entry-playback |
+| match | sfx_entry_stop | 0x0043bf60 | 60 | 60/60 | 0 | 29/29 | 100.00% | 29/29 | 0/0/0 |  | audio-entry-playback |
+| wip | sfx_entry_set_volume | 0x0043bfa0 | 120 | 104/120 | 16 | 45/45 | 86.67% | 2/45 | 5/0/0 |  | audio-entry-volume |
+| match | sfx_entry_load_wav | 0x0043c020 | 104 | 104/104 | 0 | 44/44 | 100.00% | 44/44 | 5/0/0 |  | audio-wav-load |
+| match | sfx_release_entry | 0x0043c090 | 119 | 119/119 | 0 | 52/52 | 100.00% | 52/52 | 4/0/0 |  | audio-entry-lifecycle |
+| match | wav_parse_into_entry | 0x0043c110 | 274 | 274/274 | 0 | 87/87 | 100.00% | 87/87 | 15/0/0 |  | audio-wav-parser |
+| match | sfx_entry_upload_buffer | 0x0043c230 | 123 | 123/123 | 0 | 57/57 | 100.00% | 57/57 | 1/0/0 |  | audio-directsound-buffer-upload |
+| match | sfx_entry_create_buffers | 0x0043c2b0 | 238 | 238/238 | 0 | 91/91 | 100.00% | 91/91 | 9/0/0 |  | audio-directsound-buffer-create |
+| match | music_entry_load_ogg | 0x0043c3a0 | 380 | 380/380 | 0 | 125/125 | 100.00% | 125/125 | 13/0/0 |  | audio-ogg-stream-load |
+| match | music_stream_update | 0x0043c520 | 109 | 109/109 | 0 | 42/42 | 100.00% | 42/42 | 1/0/0 |  | audio-music-stream-update |
+| match | music_stream_fill | 0x0043c590 | 221 | 221/221 | 0 | 86/86 | 100.00% | 86/86 | 4/0/0 |  | audio-music-stream-fill |
+| match | sfx_entry_table_init_thunk | 0x0043c670 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | audio-sfx-entry-table-init-thunk |
+| match | sfx_entry_table_init | 0x0043c680 | 31 | 31/31 | 0 | 12/12 | 100.00% | 12/12 | 2/0/0 |  | audio-sfx-entry-table-init |
+| match | audio_asset_id_table_init_thunk | 0x0043c6a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | audio-asset-id-table-init-thunk |
+| match | audio_asset_id_table_init | 0x0043c6b0 | 17 | 17/17 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | audio-asset-id-table-init |
+| match | music_entry_table_init_thunk | 0x0043c6d0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | audio-music-entry-table-init-thunk |
+| match | music_entry_table_init | 0x0043c6e0 | 31 | 31/31 | 0 | 12/12 | 100.00% | 12/12 | 2/0/0 |  | audio-music-entry-table-init |
+| match | sfx_release_sample | 0x0043c700 | 57 | 57/57 | 0 | 20/20 | 100.00% | 20/20 | 3/0/0 |  | audio-slot-lifecycle |
+| match | sfx_load_sample | 0x0043c740 | 389 | 389/389 | 0 | 134/134 | 100.00% | 134/134 | 29/0/0 |  | audio-sample-slot-loader |
+| match | music_load_track | 0x0043c8d0 | 139 | 139/139 | 0 | 53/53 | 100.00% | 53/53 | 12/0/0 |  | music-track-slot-loader |
+| match | music_queue_track | 0x0043c960 | 27 | 27/27 | 0 | 8/8 | 100.00% | 8/8 | 3/0/0 |  | audio-music-playlist |
+| match | music_release_track | 0x0043c980 | 57 | 57/57 | 0 | 20/20 | 100.00% | 20/20 | 3/0/0 |  | audio-slot-lifecycle |
+| match | audio_init_music | 0x0043c9c0 | 212 | 212/212 | 0 | 51/51 | 100.00% | 51/51 | 29/0/0 |  | audio-music-initialization |
+| match | audio_init_sfx | 0x0043caa0 | 1262 | 1262/1262 | 0 | 270/270 | 100.00% | 270/270 | 235/0/0 |  | audio-sfx-registry-initialization |
+| match | sfx_system_init | 0x0043cf90 | 214 | 214/214 | 0 | 59/59 | 100.00% | 59/59 | 28/0/0 |  | audio-system-initialization |
+| match | sfx_release_all | 0x0043d070 | 91 | 91/91 | 0 | 24/24 | 100.00% | 24/24 | 13/0/0 |  | audio-system-lifecycle |
+| match | music_release_all | 0x0043d0d0 | 55 | 55/55 | 0 | 16/16 | 100.00% | 16/16 | 7/0/0 |  | audio-system-lifecycle |
+| match | audio_shutdown_all | 0x0043d110 | 15 | 15/15 | 0 | 3/3 | 100.00% | 3/3 | 3/0/0 |  | audio-subsystem-teardown |
+| match | sfx_play | 0x0043d120 | 320 | 320/320 | 0 | 93/93 | 100.00% | 93/93 | 29/0/0 |  | audio-centered-sfx-playback |
+| match | sfx_play_panned | 0x0043d260 | 386 | 386/386 | 0 | 110/110 | 100.00% | 110/110 | 34/0/0 |  | position-panned-sfx-playback |
+| match | audio_update | 0x0043d3f0 | 102 | 102/102 | 0 | 32/32 | 100.00% | 32/32 | 10/0/0 |  | audio-frame-update |
+| match | sfx_play_exclusive | 0x0043d460 | 239 | 239/239 | 0 | 66/66 | 100.00% | 66/66 | 23/0/0 |  | audio-exclusive-music-playback |
+| match | sfx_mute_all | 0x0043d550 | 87 | 87/87 | 0 | 31/31 | 100.00% | 31/31 | 6/0/0 |  | audio-mute-recursion |
+| wip | sfx_update_mute_fades | 0x0043d5b0 | 374 | 323/374 | 51 | 118/118 | 86.44% | 3/118 | 27/0/0 |  | audio-mute-fade-state-machine |
+| match | audio_suspend_channels | 0x0043d730 | 58 | 58/58 | 0 | 19/19 | 100.00% | 19/19 | 6/0/0 |  | audio-suspend-resume |
+| match | audio_resume_channels | 0x0043d770 | 73 | 73/73 | 0 | 26/26 | 100.00% | 26/26 | 7/0/0 |  | audio-suspend-resume |
+| match | sfx_is_unmuted | 0x0043d7c0 | 30 | 30/30 | 0 | 11/11 | 100.00% | 11/11 | 2/0/0 |  | audio-mute-state |
+| match | ui_focus_set | 0x0043d7e0 | 75 | 75/75 | 0 | 25/25 | 100.00% | 25/25 | 6/0/0 |  | ui-focus-selection |
+| match | ui_focus_update | 0x0043d830 | 268 | 268/268 | 0 | 78/78 | 100.00% | 78/78 | 27/0/0 |  | ui-focus-navigation |
+| match | ui_focus_draw | 0x0043d940 | 104 | 104/104 | 0 | 24/24 | 100.00% | 24/24 | 4/0/0 |  | ui-focus-highlight |
+| match | ui_segmented_slider_update | 0x0043d9b0 | 714 | 714/714 | 0 | 213/213 | 100.00% | 213/213 | 35/0/0 |  | ui-segmented-slider-widget |
+| match | ui_checkbox_update | 0x0043dc80 | 622 | 622/622 | 0 | 188/188 | 100.00% | 188/188 | 27/0/0 |  | ui-checkbox-widget |
+| wip | ui_scrollbar_update | 0x0043def0 | 1767 | 1082/1767 | 685 | 475/479 | 61.22% | 0/479 | 61/0/0 |  | ui-scrollbar-wheel-drag-navigation-and-column-rendering |
+| match | ui_menu_item_update | 0x0043e5e0 | 548 | 548/548 | 0 | 153/153 | 100.00% | 153/153 | 38/0/0 |  | ui-menu-item-widget |
+| match | ui_menu_hover_color_destroy | 0x0043e810 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-menu-hover-color-empty-destructor |
+| match | ui_menu_idle_color_destroy | 0x0043e820 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-menu-idle-color-empty-destructor |
+| match | ui_button_update | 0x0043e830 | 1215 | 1215/1215 | 0 | 347/347 | 100.00% | 347/347 | 61/0/0 |  | ui-button-focus-animation-render-and-activation |
+| match | ui_text_input_update | 0x0043ecf0 | 716 | 716/716 | 0 | 203/203 | 100.00% | 203/203 | 36/0/0 |  | ui-text-input-widget |
+| wip | ui_list_widget_update | 0x0043efc0 | 1420 | 1409/1420 | 11 | 403/403 | 99.26% | 321/403 | 50/0/0 |  | ui-dropdown-focus-navigation-hover-and-row-selection |
+| wip | statistics_menu_update | 0x0043f550 | 2877 | 2585/2877 | 292 | 675/676 | 89.86% | 280/676 | 264/0/5 |  | statistics-playtime-network-status-and-navigation |
+| match | statistics_back_button_destroy | 0x00440090 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-back-button-destroy |
+| match | statistics_update_button_destroy | 0x004400a0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-update-button-destroy |
+| match | statistics_mods_button_destroy | 0x004400b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-mods-button-destroy |
+| match | statistics_typo_button_destroy | 0x004400c0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-typo-button-destroy |
+| match | statistics_credits_button_destroy | 0x004400d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-credits-button-destroy |
+| match | statistics_perks_button_destroy | 0x004400e0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-perks-button-destroy |
+| match | statistics_weapons_button_destroy | 0x004400f0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-weapons-button-destroy |
+| match | statistics_high_scores_button_destroy | 0x00440100 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-statistics-high-scores-button-destroy |
+| wip | unlocked_weapons_database_update | 0x00440110 | 2086 | 2082/2086 | 4 | 523/523 | 99.81% | 74/523 | 157/0/0 |  | unlocked-weapon-list-and-detail-panel |
+| match | unlocked_weapons_back_button_destroy | 0x00440940 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | unlocked-weapons-back-button-empty-destructor |
+| match | unlocked_weapons_scrollbar_destroy | 0x00440950 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | unlocked-weapons-scrollbar-empty-destructor |
+| wip | unlocked_perks_database_update | 0x00440960 | 2065 | 2061/2065 | 4 | 511/511 | 99.80% | 74/511 | 148/0/0 |  | unlocked-perk-list-prerequisite-and-description-panel |
+| match | unlocked_perks_back_button_destroy | 0x00441180 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | unlocked-perks-back-button-empty-destructor |
+| match | unlocked_perks_scrollbar_destroy | 0x00441190 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | unlocked-perks-scrollbar-empty-destructor |
+| match | crimson_crt_empty_initializer_slot_54_thunk | 0x004411a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-54-thunk |
+| match | crimson_crt_empty_initializer_slot_54 | 0x004411b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-crimson-crt-empty-initializer-slot-54 |
+| match | highscore_card_draw_horizontal_divider | 0x004411c0 | 83 | 83/83 | 0 | 23/23 | 100.00% | 23/23 | 6/0/0 |  | highscore-card-divider |
+| match | highscore_card_draw_vertical_divider | 0x00441220 | 71 | 71/71 | 0 | 20/20 | 100.00% | 20/20 | 5/0/0 |  | highscore-card-divider |
+| match | highscore_format_date_label | 0x00441270 | 256 | 256/256 | 0 | 80/80 | 100.00% | 80/80 | 18/0/0 |  | highscore-date-label |
+| match | ui_text_input_render | 0x004413a0 | 3504 | 3504/3504 | 0 | 924/924 | 100.00% | 924/924 | 243/0/0 |  | highscore-result-card-renderer |
+| match | ui_update_notice_update | 0x00442150 | 614 | 614/614 | 0 | 156/156 | 100.00% | 156/156 | 47/0/0 |  | update-available-notice |
+| match | ui_update_notice_button_destroy | 0x004423c0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-ui-update-notice-button-destroy |
+| wip | highscore_screen_update | 0x004423d0 | 8026 | 6266/8026 | 1760 | 1969/2004 | 78.08% | 45/2004 | 589/0/7 |  | highscore-list-filters-online-sync-and-state-routing |
+| match | highscore_game_mode_list_destroy | 0x00444330 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-game-mode-list-empty-destructor |
+| match | highscore_player_count_list_destroy | 0x00444340 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-player-count-list-empty-destructor |
+| match | highscore_date_filter_list_destroy | 0x00444350 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-date-filter-list-empty-destructor |
+| match | highscore_online_scores_checkbox_destroy | 0x00444360 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-online-scores-checkbox-empty-destructor |
+| match | highscore_back_button_destroy | 0x00444370 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-back-button-empty-destructor |
+| match | highscore_play_button_destroy | 0x00444380 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-play-button-empty-destructor |
+| match | highscore_update_button_destroy | 0x00444390 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-update-button-empty-destructor |
+| match | highscore_score_scrollbar_destroy | 0x004443a0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-score-scrollbar-empty-destructor |
+| match | highscore_hardcore_checkbox_destroy | 0x004443b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | highscore-hardcore-checkbox-empty-destructor |
+| match | ui_profile_menu_update | 0x004443c0 | 1033 | 1033/1033 | 0 | 261/261 | 100.00% | 261/261 | 109/0/0 |  | profile-saved-name-list-editing |
+| match | profile_name_list_destroy | 0x004447d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-profile-name-list-destroy |
+| match | profile_delete_button_destroy | 0x004447e0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-profile-delete-button-destroy |
+| match | profile_add_button_destroy | 0x004447f0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-profile-add-button-destroy |
+| match | profile_name_input_destroy | 0x00444800 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-profile-name-input-destroy |
+| match | creature_spawn_tinted | 0x00444810 | 364 | 364/364 | 0 | 92/92 | 100.00% | 92/92 | 34/0/0 |  | gameplay-typo-creature-spawn |
+| wip | player_fire_weapon | 0x00444980 | 1518 | 1506/1518 | 12 | 378/378 | 99.21% | 245/378 | 142/0/0 |  | typo-player-frame-and-shotgun-fire |
+| match | typo_word_pick_fragment | 0x00444f70 | 356 | 356/356 | 0 | 117/117 | 100.00% | 117/117 | 54/0/0 |  | typo-random-name-fragment-table |
+| match | typo_word_pick_highscore_name | 0x004451b0 | 345 | 345/345 | 0 | 123/123 | 100.00% | 123/123 | 20/0/0 |  | typo-highscore-name-cache |
+| match | typo_target_name_is_unique | 0x00445310 | 110 | 110/110 | 0 | 50/50 | 100.00% | 50/50 | 3/0/0 |  | typo-target-uniqueness |
+| wip | typo_target_name_assign_random | 0x00445380 | 522 | 465/522 | 57 | 173/173 | 89.02% | 17/173 | 32/0/0 |  | typo-random-target-name-policy |
+| match | typo_target_find_by_name | 0x00445590 | 98 | 98/98 | 0 | 42/42 | 100.00% | 42/42 | 3/0/0 |  | typo-target-lookup |
+| match | typo_target_name_draw_labels | 0x00445600 | 434 | 434/434 | 0 | 111/111 | 100.00% | 111/111 | 20/0/0 |  | typo-active-creature-name-labels |
+| wip | typo_gameplay_update_and_render | 0x004457c0 | 2082 | 2049/2082 | 33 | 508/508 | 98.43% | 33/508 | 194/0/0 |  | typo-shooter-gameplay-loop |
+| match | typo_target_world_destroy | 0x00445ff0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-typo-target-world-destroy |
+| match | input_any_key_pressed | 0x00446000 | 40 | 40/40 | 0 | 16/16 | 100.00% | 16/16 | 1/0/0 |  | input-any-key |
+| match | input_primary_just_pressed | 0x00446030 | 188 | 188/188 | 0 | 62/62 | 100.00% | 62/62 | 14/0/0 |  | input-primary-edge |
+| match | input_primary_is_down | 0x004460f0 | 74 | 74/74 | 0 | 24/24 | 100.00% | 24/24 | 5/0/0 |  | input-primary-held |
+| match | ui_callback_noop | 0x00446140 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | ui-placeholder-callback |
+| match | ui_get_element_index | 0x00446150 | 31 | 31/31 | 0 | 11/11 | 100.00% | 11/11 | 2/0/0 |  | ui-element-index |
+| match | ui_elements_reset_state | 0x00446170 | 31 | 31/31 | 0 | 10/10 | 100.00% | 10/10 | 2/0/0 |  | ui-element-state-reset |
+| match | ui_elements_max_timeline | 0x00446190 | 35 | 35/35 | 0 | 13/13 | 100.00% | 13/13 | 2/0/0 |  | ui-element-timeline-extent |
+| wip | game_state_set | 0x004461c0 | 1854 | 1582/1854 | 272 | 393/399 | 85.35% | 166/399 | 162/0/0 |  | game-state-ui-transition-dispatch |
+| match | ui_element_update | 0x00446900 | 831 | 831/831 | 0 | 226/226 | 100.00% | 226/226 | 29/0/0 |  | ui-element-interaction-and-transition |
+| wip | ui_element_render | 0x00446c40 | 1801 | 1670/1801 | 131 | 521/521 | 92.71% | 165/521 | 65/0/0 |  | ui-focus-panel-offset-and-counter-overlay-rendering |
+| match | ui_menu_main_click_mods | 0x00447350 | 18 | 18/18 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | ui-menu-state-callback |
+| match | ui_menu_main_click_options | 0x00447370 | 18 | 18/18 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | ui-menu-state-callback |
+| match | ui_menu_main_click_statistics | 0x00447390 | 67 | 67/67 | 0 | 16/16 | 100.00% | 16/16 | 10/0/0 |  | ui-menu-statistics-audio |
+| match | ui_menu_main_click_controls | 0x004473e0 | 18 | 18/18 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | ui-menu-state-callback |
+| match | ui_menu_main_click_play_game | 0x00447400 | 18 | 18/18 | 0 | 3/3 | 100.00% | 3/3 | 2/0/0 |  | ui-menu-state-callback |
+| match | ui_menu_click_back_contextual | 0x00447420 | 45 | 45/45 | 0 | 12/12 | 100.00% | 12/12 | 5/0/0 |  | ui-menu-contextual-back |
+| match | ui_menu_main_click_quit | 0x00447450 | 61 | 61/61 | 0 | 15/15 | 100.00% | 15/15 | 9/0/0 |  | ui-menu-quit |
+| match | ui_menu_pause_click_resume | 0x00447490 | 67 | 67/67 | 0 | 18/18 | 100.00% | 18/18 | 7/0/0 |  | ui-menu-resume |
+| match | ui_menu_pause_click_main_menu | 0x004474e0 | 160 | 160/160 | 0 | 40/40 | 100.00% | 40/40 | 22/0/0 |  | pause-menu-plugin-exit |
+| match | config_apply_detail_preset | 0x00447580 | 57 | 57/57 | 0 | 15/15 | 100.00% | 15/15 | 8/0/0 |  | graphics-detail-preset-flags |
+| wip | options_menu_update | 0x004475d0 | 1621 | 1224/1621 | 397 | 378/377 | 75.50% | 10/377 | 151/0/1 |  | options-audio-detail-input-and-controls-navigation |
+| match | options_controls_button_destroy | 0x00447c30 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-controls-button-destroy |
+| match | options_mouse_sensitivity_slider_destroy | 0x00447c40 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-mouse-sensitivity-slider-destroy |
+| match | options_graphics_detail_slider_destroy | 0x00447c50 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-graphics-detail-slider-destroy |
+| match | options_music_volume_slider_destroy | 0x00447c60 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-music-volume-slider-destroy |
+| match | options_sfx_volume_slider_destroy | 0x00447c70 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-sfx-volume-slider-destroy |
+| match | options_info_checkbox_destroy | 0x00447c80 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-options-info-checkbox-destroy |
+| match | input_configure_for_label | 0x00447c90 | 58 | 58/58 | 0 | 18/18 | 100.00% | 18/18 | 8/0/0 |  | input-configuration-label |
+| match | input_scheme_label | 0x00447cf0 | 53 | 53/53 | 0 | 17/17 | 100.00% | 17/17 | 7/0/0 |  | input-scheme-label |
+| wip | quest_select_menu_update | 0x00447d40 | 3436 | 3273/3436 | 163 | 803/803 | 95.27% | 0/803 | 282/0/0 |  | quest-stage-picker-hardcore-gating-and-start-routing |
+| match | quest_select_back_button_destroy | 0x00448ab0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-back-button-empty-destructor |
+| match | quest_select_hardcore_checkbox_destroy | 0x00448ac0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-hardcore-checkbox-empty-destructor |
+| match | quest_select_unused_orange_color_destroy | 0x00448ad0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-unused-orange-color-empty-destructor |
+| match | quest_select_hovered_stage_color_destroy | 0x00448ae0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-hovered-stage-color-empty-destructor |
+| match | quest_select_selected_stage_color_destroy | 0x00448af0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-selected-stage-color-empty-destructor |
+| match | quest_select_title_color_destroy | 0x00448b00 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-title-color-empty-destructor |
+| match | quest_select_unused_blue_dim_color_destroy | 0x00448b10 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-unused-blue-dim-color-empty-destructor |
+| match | quest_select_unused_blue_color_destroy | 0x00448b20 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-unused-blue-color-empty-destructor |
+| match | quest_select_row_hover_color_destroy | 0x00448b30 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-row-hover-color-empty-destructor |
+| match | quest_select_row_idle_color_destroy | 0x00448b40 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | quest-select-row-idle-color-empty-destructor |
+| match | input_detect_active_analog_axis | 0x00448b50 | 377 | 377/377 | 0 | 103/103 | 100.00% | 103/103 | 13/0/0 |  | input-analog-axis-detection |
+| wip | controls_menu_update | 0x00448cd0 | 21289 | 17398/21289 | 3891 | 5413/5421 | 81.72% | 172/5421 | 1559/0/9 |  | controls-device-schemes-key-axis-rebinding-and-render-flow |
+| match | vec2_add_out | 0x0044ecf0 | 26 | 26/26 | 0 | 9/9 | 100.00% | 9/9 | 0/0/0 |  | x87-vector-add |
+| match | controls_rebind_items_destroy | 0x0044ed10 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-rebind-items-destroy |
+| match | controls_direction_arrow_checkbox_destroy | 0x0044ed20 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-direction-arrow-checkbox-destroy |
+| match | controls_move_method_list_destroy | 0x0044ed30 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-move-method-list-destroy |
+| match | controls_aim_method_list_destroy | 0x0044ed40 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-aim-method-list-destroy |
+| match | controls_player_profile_list_destroy | 0x0044ed50 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-player-profile-list-destroy |
+| match | controls_back_button_destroy | 0x0044ed60 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-back-button-destroy |
+| match | controls_redefine_button_destroy | 0x0044ed70 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-controls-redefine-button-destroy |
+| wip | play_game_menu_update | 0x0044ed80 | 3238 | 2903/3238 | 335 | 778/777 | 89.65% | 120/777 | 285/0/21 |  | play-game-mode-buttons-player-count-and-routing |
+| match | play_game_player_count_list_destroy | 0x0044fa30 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-player-count-list-empty-destructor |
+| match | play_game_tutorial_button_destroy | 0x0044fa40 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-tutorial-button-empty-destructor |
+| match | play_game_hardcore_checkbox_destroy | 0x0044fa50 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-hardcore-checkbox-empty-destructor |
+| match | play_game_typo_button_destroy | 0x0044fa60 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-typo-button-empty-destructor |
+| match | play_game_survival_button_destroy | 0x0044fa70 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-survival-button-empty-destructor |
+| match | play_game_rush_button_destroy | 0x0044fa80 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-rush-button-empty-destructor |
+| match | play_game_quests_button_destroy | 0x0044fa90 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | play-game-quests-button-empty-destructor |
+| match | ui_element_init_defaults | 0x0044faa0 | 173 | 173/173 | 0 | 40/40 | 100.00% | 40/40 | 3/0/0 |  | ui-element-default-state |
+| wip | ui_element_layout_calc | 0x0044fb50 | 288 | 281/288 | 7 | 86/86 | 97.67% | 32/86 | 6/0/0 |  | ui-element-layout-and-hover-uvs |
+| match | ui_menu_main_click_buy_full_version | 0x0044fc70 | 39 | 39/39 | 0 | 11/11 | 100.00% | 11/11 | 5/0/0 |  | shareware-purchase-link |
+| match | ui_menu_main_click_recheck_full_version | 0x0044fca0 | 8 | 8/8 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | full-version-recheck |
+| wip | ui_menu_layout_init | 0x0044fcb0 | 7237 | 6398/7237 | 839 | 1408/1422 | 88.41% | 10/1422 | 482/0/5 |  | menu-element-graph-layout-and-responsive-transforms |
+| match | weapon_table_defaults_global_init_thunk | 0x00451900 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | weapon-table-default-global-initialization-thunk |
+| match | weapon_table_defaults_global_init | 0x00451910 | 150 | 150/150 | 0 | 47/47 | 100.00% | 47/47 | 2/0/0 |  | weapon-table-default-global-initialization |
+| match | weapon_table_init | 0x004519b0 | 4885 | 4885/4885 | 0 | 1000/1000 | 100.00% | 1000/1000 | 477/0/0 |  | weapon-metadata-database |
+| match | weapon_pick_random_available | 0x00452cd0 | 107 | 107/107 | 0 | 36/36 | 100.00% | 36/36 | 8/0/0 |  | gameplay-weapon-rng |
+| match | weapon_assign_player | 0x00452d40 | 254 | 254/254 | 0 | 61/61 | 100.00% | 61/61 | 26/0/0 |  | gameplay-weapon-assignment |
+| match | weapon_refresh_available | 0x00452e40 | 161 | 161/161 | 0 | 48/48 | 100.00% | 48/48 | 17/0/0 |  | gameplay-weapon-unlocks |
 
 ## grim.dll
 
-**7/1175** functions, **114/289897** bytes (**0.0%**), **7/7** scratches at 100%.
+**133/139** functions, **14944/21165** bytes (**70.6%**), **20807/21165** fuzzy-weighted bytes (**98.3%**), **139/139** reproducible candidates covering **21165/21165** bytes (**100.0%**), **133/139** scratches verified.
 
-| state | function | address | bytes | insns | match | prefix | build | note |
-|---|---|---|---:|---:|---:|---:|---|---|
-| match | grim_noop | 0x10001160 | 1 | 1/1 | 100.00% | 1/1 |  | smoke |
-| match | grim_get_error_text | 0x10006ca0 | 6 | 2/2 | 100.00% | 2/2 |  | smoke |
-| match | grim_get_time_ms | 0x10006e40 | 6 | 2/2 | 100.00% | 2/2 |  | smoke |
-| match | grim_get_frame_dt | 0x10006e60 | 33 | 9/9 | 100.00% | 9/9 |  | branch-x87 |
-| match | grim_is_mouse_button_down | 0x10007410 | 38 | 11/11 | 100.00% | 11/11 |  | branch-call-stdcall |
-| match | grim_get_mouse_x | 0x10007510 | 7 | 2/2 | 100.00% | 2/2 |  | smoke |
-| match | grim_get_mouse_wheel_delta | 0x10007560 | 23 | 7/7 | 100.00% | 7/7 |  | branch-x87 |
+| state | function | address | bytes | fuzzy bytes | fuzzy gap | insns | match | prefix | refs ok/?/! | build | note |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| match | grim_crt_empty_initializer_slot_01_thunk | 0x10001000 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | tail-thunk-to-empty-initializer |
+| match | grim_crt_empty_initializer_slot_01 | 0x10001010 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | empty-initializer |
+| match | grim_crt_empty_initializer_slot_02_thunk | 0x10001020 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-02-thunk |
+| match | grim_crt_empty_initializer_slot_02 | 0x10001030 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-02 |
+| match | grim_crt_empty_initializer_slot_03_thunk | 0x10001040 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-03-thunk |
+| match | grim_crt_empty_initializer_slot_03 | 0x10001050 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-03 |
+| match | grim_crt_empty_initializer_slot_04_thunk | 0x10001060 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-04-thunk |
+| match | grim_crt_empty_initializer_slot_04 | 0x10001070 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-04 |
+| match | grim_crt_empty_initializer_slot_05_thunk | 0x10001080 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-05-thunk |
+| match | grim_crt_empty_initializer_slot_05 | 0x10001090 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-05 |
+| match | grim_crt_empty_initializer_slot_06_thunk | 0x100010a0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-06-thunk |
+| match | grim_crt_empty_initializer_slot_06 | 0x100010b0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-06 |
+| match | grim_crt_empty_initializer_slot_07_thunk | 0x100010c0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-07-thunk |
+| match | grim_crt_empty_initializer_slot_07 | 0x100010d0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-07 |
+| match | grim_crt_empty_initializer_slot_08_thunk | 0x100010e0 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-08-thunk |
+| match | grim_crt_empty_initializer_slot_08 | 0x100010f0 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-08 |
+| match | grim_crt_empty_initializer_slot_09_thunk | 0x10001100 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-09-thunk |
+| match | grim_crt_empty_initializer_slot_09 | 0x10001110 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-09 |
+| match | grim_crt_empty_initializer_slot_10_thunk | 0x10001120 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-10-thunk |
+| match | grim_crt_empty_initializer_slot_10 | 0x10001130 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-10 |
+| match | grim_missing_frame_callback | 0x10001140 | 13 | 13/13 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | default-missing-frame-callback |
+| match | grim_default_device_callback | 0x10001150 | 3 | 3/3 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 |  | default-device-callback |
+| match | grim_noop | 0x10001160 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | smoke |
+| match | grim_config_defaults_init_thunk | 0x10001700 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | config-defaults-tail-thunk |
+| wip | grim_config_defaults_init | 0x10001710 | 734 | 729/734 | 5 | 140/140 | 99.29% | 21/140 | 83/0/0 |  | shared-config-defaults-and-input-bindings |
+| match | grim_apply_render_state | 0x10004520 | 720 | 720/720 | 0 | 232/232 | 100.00% | 232/232 | 41/0/0 |  | grim-render-state-restore |
+| match | grim_is_texture_format_supported | 0x100047f0 | 51 | 51/51 | 0 | 19/19 | 100.00% | 19/19 | 4/0/0 |  | grim-texture-format-probe |
+| match | grim_select_texture_format | 0x10004830 | 232 | 232/232 | 0 | 67/67 | 100.00% | 67/67 | 17/0/0 |  | grim-texture-format-selection |
+| match | grim_timing_init | 0x10004920 | 74 | 74/74 | 0 | 13/13 | 100.00% | 13/13 | 10/0/0 |  | grim-frame-timing-init |
+| match | grim_timing_update | 0x10004970 | 216 | 216/216 | 0 | 53/53 | 100.00% | 53/53 | 23/0/0 |  | grim-frame-timing-update |
+| match | grim_texture_init | 0x10004a50 | 83 | 83/83 | 0 | 38/38 | 100.00% | 38/38 | 1/0/0 |  | grim-texture-constructor |
+| match | grim_texture_release | 0x10004ab0 | 66 | 66/66 | 0 | 25/25 | 100.00% | 25/25 | 1/0/0 |  | grim-texture-destructor |
+| match | grim_path_has_extension | 0x10004b00 | 99 | 99/99 | 0 | 50/50 | 100.00% | 50/50 | 0/0/0 |  | grim-texture-extension |
+| match | grim_decode_jaz_texture | 0x10004b70 | 785 | 785/785 | 0 | 252/252 | 100.00% | 252/252 | 22/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX /MD | grim-jaz-texture-decode |
+| match | grim_jaz_jpeg_error_exit | 0x10004e90 | 41 | 41/41 | 0 | 14/14 | 100.00% | 14/14 | 1/0/0 | msvc6.5 /O2 /GB /W3 /GR- /MD | grim-jaz-jpeg-error |
+| wip | grim_texture_load_file | 0x10004ec0 | 591 | 508/591 | 83 | 235/235 | 85.96% | 5/235 | 24/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX /MD | grim-texture-file-decode |
+| match | grim_texture_name_equals | 0x10005110 | 93 | 93/93 | 0 | 44/44 | 100.00% | 44/44 | 0/0/0 |  | grim-texture-name |
+| match | grim_find_texture_by_name | 0x10005170 | 68 | 68/68 | 0 | 33/33 | 100.00% | 33/33 | 4/0/0 |  | grim-texture-name-lookup |
+| match | grim_find_free_texture_slot | 0x100051c0 | 28 | 28/28 | 0 | 10/10 | 100.00% | 10/10 | 2/0/0 |  | grim-texture-slot-allocation |
+| match | grim_load_texture_internal | 0x100051e0 | 265 | 265/265 | 0 | 80/80 | 100.00% | 80/80 | 14/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | grim-texture-file-load |
+| wip | grim_state_init | 0x100052f0 | 1872 | 1841/1872 | 31 | 425/425 | 98.35% | 397/425 | 166/0/0 | msvc6.5 /O2 /GB /W3 /GR- /MD | grim-global-state-and-atlas-defaults |
+| match | grim_lookup_blob_load | 0x10005a40 | 146 | 146/146 | 0 | 51/51 | 100.00% | 51/51 | 15/0/0 |  | grim-lookup-blob-lifecycle |
+| match | grim_lookup_blob_find | 0x10005ae0 | 146 | 146/146 | 0 | 66/66 | 100.00% | 66/66 | 4/0/0 |  | grim-lookup-blob-search |
+| match | grim_lookup_blob_size_for_path | 0x10005b80 | 146 | 146/146 | 0 | 66/66 | 100.00% | 66/66 | 4/0/0 |  | grim-lookup-blob-size |
+| match | grim_set_key_char_buffer | 0x10005c20 | 32 | 32/32 | 0 | 7/7 | 100.00% | 7/7 | 3/0/0 |  | grim2d-key-char-buffer |
+| match | grim_get_key_char | 0x10005c40 | 52 | 52/52 | 0 | 22/22 | 100.00% | 22/22 | 4/0/0 |  | grim2d-key-char-fifo |
+| match | grim_release | 0x10005c80 | 8 | 8/8 | 0 | 4/4 | 100.00% | 4/4 | 1/0/0 |  | grim2d-object-release |
+| match | grim_set_paused | 0x10005c90 | 12 | 12/12 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim2d-pause-state |
+| match | grim_get_version | 0x10005ca0 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim2d-version |
+| match | grim_init_system | 0x10005eb0 | 318 | 318/318 | 0 | 93/93 | 100.00% | 93/93 | 32/0/0 |  | grim2d-system-initialization |
+| match | grim_shutdown | 0x10005ff0 | 38 | 38/38 | 0 | 8/8 | 100.00% | 8/8 | 7/0/0 |  | grim2d-system-shutdown |
+| match | grim_apply_settings | 0x10006020 | 8 | 8/8 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim2d-run-loop-wrapper |
+| match | grim_set_texture_stage_ops | 0x10006030 | 1324 | 1324/1324 | 0 | 468/468 | 100.00% | 468/468 | 65/0/0 |  | grim-texture-stage-operation-modes |
+| wip | grim_set_config_var | 0x10006580 | 1534 | 1447/1534 | 87 | 443/443 | 94.36% | 7/443 | 70/0/0 |  | grim2d-config-variable-router |
+| match | grim_get_config_var | 0x10006c30 | 102 | 102/102 | 0 | 32/32 | 100.00% | 32/32 | 5/0/0 |  | grim2d-get-config-var |
+| match | grim_get_error_text | 0x10006ca0 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | grim_clear_color | 0x10006cb0 | 150 | 150/150 | 0 | 45/45 | 100.00% | 45/45 | 11/0/0 |  | grim2d-device-clear |
+| match | grim_set_render_target | 0x10006d50 | 240 | 240/240 | 0 | 89/89 | 100.00% | 89/89 | 19/0/0 |  | grim2d-render-target-switch |
+| match | grim_get_time_ms | 0x10006e40 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | grim_set_time_ms | 0x10006e50 | 12 | 12/12 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim2d-time-state |
+| match | grim_get_frame_dt | 0x10006e60 | 33 | 33/33 | 0 | 9/9 | 100.00% | 9/9 | 4/0/0 |  | branch-x87 |
+| match | grim_get_fps | 0x10006e90 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim2d-fps-state |
+| match | grim_joystick_up_active | 0x10006ea0 | 78 | 78/78 | 0 | 23/23 | 100.00% | 23/23 | 3/0/0 |  | grim-joystick-direction |
+| match | grim_joystick_down_active | 0x10006ef0 | 74 | 74/74 | 0 | 21/21 | 100.00% | 21/21 | 3/0/0 |  | grim-joystick-direction |
+| match | grim_joystick_left_active | 0x10006f40 | 78 | 78/78 | 0 | 23/23 | 100.00% | 23/23 | 3/0/0 |  | grim-joystick-direction |
+| match | grim_joystick_right_active | 0x10006f90 | 74 | 74/74 | 0 | 21/21 | 100.00% | 21/21 | 3/0/0 |  | grim-joystick-direction |
+| wip | grim_is_key_active | 0x10006fe0 | 456 | 361/456 | 95 | 176/175 | 79.20% | 95/175 | 7/0/1 |  | grim-input-key-router |
+| match | grim_get_config_float | 0x100071b0 | 264 | 264/264 | 0 | 88/88 | 100.00% | 88/88 | 13/0/0 |  | grim-input-float-router |
+| match | grim_get_slot_float | 0x100072c0 | 14 | 14/14 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim-slot-state |
+| match | grim_get_slot_int | 0x100072d0 | 14 | 14/14 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim-slot-state |
+| match | grim_set_slot_float | 0x100072e0 | 18 | 18/18 | 0 | 4/4 | 100.00% | 4/4 | 1/0/0 |  | grim-slot-state |
+| match | grim_set_slot_int | 0x10007300 | 18 | 18/18 | 0 | 4/4 | 100.00% | 4/4 | 1/0/0 |  | grim-slot-state |
+| match | grim_is_key_down | 0x10007320 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | grim2d-key-state |
+| match | grim_flush_input | 0x10007330 | 91 | 91/91 | 0 | 34/34 | 100.00% | 34/34 | 5/0/0 |  | grim2d-input-flush |
+| match | grim_was_key_pressed | 0x10007390 | 119 | 119/119 | 0 | 31/31 | 100.00% | 31/31 | 10/0/0 |  | grim2d-key-repeat |
+| match | grim_is_mouse_button_down | 0x10007410 | 38 | 38/38 | 0 | 11/11 | 100.00% | 11/11 | 3/0/0 |  | grim2d-mouse-button-state |
+| match | grim_was_mouse_button_pressed | 0x10007440 | 131 | 131/131 | 0 | 51/51 | 100.00% | 51/51 | 7/0/0 |  | grim2d-mouse-edge |
+| match | grim_get_mouse_dx | 0x100074d0 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-mouse-motion |
+| match | grim_get_mouse_dy | 0x100074e0 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-mouse-motion |
+| match | grim_get_mouse_dx_indexed | 0x100074f0 | 8 | 8/8 | 0 | 3/3 | 100.00% | 3/3 | 0/0/0 |  | grim-mouse-motion-forwarder |
+| match | grim_get_mouse_dy_indexed | 0x10007500 | 8 | 8/8 | 0 | 3/3 | 100.00% | 3/3 | 0/0/0 |  | grim-mouse-motion-forwarder |
+| match | grim_get_mouse_x | 0x10007510 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | smoke |
+| match | grim_get_mouse_y | 0x10007520 | 7 | 7/7 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-mouse-position |
+| match | grim_set_mouse_pos | 0x10007530 | 37 | 37/37 | 0 | 9/9 | 100.00% | 9/9 | 4/0/0 |  | grim-mouse-position |
+| match | grim_get_mouse_wheel_delta | 0x10007560 | 23 | 23/23 | 0 | 7/7 | 100.00% | 7/7 | 3/0/0 |  | branch-x87 |
+| match | grim_get_joystick_x | 0x10007580 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-joystick-state |
+| match | grim_get_joystick_y | 0x10007590 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-joystick-state |
+| match | grim_get_joystick_z | 0x100075a0 | 6 | 6/6 | 0 | 2/2 | 100.00% | 2/2 | 1/0/0 |  | grim-joystick-state |
+| match | grim_get_joystick_pov | 0x100075b0 | 14 | 14/14 | 0 | 3/3 | 100.00% | 3/3 | 1/0/0 |  | grim-joystick-state |
+| match | grim_is_joystick_button_down | 0x100075c0 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | grim-joystick-button-wrapper |
+| match | grim_create_texture | 0x100075d0 | 257 | 257/257 | 0 | 81/81 | 100.00% | 81/81 | 13/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX | grim2d-texture-create |
+| match | grim_load_texture | 0x100076e0 | 21 | 21/21 | 0 | 7/7 | 100.00% | 7/7 | 1/0/0 |  | grim2d-texture-load-wrapper |
+| match | grim_destroy_texture | 0x10007700 | 64 | 64/64 | 0 | 20/20 | 100.00% | 20/20 | 6/0/0 |  | grim2d-texture-destruction |
+| match | grim_get_texture_handle | 0x10007740 | 16 | 16/16 | 0 | 5/5 | 100.00% | 5/5 | 1/0/0 |  | grim2d-texture-lookup |
+| match | grim_recreate_texture | 0x10007790 | 157 | 157/157 | 0 | 57/57 | 100.00% | 57/57 | 8/0/0 |  | grim2d-texture-recreate |
+| match | grim_bind_texture | 0x10007830 | 58 | 58/58 | 0 | 20/20 | 100.00% | 20/20 | 3/0/0 |  | grim2d-texture-binding |
+| match | grim_draw_fullscreen_quad | 0x10007870 | 109 | 109/109 | 0 | 32/32 | 100.00% | 32/32 | 2/0/0 |  | grim2d-fullscreen-quad |
+| match | grim_draw_rect_filled | 0x100078e0 | 205 | 205/205 | 0 | 72/72 | 100.00% | 72/72 | 6/0/0 |  | grim2d-filled-rectangle |
+| match | grim_draw_fullscreen_color | 0x100079b0 | 259 | 259/259 | 0 | 83/83 | 100.00% | 83/83 | 8/0/0 |  | grim2d-fullscreen-color |
+| match | grim_begin_batch | 0x10007ac0 | 94 | 94/94 | 0 | 27/27 | 100.00% | 27/27 | 9/0/0 |  | grim2d-batch-lifecycle |
+| match | grim_end_batch | 0x10007b20 | 104 | 104/104 | 0 | 36/36 | 100.00% | 36/36 | 8/0/0 |  | grim2d-batch-lifecycle |
+| match | grim_draw_circle_filled | 0x10007b90 | 432 | 432/432 | 0 | 115/115 | 100.00% | 115/115 | 32/0/0 |  | grim2d-filled-circle |
+| match | grim_draw_circle_outline | 0x10007d40 | 462 | 462/462 | 0 | 120/120 | 100.00% | 120/120 | 31/0/0 |  | grim2d-circle-outline |
+| match | grim_crt_empty_initializer_slot_12_thunk | 0x10007f10 | 5 | 5/5 | 0 | 1/1 | 100.00% | 1/1 | 1/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-12-thunk |
+| match | grim_crt_empty_initializer_slot_12 | 0x10007f20 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | evidence-backed-grim-crt-empty-initializer-slot-12 |
+| match | grim_set_rotation | 0x10007f30 | 85 | 85/85 | 0 | 19/19 | 100.00% | 19/19 | 11/0/0 |  | grim2d-rotation-matrix |
+| match | grim_set_color | 0x10007f90 | 166 | 166/166 | 0 | 42/42 | 100.00% | 42/42 | 16/0/0 |  | grim2d-packed-color |
+| match | grim_set_color_ptr | 0x10008040 | 104 | 104/104 | 0 | 25/25 | 100.00% | 25/25 | 12/0/0 |  | grim2d-packed-color-pointer |
+| match | grim_draw_line | 0x100080b0 | 134 | 134/134 | 0 | 40/40 | 100.00% | 40/40 | 13/0/0 |  | grim2d-line-vector |
+| match | grim_line_vector_dtor | 0x10008140 | 1 | 1/1 | 0 | 1/1 | 100.00% | 1/1 | 0/0/0 |  | empty-local-static-destructor |
+| match | grim_draw_line_quad | 0x10008150 | 99 | 99/99 | 0 | 42/42 | 100.00% | 42/42 | 0/0/0 |  | grim2d-line-quad |
+| match | grim_set_color_slot | 0x100081c0 | 109 | 109/109 | 0 | 27/27 | 100.00% | 27/27 | 9/0/0 |  | grim2d-packed-color-slot |
+| match | grim_set_atlas_frame | 0x10008230 | 139 | 139/139 | 0 | 31/31 | 100.00% | 31/31 | 15/0/0 |  | grim2d-atlas-frame |
+| match | grim_set_sub_rect | 0x100082c0 | 143 | 143/143 | 0 | 31/31 | 100.00% | 31/31 | 15/0/0 |  | grim2d-atlas-sub-rectangle |
+| match | grim_set_uv | 0x10008350 | 74 | 74/74 | 0 | 17/17 | 100.00% | 17/17 | 8/0/0 |  | grim2d-uv-rectangle |
+| match | grim_set_uv_point | 0x100083a0 | 29 | 29/29 | 0 | 6/6 | 100.00% | 6/6 | 2/0/0 |  | grim2d-uv-point |
+| match | grim_flush_batch | 0x100083c0 | 107 | 107/107 | 0 | 37/37 | 100.00% | 37/37 | 8/0/0 |  | grim2d-batch-lifecycle |
+| match | grim_submit_vertices_offset_color | 0x10008430 | 168 | 168/168 | 0 | 54/54 | 100.00% | 54/54 | 9/0/0 |  | grim2d-vertex-submit-offset-color |
+| match | grim_submit_vertices_transform_color | 0x100084e0 | 218 | 218/218 | 0 | 72/72 | 100.00% | 72/72 | 10/0/0 |  | grim2d-vertex-submit-transform-color |
+| match | grim_submit_vertices_transform | 0x100085c0 | 192 | 192/192 | 0 | 64/64 | 100.00% | 64/64 | 9/0/0 |  | grim2d-vertex-submit-transform |
+| match | grim_submit_vertices_offset | 0x10008680 | 153 | 153/153 | 0 | 50/50 | 100.00% | 50/50 | 8/0/0 |  | grim2d-vertex-submit-offset |
+| match | grim_draw_quad_xy | 0x10008720 | 34 | 34/34 | 0 | 14/14 | 100.00% | 14/14 | 0/0/0 |  | grim2d-quad-xy-wrapper |
+| match | grim_draw_quad_rotated_matrix | 0x10008750 | 953 | 953/953 | 0 | 236/236 | 100.00% | 236/236 | 81/0/0 |  | grim2d-matrix-quad |
+| match | grim_draw_quad | 0x10008b10 | 800 | 800/800 | 0 | 195/195 | 100.00% | 195/195 | 68/0/0 |  | grim2d-quad-batching |
+| match | grim_submit_vertex_raw | 0x10008e30 | 116 | 116/116 | 0 | 35/35 | 100.00% | 35/35 | 9/0/0 |  | grim2d-raw-vertex-submit |
+| match | grim_submit_quad_raw | 0x10008eb0 | 91 | 91/91 | 0 | 25/25 | 100.00% | 25/25 | 7/0/0 |  | grim2d-raw-quad-submit |
+| match | grim_draw_rect_outline | 0x10008f10 | 356 | 356/356 | 0 | 125/125 | 100.00% | 125/125 | 8/0/0 |  | grim2d-outlined-rectangle |
+| match | grim_draw_quad_points | 0x10009080 | 554 | 554/554 | 0 | 130/130 | 100.00% | 130/130 | 59/0/0 |  | grim2d-quad-points |
+| wip | grim_draw_text_mono | 0x100092b0 | 1034 | 976/1034 | 58 | 298/308 | 94.39% | 6/308 | 41/0/0 |  | grim2d-mono-font-draw |
+| match | grim_measure_text_width | 0x100096c0 | 98 | 98/98 | 0 | 45/45 | 100.00% | 45/45 | 2/0/0 |  | grim2d-small-font-measurement |
+| match | grim_draw_text_small | 0x10009730 | 515 | 515/515 | 0 | 153/153 | 100.00% | 153/153 | 18/0/0 |  | grim2d-small-font-draw |
+| match | grim_draw_text_mono_fmt | 0x10009940 | 52 | 52/52 | 0 | 16/16 | 100.00% | 16/16 | 3/0/0 |  | grim2d-mono-text-format-wrapper |
+| match | grim_draw_text_small_fmt | 0x10009980 | 52 | 52/52 | 0 | 16/16 | 100.00% | 16/16 | 3/0/0 |  | grim2d-small-text-format-wrapper |
+| match | GRIM__GetInterface | 0x100099c0 | 95 | 95/95 | 0 | 28/28 | 100.00% | 28/28 | 11/0/0 |  | grim-interface-factory |
+| match | DllMain | 0x10009a20 | 38 | 38/38 | 0 | 10/10 | 100.00% | 10/10 | 3/0/0 |  | grim-dll-process-attach |
+| match | grim_jaz_decode_scope_init | 0x1000a810 | 3 | 3/3 | 0 | 2/2 | 100.00% | 2/2 | 0/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX /MD | grim-jaz-decode-scope |
+| match | grim_zlib_status_is_error | 0x1000a820 | 21 | 21/21 | 0 | 11/11 | 100.00% | 11/11 | 0/0/0 | msvc6.5 /O2 /GB /W3 /GR- /MD | grim-zlib-status-classification |
+| match | grim_zlib_decompress_alloc | 0x1000a840 | 60 | 60/60 | 0 | 22/22 | 100.00% | 22/22 | 3/0/0 | msvc6.5 /O2 /GB /W3 /GR- /MD | grim-zlib-decompress-allocation |
+| match | grim_jaz_decompress_payload | 0x1000a880 | 66 | 66/66 | 0 | 26/26 | 100.00% | 26/26 | 1/0/0 | msvc6.5 /O2 /GB /W3 /GR- /GX /MD | grim-jaz-payload-decompression |

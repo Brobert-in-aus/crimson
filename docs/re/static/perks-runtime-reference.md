@@ -9,7 +9,8 @@ tags:
 
 This page documents runtime location evidence for each perk in:
 
-- **Original**: Crimsonland v1.9.93 (`analysis/ghidra/raw/crimsonland.exe_decompiled.c`)
+- **Original**: Crimsonland v1.9.93, resolved by canonical function name/address
+  through `just analysis-function`
 - **Rewrite parity implementation**: Python port (`src/`)
 
 For gameplay effects and mechanics, see [Perks](../../mechanics/perks.md).
@@ -152,7 +153,9 @@ Notes:
 ### Rewrite
 
 - Flag application: `src/crimson/perks/runtime/apply.py`: `perk_apply()` dispatches to:
-- `src/crimson/perks/impl/plaguebearer.py`: `apply_plaguebearer()` (sets `plaguebearer_active` for all players).
+- `src/crimson/perks/impl/plaguebearer.py`: `apply_plaguebearer()` (sets
+  `plaguebearer_active` for all players by default, or player zero only with
+  `--preserve-bugs`).
 - Creature-side behavior: `src/crimson/creatures/runtime.py`: `CreaturePool.update()` (contact infection, tick damage, spread).
 - Offer gating: `src/crimson/perks/availability.py`: `perk_can_offer()` hardcore quest gate.
 
@@ -258,7 +261,10 @@ Notes:
 ### Rewrite
 
 - Death hook implementation: `src/crimson/perks/impl/final_revenge.py`: `apply_final_revenge_on_player_death()`.
-- Hook wiring and death pipeline call-site: `src/crimson/sim/world_state.py`.
+- Hook wiring: `src/crimson/sim/world_state.py`; synchronous dispatch:
+  `src/crimson/player_damage.py`, reached only from creature contact and
+  Ammunition Within. Direct projectile/perk health writes intentionally bypass
+  the hook, matching the native function's two xrefs.
 - Offer gating: `src/crimson/perks/availability.py`: `perk_can_offer()`.
 
 ## 20. Telekinetic (`PerkId.TELEKINETIC`)
@@ -545,7 +551,10 @@ Notes:
 
 ### Rewrite
 
-- `src/crimson/sim/world_state.py`: `WorldState.step()`.
+- `src/crimson/sim/sessions.py`: session timing applies the outer transform
+  before Reflex Boost bonus scaling so mode timers and entity updates share it.
+- `src/crimson/sim/world_state.py`: direct world stepping uses the same perk
+  transform.
 
 ## 45. Greater Regeneration (`PerkId.GREATER_REGENERATION`)
 
@@ -565,7 +574,7 @@ Notes:
 
 ### Original
 
-- `perk_apply` (0x004055e0): applies health reduction, forces creature hitbox ramp, clears guard.
+- `perk_apply` (0x004055e0): applies health reduction, advances the creature lifecycle stage, clears guard.
 
 ### Rewrite
 

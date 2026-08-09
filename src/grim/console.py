@@ -32,6 +32,7 @@ EXTENDED_CONSOLE_HEIGHT = 480
 CONSOLE_VERSION_TEXT = "Crimsonland 1.9.93"
 CONSOLE_ANIM_SPEED = 3.5
 CONSOLE_BLINK_SPEED = 3.0
+CONSOLE_BLINK_EXPONENT = 8.0
 CONSOLE_LINE_HEIGHT = 16.0
 CONSOLE_MONO_SCALE = 0.5
 CONSOLE_SMALL_SCALE = 1.0
@@ -73,7 +74,7 @@ def _normalize_script_path(name: str) -> Path:
     return Path(normalized)
 
 
-def _resolve_script_path(console: "ConsoleState", target: Path) -> Path | None:
+def _resolve_script_path(console: ConsoleState, target: Path) -> Path | None:
     if target.is_absolute():
         return target if target.is_file() else None
     for base in console.script_dirs:
@@ -83,7 +84,7 @@ def _resolve_script_path(console: "ConsoleState", target: Path) -> Path | None:
     return None
 
 
-def _primary_script_dirs(console: "ConsoleState") -> tuple[Path, ...]:
+def _primary_script_dirs(console: ConsoleState) -> tuple[Path, ...]:
     dirs: list[Path] = [console.base_dir]
     if console.assets_dir is not None and console.assets_dir not in dirs:
         dirs.append(console.assets_dir)
@@ -100,7 +101,7 @@ def _resolve_script_path_in(target: Path, roots: Iterable[Path]) -> Path | None:
     return None
 
 
-def _iter_script_paq_paths(console: "ConsoleState") -> Iterable[Path]:
+def _iter_script_paq_paths(console: ConsoleState) -> Iterable[Path]:
     roots: list[Path] = []
     if console.assets_dir is not None:
         roots.append(console.assets_dir)
@@ -113,7 +114,7 @@ def _iter_script_paq_paths(console: "ConsoleState") -> Iterable[Path]:
                 yield path
 
 
-def _load_script_from_paq(console: "ConsoleState", target: Path) -> str | None:
+def _load_script_from_paq(console: ConsoleState, target: Path) -> str | None:
     if target.is_absolute():
         return None
     normalized = target.as_posix().replace("\\", "/")
@@ -145,7 +146,7 @@ class ConsoleCvar(msgspec.Struct):
     value_f: float
 
     @classmethod
-    def from_value(cls, name: str, value: str) -> "ConsoleCvar":
+    def from_value(cls, name: str, value: str) -> ConsoleCvar:
         return cls(name=name, value=value, value_f=_parse_float(value))
 
 
@@ -281,19 +282,17 @@ class ConsoleState(msgspec.Struct):
             self.scroll_offset = 0
         if rl.is_key_pressed(rl.KeyboardKey.KEY_TAB):
             self._autocomplete()
-        if rl.is_key_pressed(rl.KeyboardKey.KEY_BACKSPACE):
-            if self.input_caret > 0:
-                self._exit_history_edit()
-                self.input_buffer = (
-                    self.input_buffer[: self.input_caret - 1] + self.input_buffer[self.input_caret :]
-                )
-                self.input_caret -= 1
-        if rl.is_key_pressed(rl.KeyboardKey.KEY_DELETE):
-            if self.input_caret < len(self.input_buffer):
-                self._exit_history_edit()
-                self.input_buffer = (
-                    self.input_buffer[: self.input_caret] + self.input_buffer[self.input_caret + 1 :]
-                )
+        if rl.is_key_pressed(rl.KeyboardKey.KEY_BACKSPACE) and self.input_caret > 0:
+            self._exit_history_edit()
+            self.input_buffer = (
+                self.input_buffer[: self.input_caret - 1] + self.input_buffer[self.input_caret :]
+            )
+            self.input_caret -= 1
+        if rl.is_key_pressed(rl.KeyboardKey.KEY_DELETE) and self.input_caret < len(self.input_buffer):
+            self._exit_history_edit()
+            self.input_buffer = (
+                self.input_buffer[: self.input_caret] + self.input_buffer[self.input_caret + 1 :]
+            )
         if rl.is_key_pressed(rl.KeyboardKey.KEY_ENTER):
             self._submit_input()
         self._poll_text_input()
@@ -534,7 +533,7 @@ class ConsoleState(msgspec.Struct):
 
     def _caret_blink_alpha(self) -> float:
         pulse = math.sin(self._blink_time * CONSOLE_BLINK_SPEED)
-        value = max(0.2, abs(pulse) ** 2)
+        value = max(0.2, abs(pulse) ** CONSOLE_BLINK_EXPONENT)
         return clamp(value, 0.0, 1.0)
 
     def _use_mono_font(self) -> bool:
@@ -651,6 +650,7 @@ def register_boot_commands(
 def register_core_cvars(console: ConsoleState, width: int, height: int) -> None:
     # Defaults match `register_core_cvars` (0x00402c00) in `crimsonland.exe`.
     console.register_cvar("cv_silentloads", "1")
+    console.register_cvar("cv_terrainFilter", "1")
     console.register_cvar("cv_bodiesFade", "1")
     console.register_cvar("cv_uiTransparency", "1")
     console.register_cvar("cv_uiPointFilterPanels", "0")
@@ -670,12 +670,12 @@ def register_core_cvars(console: ConsoleState, width: int, height: int) -> None:
 
 def register_core_commands(console: ConsoleState) -> None:
     def cmdlist(_args: list[str]) -> None:
-        for name in console.commands.keys():
+        for name in console.commands:
             console.log.log(name)
         console.log.log(f"{len(console.commands)} commands")
 
     def vars_cmd(_args: list[str]) -> None:
-        for name in console.cvars.keys():
+        for name in console.cvars:
             console.log.log(name)
         console.log.log(f"{len(console.cvars)} variables")
 

@@ -18,6 +18,7 @@ from ..perks.selection import (
 from ..quests.runtime import tick_quest_completion_transition
 from ..quests.timeline import quest_spawn_table_empty, tick_quest_mode_spawns
 from ..quests.types import SpawnEntry
+from ..rng_caller_static import RngCallerStatic
 from ..tutorial.runtime import tutorial_before_step, tutorial_input_transform, tutorial_post_step
 from ..typo.runtime import apply_typo_command, typo_before_step, typo_input_transform, typo_mid_step, typo_post_step
 from ..weapon_runtime import weapon_assign_player
@@ -27,8 +28,11 @@ from .input import PlayerInput
 from .input_frame import normalize_input_frame
 from .input_providers import (
     GameCommand,
+    GameFrameRngAdvanceOperation,
     PerkMenuOpenCommand,
     PerkPickCommand,
+    ReplayPostludeOperation,
+    ReplayPreludeOperation,
     TypoBackspaceCommand,
     TypoCharCommand,
     TypoSubmitCommand,
@@ -37,10 +41,9 @@ from .presentation_step import plan_world_presentation_step
 from .step_pipeline import (
     DeterministicStepResult,
     PresentationRngTrace,
-    time_scale_reflex_boost_factor,
 )
 from .terrain_fx import TerrainFxScratch
-from .timing import FrameTiming
+from .timing import FrameTiming, reflex_boost_time_scale_factor
 from .world_state import WorldMidStepRuntime, WorldState
 
 RUSH_WEAPON_ID = WeaponId.ASSAULT_RIFLE
@@ -49,6 +52,7 @@ RUSH_FORCED_AMMO = 30.0
 # ---------------------------------------------------------------------------
 # Tick result types
 # ---------------------------------------------------------------------------
+
 
 class DeterministicSessionTick(msgspec.Struct):
     step: DeterministicStepResult
@@ -60,6 +64,7 @@ class DeterministicSessionTick(msgspec.Struct):
 # ---------------------------------------------------------------------------
 # Mode runtime system
 # ---------------------------------------------------------------------------
+
 
 class MidStepContext(msgspec.Struct, frozen=True):
     """Context passed to mid-step spawn hooks during deterministic stepping."""
@@ -207,10 +212,7 @@ def quest_mid_step(ctx: MidStepContext, spawn: QuestSpawnState) -> None:
 
 
 def rush_input_transform(inputs: list[PlayerInput]) -> list[PlayerInput]:
-    return [
-        msgspec.structs.replace(inp, reload_pressed=False) if inp.reload_pressed else inp
-        for inp in inputs
-    ]
+    return [msgspec.structs.replace(inp, reload_pressed=False) if inp.reload_pressed else inp for inp in inputs]
 
 
 class SessionModeRuntime(msgspec.Struct):
@@ -225,11 +227,9 @@ class SessionModeRuntime(msgspec.Struct):
 
     def mid_step(self, ctx: MidStepContext) -> None:
         _ = ctx
-        return None
 
     def post_step(self, ctx: PostStepContext) -> None:
         _ = ctx
-        return None
 
 
 class SurvivalSessionRuntime(SessionModeRuntime):
@@ -313,21 +313,27 @@ class _SessionWorldMidStepRuntime(WorldMidStepRuntime):
 # Shared timing helper
 # ---------------------------------------------------------------------------
 
-def _session_timing(state: object, dt: float) -> FrameTiming:
+
+def _session_timing(world: WorldState, dt: float, *, apply_world_dt_steps: bool) -> FrameTiming:
     """Compute frame timing from world state. Used by all session types."""
+    state = world.state
+    world_dt = world.world_dt_after_perk_steps(dt) if bool(apply_world_dt_steps) else float(dt)
     return FrameTiming.compute(
         dt,
-        time_scale_active_entry=bool(state.time_scale_active),  # type: ignore[union-attr]
-        time_scale_factor=time_scale_reflex_boost_factor(
-            reflex_boost_timer=float(state.bonuses.reflex_boost),  # type: ignore[union-attr]
-            time_scale_active=bool(state.time_scale_active),  # type: ignore[union-attr]
+        world_dt=world_dt,
+        time_scale_active_entry=bool(state.time_scale_active),
+        time_scale_factor=reflex_boost_time_scale_factor(
+            reflex_boost_timer=float(state.bonuses.reflex_boost),
+            time_scale_active=bool(state.time_scale_active),
         ),
         zero_gate_active=False,
     )
 
+
 # ---------------------------------------------------------------------------
 # Unified deterministic session (replaces Survival/Rush/Tutorial/Typo/WorldTick)
 # ---------------------------------------------------------------------------
+
 
 class DeterministicSession(msgspec.Struct):
     # Core state
@@ -363,7 +369,77 @@ class DeterministicSession(msgspec.Struct):
         prepare_perk_availability(state)
 
     def timing_for_dt(self, dt: float) -> FrameTiming:
-        return _session_timing(self.world.state, dt)
+        return _session_timing(
+            self.world,
+            dt,
+            apply_world_dt_steps=bool(self.apply_world_dt_steps),
+        )
+
+    def apply_replay_prelude(
+        self,
+        *,
+        dt: float,
+        operations: list[ReplayPreludeOperation],
+    ) -> list[SfxId]:
+        """Apply ordered between-tick replay operations outside the tick RNG trace."""
+
+        post_apply_sfx: list[SfxId] = []
+        for operation in operations:
+            match operation:
+                case GameFrameRngAdvanceOperation(frames=frames):
+                    if int(frames) <= 0:
+                        raise RuntimeError(
+                            f"replay game_frame_rng_advance frames must be > 0, got {frames}",
+                        )
+                    for _ in range(int(frames)):
+                        self.world.state.rng.rand_tagged(
+                            RngCallerStatic.GAME_FRAME_UPDATE_DISCARDED,
+                        )
+                case PerkPickCommand(choice_index=choice_index):
+                    # Earlier prelude operations may change time scaling, so
+                    # derive the native apply delta at this exact position in
+                    # the ordered stream.
+                    timing = self.timing_for_dt(dt)
+                    picked = perk_selection_pick(
+                        self.world.state,
+                        self.world.players,
+                        self.world.state.perk_selection,
+                        choice_index,
+                        game_mode=self.game_mode,
+                        player_count=len(self.world.players),
+                        dt=timing.dt_sim,
+                        creatures=self.world.creatures.entries,
+                        refresh_choices=False,
+                    )
+                    if picked is not None:
+                        post_apply_sfx.append(SfxId.UI_BONUS)
+                case PerkMenuOpenCommand():
+                    perk_selection_open_choices(
+                        self.world.state,
+                        self.world.players,
+                        self.world.state.perk_selection,
+                        game_mode=self.game_mode,
+                        player_count=len(self.world.players),
+                    )
+                case _:
+                    raise RuntimeError(f"unhandled replay prelude operation: {type(operation).__name__}")
+        return post_apply_sfx
+
+    def apply_replay_postlude(self, *, operations: list[ReplayPostludeOperation]) -> None:
+        """Apply operations observed after simulation but before the native tick returns."""
+
+        for operation in operations:
+            match operation:
+                case PerkMenuOpenCommand():
+                    perk_selection_open_choices(
+                        self.world.state,
+                        self.world.players,
+                        self.world.state.perk_selection,
+                        game_mode=self.game_mode,
+                        player_count=len(self.world.players),
+                    )
+                case _:
+                    raise RuntimeError(f"unhandled replay postlude operation: {type(operation).__name__}")
 
     def step_tick(
         self,
@@ -372,13 +448,14 @@ class DeterministicSession(msgspec.Struct):
         inputs: list[PlayerInput] | None,
         trace_rng: bool = False,
         commands: list[GameCommand] | None = None,
+        prelude_post_apply_sfx: list[SfxId] | None = None,
     ) -> DeterministicSessionTick:
         timing = self.timing_for_dt(dt)
         mode_runtime = self.mode_runtime
         mode_runtime.before_step()
 
-        post_apply_sfx: list[SfxId] = []
-        for cmd in (commands or ()):
+        post_apply_sfx = list(prelude_post_apply_sfx or ())
+        for cmd in commands or ():
             match cmd:
                 case PerkPickCommand(choice_index=ci):
                     picked = perk_selection_pick(
@@ -390,7 +467,7 @@ class DeterministicSession(msgspec.Struct):
                         player_count=len(self.world.players),
                         dt=timing.dt_sim,
                         creatures=self.world.creatures.entries,
-                        refresh_choices=True,
+                        refresh_choices=False,
                     )
                     if picked is not None:
                         post_apply_sfx.append(SfxId.UI_BONUS)
@@ -453,8 +530,9 @@ class DeterministicSession(msgspec.Struct):
 
         events = self.world.step(
             timing.dt_sim,
-            apply_world_dt_steps=self.apply_world_dt_steps,
-            dt_player_local=timing.dt_player_local,
+            # Session timing already applied the outer-loop perk transforms so
+            # mode hooks and the world share the same native frame delta.
+            apply_world_dt_steps=False,
             defer_camera_shake_update=self.defer_camera_shake_update,
             defer_freeze_corpse_fx=False,
             mid_step_runtime=mid_step_runtime,

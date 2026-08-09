@@ -12,10 +12,23 @@ from crimson.bonuses.hud import bonus_hud_update
 from crimson.gameplay import (
     _RELATIVE_MOVE_HEADING_LEFT,
     GameplayState,
+    _direction_from_heading_native,
     _player_heading_approach_target_with_delta,
+    _player_turn_aligned_velocity_native,
     player_update,
 )
-from crimson.math_parity import NATIVE_HALF_PI, NATIVE_PI, NATIVE_TAU, f32
+from crimson.math_parity import (
+    NATIVE_HALF_PI,
+    NATIVE_PI,
+    NATIVE_TAU,
+    f32,
+    native_fire_muzzle_pos,
+    x87_fpatan,
+    x87_pc24_add,
+    x87_pc24_mul,
+    x87_pc24_mul_chain,
+    x87_pc24_sub,
+)
 from crimson.movement_controls import MovementControlType
 from crimson.owner_ref import OwnerRef
 from crimson.perks import PerkId
@@ -43,6 +56,54 @@ def _active_type_ids(pool: ProjectilePool) -> list[int]:
     return [entry.type_id for entry in pool.entries if entry.active]
 
 
+def test_preserve_mode_uses_player_zero_timed_perk_for_player_one() -> None:
+    state = GameplayState(preserve_bugs=True)
+    player0 = PlayerState(index=0, pos=Vec2())
+    player0.perk_counts[int(PerkId.LIVING_FORTRESS)] = 1
+    player1 = PlayerState(index=1, pos=Vec2())
+
+    player_update(player1, PlayerInput(), 0.1, state, players=[player0, player1])
+
+    assert_float_close(player1.living_fortress_timer, f32(0.1))
+
+
+def test_dead_player_update_only_advances_native_death_timer() -> None:
+    state = GameplayState(player_spread_damping_scalar=0.5)
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        health=0.0,
+        death_timer=16.0,
+        low_health_timer=0.25,
+        muzzle_flash_alpha=0.75,
+        weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, shot_cooldown=0.5),
+    )
+
+    player_update(player, PlayerInput(), f32(0.1), state)
+
+    assert player.death_timer == x87_pc24_sub(16.0, x87_pc24_mul(f32(0.1), f32(20.0)))
+    assert player.low_health_timer == 0.25
+    assert player.muzzle_flash_alpha == 0.75
+    assert player.weapon.shot_cooldown == 0.5
+    assert state.player_spread_damping_scalar == 0.5
+
+
+def test_player_update_muzzle_flash_decay_keeps_native_store() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        muzzle_flash_alpha=0.75,
+    )
+
+    player_update(player, PlayerInput(), f32(0.1), state)
+
+    assert player.muzzle_flash_alpha == x87_pc24_sub(
+        0.75,
+        x87_pc24_mul(f32(0.1), f32(2.0)),
+    )
+
+
 def test_player_update_weapon_power_up_scales_shot_cooldown_decay() -> None:
     state = GameplayState()
     state.bonuses.weapon_power_up = 1.0
@@ -57,17 +118,31 @@ def test_player_update_weapon_power_up_scales_shot_cooldown_decay() -> None:
     assert_float_close(player.weapon.shot_cooldown, 0.25)
 
 
-def test_player_update_shot_cooldown_decay_snaps_tiny_residual_to_zero() -> None:
+def test_player_update_shot_cooldown_decay_keeps_tiny_positive_residual() -> None:
     state = GameplayState()
     player = PlayerState(
         index=0,
         pos=Vec2(100.0, 100.0),
-        weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, shot_cooldown=0.03400000000000056),
+        weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, shot_cooldown=0.034000005573034286),
     )
 
     player_update(player, PlayerInput(aim=Vec2(101.0, 100.0)), 0.034, state)
 
-    assert player.weapon.shot_cooldown == 0.0
+    assert player.weapon.shot_cooldown == 3.725290298461914e-09
+
+
+def test_player_update_spread_floor_is_native_f32() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        spread_heat=f32(0.01),
+    )
+
+    player_update(player, PlayerInput(aim=Vec2(101.0, 100.0)), f32(0.1), state)
+
+    assert player.spread_heat == f32(0.01)
+    assert player.spread_heat != 0.01
 
 
 def test_player_update_low_health_timer_spawns_bleed_fx_and_resets_timer(mocker) -> None:
@@ -87,16 +162,25 @@ def test_player_update_low_health_timer_spawns_bleed_fx_and_resets_timer(mocker)
     player_update(player, PlayerInput(aim=Vec2(101.0, 200.0)), 0.016, state)
 
     expected_angle = float(aim_heading_before)
-    expected_bleed_dir_angle = float(aim_heading_before) + (1.5707964 - 0.5)
-    expected_x = f32(math.cos(expected_bleed_dir_angle) * -6.0 + 100.0)
-    expected_y = f32(math.sin(expected_bleed_dir_angle) * -6.0 + 200.0)
+    expected_bleed_dir_angle = x87_pc24_sub(
+        x87_pc24_add(aim_heading_before, NATIVE_HALF_PI),
+        f32(0.5),
+    )
+    expected_x = x87_pc24_add(
+        x87_pc24_mul(math.cos(expected_bleed_dir_angle), f32(-6.0)),
+        100.0,
+    )
+    expected_y = x87_pc24_add(
+        x87_pc24_mul(math.sin(expected_bleed_dir_angle), f32(-6.0)),
+        200.0,
+    )
 
     assert spawn_blood_splatter.call_count == 3
     for call in spawn_blood_splatter.call_args_list:
         pos = call.kwargs["pos"]
         assert isinstance(pos, Vec2)
-        assert_float_close(pos.x, expected_x)
-        assert_float_close(pos.y, expected_y)
+        assert pos.x == expected_x
+        assert pos.y == expected_y
         assert call.kwargs["angle"] == expected_angle
         assert call.kwargs["age"] == 0.0
         assert call.kwargs["detail_preset"] == 5
@@ -167,6 +251,33 @@ def test_player_update_stationary_reloader_tripples_reload_decay() -> None:
     assert_float_close(player.weapon.reload_timer, f32(0.7))
 
 
+def test_player_update_stationary_reload_keeps_native_completion_frame() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(50.0, 50.0),
+        weapon=WeaponSlot(
+            weapon_id=WeaponId.PISTOL,
+            clip_size=10,
+            ammo=10,
+            reload_active=True,
+            reload_timer=1.5,
+            reload_timer_max=1.5,
+        ),
+    )
+    player.perk_counts[int(PerkId.STATIONARY_RELOADER)] = 1
+    input_state = PlayerInput(aim=Vec2(51.0, 50.0))
+
+    for _ in range(19):
+        player_update(player, input_state, 1.0 / 38.0, state)
+
+    assert player.weapon.reload_timer == 4.172325134277344e-07
+
+    player_update(player, input_state, 1.0 / 38.0, state)
+
+    assert player.weapon.reload_timer == 0.0
+
+
 def test_player_update_preloads_ammo_only_before_reload_underflow() -> None:
     state = GameplayState()
     player = PlayerState(
@@ -177,6 +288,27 @@ def test_player_update_preloads_ammo_only_before_reload_underflow() -> None:
             clip_size=6,
             ammo=-1.0,
             reload_active=True,
+            reload_timer=0.01,
+            reload_timer_max=3.0,
+            shot_cooldown=0.5,
+        ),
+    )
+
+    player_update(player, PlayerInput(aim=Vec2(51.0, 50.0)), 0.016, state)
+
+    assert_float_close(player.weapon.ammo, 6.0)
+
+
+def test_player_update_preload_gate_ignores_reload_active_byte() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(50.0, 50.0),
+        weapon=WeaponSlot(
+            weapon_id=WeaponId.ION_CANNON,
+            clip_size=6,
+            ammo=-1.0,
+            reload_active=False,
             reload_timer=0.01,
             reload_timer_max=3.0,
             shot_cooldown=0.5,
@@ -209,7 +341,7 @@ def test_player_update_does_not_preload_ammo_when_reload_timer_is_zero() -> None
     assert_float_close(player.weapon.ammo, -1.0)
 
 
-def test_player_update_does_not_preload_ammo_on_tiny_underflow() -> None:
+def test_player_update_preloads_ammo_on_tiny_negative_reload_crossing() -> None:
     state = GameplayState()
     player = PlayerState(
         index=0,
@@ -227,7 +359,29 @@ def test_player_update_does_not_preload_ammo_on_tiny_underflow() -> None:
 
     player_update(player, PlayerInput(aim=Vec2(51.0, 50.0)), 0.03200000151991844, state)
 
+    assert_float_close(player.weapon.ammo, 6.0)
+
+
+def test_player_update_does_not_preload_ammo_on_tiny_positive_reload_residual() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(50.0, 50.0),
+        weapon=WeaponSlot(
+            weapon_id=WeaponId.ION_CANNON,
+            clip_size=6,
+            ammo=-1.0,
+            reload_active=True,
+            reload_timer=0.10000000894069672,
+            reload_timer_max=3.0,
+            shot_cooldown=0.5,
+        ),
+    )
+
+    player_update(player, PlayerInput(aim=Vec2(51.0, 50.0), fire_down=True), 0.10000000149011612, state)
+
     assert_float_close(player.weapon.ammo, -1.0)
+    assert player.weapon.reload_timer == 7.450580596923828e-09
 
 
 def test_player_update_empty_reload_fire_tick_keeps_underflow_and_restarts_reload() -> None:
@@ -494,6 +648,28 @@ def test_player_update_man_bomb_spawns_8_projectiles_when_charged() -> None:
     ]
 
 
+def test_player_update_perk_timers_keep_native_stored_cadence() -> None:
+    pool = ProjectilePool(size=32)
+    state = GameplayState(projectiles=pool)
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0))
+    player.perk_counts[int(PerkId.MAN_BOMB)] = 1
+    player.perk_counts[int(PerkId.LIVING_FORTRESS)] = 1
+    input_state = PlayerInput(aim=Vec2(101.0, 100.0))
+
+    for _ in range(240):
+        player_update(player, input_state, 1.0 / 60.0, state)
+
+    assert pool.iter_active() == []
+    assert player.man_bomb_timer == 3.9999969005584717
+    assert player.living_fortress_timer == 3.9999969005584717
+
+    player_update(player, input_state, 1.0 / 60.0, state)
+
+    assert len(pool.iter_active()) == 8
+    assert player.man_bomb_timer == 0.016663551330566406
+    assert player.living_fortress_timer == 4.016663551330566
+
+
 def test_player_update_man_bomb_can_fire_on_large_moving_frame_then_resets() -> None:
     pool = ProjectilePool(size=32)
     rng = ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST)
@@ -541,6 +717,27 @@ def test_player_update_fire_cough_spawns_fire_bullet_projectile() -> None:
     ]
 
 
+def test_player_update_fire_cough_uses_native_spread_angle() -> None:
+    pool = ProjectilePool(size=8)
+    state = GameplayState(
+        projectiles=pool,
+        rng=ScriptedCrand([65, 3, 0, 0], fallback=ScriptedCrand.Fallback.REPEAT_LAST),
+    )
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        aim=Vec2(200.0, 100.0),
+        spread_heat=0.2,
+        fire_cough_timer=1.95,
+    )
+    player.perk_counts[int(PerkId.FIRE_CAUGH)] = 1
+
+    player_update(player, PlayerInput(aim=player.aim), 0.1, state)
+
+    projectile = next(entry for entry in pool.entries if entry.active)
+    assert projectile.angle == -4.71196985244751
+
+
 def test_player_update_fire_cough_uses_pre_move_position_for_spawn() -> None:
     pool = ProjectilePool(size=8)
     rng = ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST)
@@ -566,9 +763,7 @@ def test_player_update_fire_cough_uses_pre_move_position_for_spawn() -> None:
     entry = next(e for e in pool.entries if e.active)
     assert int(entry.type_id) == int(ProjectileTemplateId.FIRE_BULLETS)
 
-    expected = before_pos + Vec2.from_heading(0.0).rotated(-0.150915) * 16.0
-    assert_float_close(float(entry.pos.x), float(f32(float(expected.x))))
-    assert_float_close(float(entry.pos.y), float(f32(float(expected.y))))
+    assert entry.pos == native_fire_muzzle_pos(before_pos, 0.0)
     assert [record.caller for record in rng.records_since()] == [
         RngCallerStatic.PLAYER_UPDATE_FIRE_COUGH_SPREAD_DIR,
         RngCallerStatic.PLAYER_UPDATE_FIRE_COUGH_SPREAD_MAG,
@@ -715,6 +910,29 @@ def test_player_fire_weapon_can_fire_with_negative_ammo_then_reloads() -> None:
     assert_float_close(player.weapon.reload_timer, 3.0)
 
 
+def test_player_fire_weapon_spread_cap_is_native_f32() -> None:
+    pool = ProjectilePool(size=8)
+    state = GameplayState(projectiles=pool)
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, clip_size=10, ammo=10),
+        spread_heat=f32(0.47),
+    )
+
+    fire_weapon(
+        WeaponFireCtx(
+            player=player,
+            input_state=PlayerInput(fire_down=True, aim=Vec2(200.0, 100.0)),
+            dt=0.0,
+            state=state,
+        ),
+    )
+
+    assert player.spread_heat == f32(0.48)
+    assert player.spread_heat != 0.48
+
+
 def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_pellet_weapons() -> None:
     from crimson.weapons import weapon_entry_for_projectile_type_id
 
@@ -731,7 +949,10 @@ def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_p
     fire_bullets_weapon = weapon_entry_for_projectile_type_id(ProjectileTemplateId.FIRE_BULLETS)
 
     start_heat = player.spread_heat
-    expected = start_heat + float(fire_bullets_weapon.spread_heat_inc) * 1.3
+    expected = x87_pc24_add(
+        start_heat,
+        x87_pc24_mul(fire_bullets_weapon.spread_heat_inc, f32(1.3)),
+    )
 
     fire_weapon(
         WeaponFireCtx(
@@ -742,7 +963,7 @@ def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_p
         ),
     )
 
-    assert_float_close(player.spread_heat, expected)
+    assert player.spread_heat == expected
 
 
 def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_single_pellet_weapons() -> None:
@@ -762,7 +983,10 @@ def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_s
     fire_bullets_weapon = weapon_entry_for_projectile_type_id(ProjectileTemplateId.FIRE_BULLETS)
 
     start_heat = player.spread_heat
-    expected = start_heat + float(fire_bullets_weapon.spread_heat_inc) * 1.3
+    expected = x87_pc24_add(
+        start_heat,
+        x87_pc24_mul(fire_bullets_weapon.spread_heat_inc, f32(1.3)),
+    )
 
     fire_weapon(
         WeaponFireCtx(
@@ -773,7 +997,7 @@ def test_player_fire_weapon_fire_bullets_uses_fire_bullets_spread_heat_inc_for_s
         ),
     )
 
-    assert_float_close(player.spread_heat, expected)
+    assert player.spread_heat == expected
 
 
 def test_player_fire_weapon_shotgun_spawns_pellets() -> None:
@@ -810,12 +1034,25 @@ def test_player_update_tracks_aim_point() -> None:
     assert player.aim == Vec2(123.0, 456.0)
 
 
-def test_player_update_sets_survival_fire_seen_when_fire_input_is_down() -> None:
+def test_player_update_keeps_survival_fire_unseen_while_shot_is_on_cooldown() -> None:
     state = GameplayState()
     player = PlayerState(
         index=0,
         pos=Vec2(100.0, 100.0),
         weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, shot_cooldown=1.0),
+    )
+
+    player_update(player, PlayerInput(aim=Vec2(101.0, 100.0), fire_down=True), 0.016, state)
+
+    assert state.survival_reward_fire_seen is False
+
+
+def test_player_update_sets_survival_fire_seen_when_ready_shot_is_attempted() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(100.0, 100.0),
+        weapon=WeaponSlot(weapon_id=WeaponId.PISTOL, ammo=12.0),
     )
 
     player_update(player, PlayerInput(aim=Vec2(101.0, 100.0), fire_down=True), 0.016, state)
@@ -885,6 +1122,74 @@ def test_player_update_relative_mode_dispatch_updates_turn_speed() -> None:
 
     assert player.turn_speed > 1.0
     assert player.heading > 0.0
+
+
+@pytest.mark.parametrize(
+    ("moving_forward", "moving_backward", "speed_scale"),
+    (
+        (True, False, 25.0),
+        (False, True, -25.0),
+        (False, False, 25.0),
+    ),
+)
+def test_player_update_relative_mode_applies_speed_multiplier(
+    moving_forward: bool,
+    moving_backward: bool,
+    speed_scale: float,
+) -> None:
+    start_pos = Vec2(512.0, 512.0)
+    player = PlayerState(
+        index=0,
+        pos=start_pos,
+        heading=0.0,
+        move_speed=1.0,
+        speed_multiplier=3.0,
+    )
+    dt = f32(0.01)
+
+    player_update(
+        player,
+        PlayerInput(
+            aim=Vec2(600.0, 512.0),
+            move_mode=MovementControlType.RELATIVE,
+            move_forward_pressed=moving_forward,
+            move_backward_pressed=moving_backward,
+            turn_left_pressed=False,
+            turn_right_pressed=False,
+        ),
+        dt,
+        GameplayState(),
+    )
+
+    direction = _direction_from_heading_native(0.0)
+    move_dx = f32(direction.x * player.move_speed * player.speed_multiplier * speed_scale)
+    move_dy = f32(direction.y * player.move_speed * player.speed_multiplier * speed_scale)
+    expected_pos = Vec2(
+        f32(start_pos.x + f32(dt * move_dx)),
+        f32(start_pos.y + f32(dt * move_dy)),
+    )
+
+    assert player.pos == expected_pos
+
+
+def test_player_update_computer_aim_preserves_static_movement_mode() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), heading=0.0, move_speed=0.0)
+    input_state = PlayerInput(
+        move=Vec2(),
+        aim=Vec2(200.0, 100.0),
+        move_mode=MovementControlType.STATIC,
+        aim_scheme=AimScheme.COMPUTER,
+        move_forward_pressed=True,
+        move_backward_pressed=False,
+        turn_left_pressed=False,
+        turn_right_pressed=False,
+    )
+
+    player_update(player, input_state, 0.1, state)
+
+    assert player.move_speed > 0.0
+    assert player.pos.y < 100.0
 
 
 def test_player_update_digital_turn_only_rotates_and_accelerates() -> None:
@@ -975,6 +1280,106 @@ def test_player_update_digital_move_conflict_prefers_backward() -> None:
     assert player.heading > 0.0
 
 
+def test_player_update_move_phase_uses_native_intermediate_f32_store() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0))
+
+    player_update(
+        player,
+        PlayerInput(move=Vec2(0.0, 1.0), aim=Vec2(512.0, 512.0)),
+        0.03200000151991844,
+        state,
+    )
+
+    assert player.move_speed == f32(0.1600000113248825)
+    assert player.move_phase == f32(f32(0.03200000151991844 * player.move_speed) * 19.0)
+
+
+def test_player_update_minigun_speed_cap_is_f32_before_move_phase() -> None:
+    state = GameplayState()
+    player = PlayerState(
+        index=0,
+        pos=Vec2(439.3449401855469, 646.193603515625),
+        move_speed=f32(0.8),
+        move_phase=1.4318476915359497,
+        weapon=WeaponSlot(weapon_id=WeaponId.MEAN_MINIGUN, clip_size=120, ammo=19),
+    )
+
+    player_update(
+        player,
+        PlayerInput(
+            aim=Vec2(560.0, 496.0),
+            move_forward_pressed=True,
+            move_backward_pressed=False,
+            turn_left_pressed=False,
+            turn_right_pressed=True,
+        ),
+        0.08900000154972076,
+        state,
+    )
+
+    assert player.move_speed == f32(0.8)
+    assert player.move_phase == 2.7846479415893555
+
+
+def test_player_update_move_speed_uses_native_acceleration_f32_store() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), move_speed=0.4750000238418579)
+
+    player_update(
+        player,
+        PlayerInput(move=Vec2(0.0, 1.0), aim=Vec2(512.0, 512.0)),
+        0.032999999821186066,
+        state,
+    )
+
+    assert player.move_speed == 0.6399999856948853
+
+
+def test_player_update_normalizes_analog_move_with_native_safe_helper() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), heading=0.0, aim_heading=0.0)
+
+    player_update(
+        player,
+        PlayerInput(
+            move=Vec2(0.19850380718708038, -0.9801002740859985),
+            aim=Vec2(513.0, 512.0),
+            move_mode=MovementControlType.DUAL_ACTION_PAD,
+        ),
+        0.1,
+        state,
+    )
+
+    assert player.heading == 0.0999155342578888
+
+
+def test_player_direction_heading_subtraction_uses_native_f32_store() -> None:
+    heading = 3.93251371383667
+
+    direction = _direction_from_heading_native(heading)
+    radians = f32(heading - NATIVE_HALF_PI)
+
+    assert direction.x == math.cos(radians)
+    assert direction.y == math.sin(radians)
+
+
+def test_player_turn_aligned_velocity_uses_native_intermediate_f32_stores() -> None:
+    # Retaining the full product until the final velocity store moves this
+    # backward-diagonal step one ULP too far left.
+    direction = _direction_from_heading_native(3.9270143508911133)
+
+    velocity = _player_turn_aligned_velocity_native(
+        direction=direction,
+        move_speed=2.0,
+        angle_diff=3.0040740966796875e-05,
+        speed_multiplier=2.0,
+    )
+
+    assert velocity == Vec2(-70.7116470336914, 70.7083511352539)
+    assert f32(302.53350830078125 + f32(0.04400000348687172 * velocity.x)) == 299.4222106933594
+
+
 def test_player_update_keyboard_aim_scheme_uses_heading_dispatch() -> None:
     state = GameplayState()
     player = PlayerState(index=0, pos=Vec2(100.0, 100.0), heading=0.0, aim_heading=0.0)
@@ -1016,15 +1421,15 @@ def test_player_update_wraps_negative_target_heading_before_turning() -> None:
     assert player.heading < math.tau
 
 
-def test_player_heading_approach_target_spills_scaled_product_to_float32() -> None:
+def test_player_heading_approach_target_rounds_scaled_product_at_pc24() -> None:
     def _f32_from_bits(bits: int) -> float:
         return struct.unpack("<f", struct.pack("<I", int(bits) & 0xFFFFFFFF))[0]
 
     def _bits_f32(value: float) -> int:
         return struct.unpack("<I", struct.pack("<f", float(value)))[0]
 
-    # Tick 137 boundary from gameplay_diff_capture:
-    # without a float32 spill of `frame_dt * diff` this turns 1 ULP too far.
+    # Without PC=24 rounding after `frame_dt * diff`, this opposite-heading
+    # boundary turns one ULP too far even though native keeps it on x87.
     heading_before = _f32_from_bits(0x40966A37)
     dt = _f32_from_bits(0x3D75C290)
 
@@ -1060,19 +1465,25 @@ def test_player_fire_weapon_uses_disc_spread_jitter() -> None:
     rand_dir = expected_rng.rand()
     rand_mag = expected_rng.rand()
 
-    # Mirror the native float sequence: half the f32 aim distance is spilled,
-    # the spread/magnitude product stays extended, jittered aim x is spilled
-    # while y feeds atan2 unspilled, heading = f32(atan2(pos - jitter) - half_pi).
-    dx = float(f32(float(aim_x) - float(player.pos.x)))
-    dy = float(f32(float(aim_y) - float(player.pos.y)))
-    dist_sq = float(f32(float(f32(float(dx) * float(dx))) + float(f32(float(dy) * float(dy)))))
-    half_len = float(f32(float(f32(math.sqrt(float(dist_sq)))) * 0.5))
-    offset_term = half_len * float(player.spread_heat) * float(rand_mag & 0x1FF) * 0.001953125
-    dir_angle = float(f32(float(rand_dir & 0x1FF) * float(f32(float(NATIVE_TAU) / 512.0))))
-    jitter_x = float(f32(math.cos(dir_angle) * offset_term + float(aim_x)))
-    jitter_y = math.sin(dir_angle) * offset_term + float(aim_y)
-    expected_angle = float(
-        f32(math.atan2(float(player.pos.y) - jitter_y, float(player.pos.x) - jitter_x) - float(NATIVE_HALF_PI)),
+    dx = x87_pc24_sub(aim_x, player.pos.x)
+    dy = x87_pc24_sub(aim_y, player.pos.y)
+    dist_sq = x87_pc24_add(x87_pc24_mul(dx, dx), x87_pc24_mul(dy, dy))
+    half_len = x87_pc24_mul(math.sqrt(dist_sq), 0.5)
+    offset_term = x87_pc24_mul_chain(
+        half_len,
+        player.spread_heat,
+        float(rand_mag & 0x1FF),
+        0.001953125,
+    )
+    dir_angle = x87_pc24_mul(float(rand_dir & 0x1FF), f32(float(NATIVE_TAU) / 512.0))
+    jitter_x = x87_pc24_add(x87_pc24_mul(math.cos(dir_angle), offset_term), aim_x)
+    jitter_y = x87_pc24_add(x87_pc24_mul(math.sin(dir_angle), offset_term), aim_y)
+    expected_angle = x87_pc24_sub(
+        x87_fpatan(
+            x87_pc24_sub(player.pos.y, jitter_y),
+            x87_pc24_sub(player.pos.x, jitter_x),
+        ),
+        NATIVE_HALF_PI,
     )
 
     fire_weapon(
@@ -1099,6 +1510,65 @@ def test_player_fire_weapon_uses_disc_spread_jitter() -> None:
         RngCallerStatic.FX_SPAWN_SPRITE_ROTATION,
         RngCallerStatic.FX_SPAWN_SPRITE_ROTATION,
     ]
+
+
+def test_player_fire_weapon_disc_spread_rounds_each_x87_operation() -> None:
+    pool = ProjectilePool(size=8)
+    state = GameplayState(
+        projectiles=pool,
+        rng=ScriptedCrand(
+            [3210, 6757, 16721, 32587, 146, 4299, 4835],
+            fallback=ScriptedCrand.Fallback.REPEAT_LAST,
+        ),
+    )
+    player = PlayerState(
+        index=0,
+        pos=Vec2(284.0749816894531, 934.1846923828125),
+        weapon=WeaponSlot(weapon_id=WeaponId.MEAN_MINIGUN, clip_size=120, ammo=110),
+        spread_heat=0.24259991943836212,
+    )
+
+    fire_weapon(
+        WeaponFireCtx(
+            player=player,
+            input_state=PlayerInput(fire_down=True, aim=Vec2(272.0, 787.0)),
+            dt=0.07300000637769699,
+            state=state,
+        ),
+    )
+
+    projectiles = pool.iter_active()
+    assert len(projectiles) == 1
+    assert projectiles[0].angle == -0.09688407182693481
+    assert player.spread_heat == 0.32319992780685425
+
+
+def test_player_fire_weapon_uses_native_muzzle_arithmetic() -> None:
+    muzzle = native_fire_muzzle_pos(
+        Vec2(137.84991455078125, 935.0262451171875),
+        -4.14423131942749,
+    )
+
+    assert muzzle == Vec2(152.47727966308594, 941.5100708007812)
+
+
+def test_player_fire_weapon_secondary_owner_uses_native_friendly_fire_encoding() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0))
+    weapon_assign_player(player, WeaponId.SEEKER_ROCKETS, state=state)
+
+    fire_weapon(
+        WeaponFireCtx(
+            player=player,
+            input_state=PlayerInput(fire_down=True, aim=Vec2(200.0, 100.0)),
+            dt=0.0,
+            state=state,
+            creatures=[],
+        ),
+    )
+
+    projectile = state.secondary_projectiles.iter_active()[0]
+    assert projectile.owner.to_legacy() == -100
 
 
 @pytest.mark.parametrize(
@@ -1176,10 +1646,10 @@ def test_player_update_hot_tempered_spawns_ring() -> None:
     pool = ProjectilePool(size=16)
     rng = ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST)
     state = GameplayState(projectiles=pool, rng=rng)
-    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), hot_tempered_timer=1.95)
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), hot_tempered_timer=1.35)
     player.perk_counts[int(PerkId.HOT_TEMPERED)] = 1
 
-    player_update(player, PlayerInput(aim=Vec2(101.0, 100.0)), 0.1, state)
+    player_update(player, PlayerInput(aim=Vec2(101.0, 100.0)), 0.08400000631809235, state)
 
     owners = {entry.owner for entry in pool.entries if entry.active}
     assert owners == {OwnerRef.from_local_player(0)}
@@ -1187,6 +1657,17 @@ def test_player_update_hot_tempered_spawns_ring() -> None:
     assert len(type_ids) == 8
     assert type_ids.count(int(ProjectileTemplateId.PLASMA_MINIGUN)) == 4
     assert type_ids.count(int(ProjectileTemplateId.PLASMA_RIFLE)) == 4
+    assert [entry.angle for entry in pool.entries if entry.active] == [
+        0.0,
+        0.7853981852531433,
+        1.5707963705062866,
+        2.356194496154785,
+        3.1415927410125732,
+        3.9269909858703613,
+        4.71238899230957,
+        5.4977874755859375,
+    ]
+    assert player.hot_tempered_timer == 0.03400003910064697
     assert [record.caller for record in rng.records_since()] == [
         RngCallerStatic.PLAYER_UPDATE_HOT_TEMPERED_INTERVAL_RESET,
     ]
@@ -1255,6 +1736,34 @@ def test_bonus_apply_registers_hud_slot_and_expires() -> None:
     assert not any(slot.active and slot.bonus_id == BonusId.WEAPON_POWER_UP for slot in state.bonus_hud.slots)
 
 
+@pytest.mark.parametrize(
+    "bonus_id",
+    [BonusId.WEAPON_POWER_UP, BonusId.REFLEX_BOOST, BonusId.FIRE_BULLETS],
+)
+def test_ammo_refill_bonuses_preserve_native_reload_metadata(bonus_id: BonusId) -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2())
+    player.weapon.clip_size = 8
+    player.weapon.ammo = 3.0
+    player.weapon.reload_active = True
+    player.weapon.reload_timer = 0.5
+    player.weapon.reload_timer_max = f32(1.2)
+
+    bonus_apply(
+        state,
+        player,
+        bonus_id,
+        origin=player.pos,
+        creatures=[],
+        players=[player],
+    )
+
+    assert player.weapon.ammo == 8.0
+    assert player.weapon.reload_timer == 0.0
+    assert player.weapon.reload_active is True
+    assert player.weapon.reload_timer_max == f32(1.2)
+
+
 def test_bonus_apply_shock_chain_spawns_projectile_and_chains() -> None:
     pool = ProjectilePool(size=8)
     state = GameplayState(projectiles=pool)
@@ -1266,10 +1775,12 @@ def test_bonus_apply_shock_chain_spawns_projectile_and_chains() -> None:
         _creature(pos=Vec2(100.0, far_y), hp=100.0),
     ]
 
+    state.bonus_spawn_guard = True
     bonus_apply(state, player, BonusId.SHOCK_CHAIN, origin=player.pos, creatures=creatures, players=[player])
     assert state.shock_chain_links_left == 0x20
     first_proj = state.shock_chain_projectile_id
     assert first_proj >= 0
+    assert not state.bonus_spawn_guard
 
     pool.step(
         PrimaryStepCtx(
@@ -1287,6 +1798,7 @@ def test_bonus_apply_shock_chain_spawns_projectile_and_chains() -> None:
     assert state.shock_chain_projectile_id == first_proj
     assert sum(1 for entry in pool.entries if entry.active) == 1
 
+    state.bonus_spawn_guard = True
     pool.step(
         PrimaryStepCtx(
             dt=0.1,
@@ -1301,6 +1813,7 @@ def test_bonus_apply_shock_chain_spawns_projectile_and_chains() -> None:
 
     assert state.shock_chain_links_left == 0x1F
     assert state.shock_chain_projectile_id != first_proj
+    assert not state.bonus_spawn_guard
     assert sum(1 for entry in pool.entries if entry.active) >= 2
     chained = pool.entries[int(state.shock_chain_projectile_id)]
     # Native stores (float)(atan2(dy, dx) - 1.5707964 - 3.1415927).

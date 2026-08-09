@@ -108,24 +108,28 @@ pub const LocalInputInterpreter = struct {
         var move_to_cursor_pressed = false;
         var computer_target_index: ?i32 = null;
 
-        const computer_move_active = move_mode_type == movement_control_computer or aim_scheme == aim_scheme_computer;
+        const computer_move_active = move_mode_type == movement_control_computer;
 
         if (computer_move_active) {
             computer_target_index = self.selectComputerTarget(idx, player, creatures);
             const center_delta = sub(computer_arena_center, player.pos);
             const center_dist = length(center_delta);
-            const target_pos = blk: {
+            const move_delta: state_mod.Vec2 = blk: {
                 if (computer_target_index) |target_idx| {
-                    if (center_dist <= computer_move_target_radius) {
-                        if (creatureAt(creatures, target_idx)) |target| {
-                            break :blk target.pos;
+                    if (creatureAt(creatures, target_idx)) |target| {
+                        if (center_dist <= computer_move_target_radius) {
+                            break :blk sub(target.pos, player.pos);
                         }
+                        break :blk center_delta;
                     }
                 }
-                break :blk computer_arena_center;
+
+                const away = sub(player.pos, computer_arena_center);
+                const orbit: state_mod.Vec2 = .{ .x = -away.y, .y = away.x };
+                if (lengthSq(orbit) > 1e-12) break :blk orbit;
+                break :blk state_mod.Vec2{ .x = 0.0, .y = 1.0 };
             };
 
-            const move_delta = sub(target_pos, player.pos);
             const move_dir = normalized(move_delta);
             if (lengthSq(move_delta) > 1e-12) {
                 move_vec = move_dir;
@@ -569,7 +573,7 @@ test "computer aim auto fires without fire pressed" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 512.0, .y = 512.0 }, .{ .x = 560.0, .y = 512.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_computer));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_computer));
 
     const creatures = [_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 612.0, .y = 512.0 } },
@@ -605,7 +609,7 @@ test "relative mode single player uses alt arrow fallback" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.player_mode_flag_p1 = @intCast(movement_control_relative);
+    cfg.movement_schemes[0] = @intCast(movement_control_relative);
     formats.crimson_cfg.setPlayerBindBlock(&cfg, 0, .{
         .move_forward = formats.crimson_cfg.keybind_unbound_code,
         .move_backward = formats.crimson_cfg.keybind_unbound_code,
@@ -652,7 +656,7 @@ test "relative mode multiplayer does not use alt arrow fallback" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.player_mode_flag_p1 = @intCast(movement_control_relative);
+    cfg.movement_schemes[0] = @intCast(movement_control_relative);
     formats.crimson_cfg.setPlayerBindBlock(&cfg, 0, .{
         .move_forward = formats.crimson_cfg.keybind_unbound_code,
         .move_backward = formats.crimson_cfg.keybind_unbound_code,
@@ -699,7 +703,7 @@ test "mouse point click marks move to cursor press" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.player_mode_flag_p1 = @intCast(movement_control_mouse_point_click);
+    cfg.movement_schemes[0] = @intCast(movement_control_mouse_point_click);
 
     const mouse_world: state_mod.Vec2 = .{ .x = 160.0, .y = 140.0 };
     const out = interpreter.buildPlayerInput(
@@ -729,7 +733,7 @@ test "computer move mode near center heads toward target" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 500.0, .y = 500.0 }, .{ .x = 560.0, .y = 500.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.player_mode_flag_p1 = @intCast(movement_control_computer);
+    cfg.movement_schemes[0] = @intCast(movement_control_computer);
     const creatures = [_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 560.0, .y = 500.0 } },
     };
@@ -744,7 +748,7 @@ test "computer move mode far from center heads toward center" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 900.0, .y = 900.0 }, .{ .x = 960.0, .y = 900.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.player_mode_flag_p1 = @intCast(movement_control_computer);
+    cfg.movement_schemes[0] = @intCast(movement_control_computer);
     const creatures = [_]struct { active: bool, hp: f32, pos: state_mod.Vec2 }{
         .{ .active = true, .hp = 20.0, .pos = .{ .x = 960.0, .y = 900.0 } },
     };
@@ -759,7 +763,7 @@ test "joystick aim uses pov not aim keybinds" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_joystick));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_joystick));
 
     const out = interpreter.buildPlayerInput(
         FakeSampler{ .down = &.{.{ .player_index = 0, .code = formats.crimson_cfg.playerBindBlock(&cfg, 0).aim_right, .value = true }} },
@@ -782,7 +786,7 @@ test "joystick aim turns with pov input" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_joystick));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_joystick));
 
     const out = interpreter.buildPlayerInput(
         FakeSampler{ .down = &.{.{ .player_index = 0, .code = aim_pov_right_code, .value = true }} },
@@ -805,7 +809,7 @@ test "dual action pad aim uses native radius scale" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 160.0, .y = 100.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_dual_action_pad));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_dual_action_pad));
 
     const binds = formats.crimson_cfg.playerBindBlock(&cfg, 0);
     const out = interpreter.buildPlayerInput(
@@ -829,7 +833,7 @@ test "keyboard aim in static mode reanchors to heading" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 180.0, .y = 130.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_keyboard));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_keyboard));
 
     const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, no_creatures);
 
@@ -841,8 +845,8 @@ test "keyboard aim with non relative move mode keeps world aim" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 180.0, .y = 130.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_keyboard));
-    cfg.player_mode_flag_p1 = @intCast(movement_control_dual_action_pad);
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_keyboard));
+    cfg.movement_schemes[0] = @intCast(movement_control_dual_action_pad);
 
     const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, .{}, .{}, .{}, 0.1, no_creatures);
 
@@ -854,7 +858,7 @@ test "relative mouse aim centered keeps world aim" {
     var interpreter: LocalInputInterpreter = .{};
     const player = makePlayer(0, .{ .x = 100.0, .y = 100.0 }, .{ .x = 180.0, .y = 130.0 }, 0.0);
     var cfg = formats.crimson_cfg.defaultConfig();
-    cfg.aim_scheme_p1 = @bitCast(@as(i32, aim_scheme_mouse_relative));
+    cfg.aim_schemes[0] = @bitCast(@as(i32, aim_scheme_mouse_relative));
     const center: state_mod.Vec2 = .{ .x = 320.0, .y = 200.0 };
 
     const out = interpreter.buildPlayerInput(FakeSampler{}, 0, 1, &player, &cfg, center, .{}, center, 0.1, no_creatures);

@@ -21,14 +21,14 @@ TYPING_PANEL_HEIGHT = 53.0      # Original: 53.0
 TYPING_PANEL_ALPHA = 0.7        # Original: 0.7
 TYPING_TEXT_X = 6.0             # Original: 6.0
 TYPING_PROMPT = "> "            # Original: part of format string
-TYPING_CURSOR = "_"             # Original: DAT_004712b8 = "_"
+TYPING_CURSOR = "_"             # Original: console_caret_string = "_"
 TYPING_CURSOR_X_OFFSET = 14.0   # Original: text_width + 14.0
 ```
 
 ### Rendering Sequence (`_draw_typing_box`)
 
 1. **Panel Backdrop** 
-   - Texture: `ind_panel` (original: `DAT_0048f7c4` = `ui/ui_indPanel.jaz`)
+   - Texture: `ind_panel` (original: `ui_hud_panel_texture` = `ui/ui_indPanel.jaz`)
    - Position: `x=-1.0, y=screen_height - 144.0`
    - Size: `182.0 × 53.0`
    - Alpha: `0.7`
@@ -41,7 +41,7 @@ TYPING_CURSOR_X_OFFSET = 14.0   # Original: text_width + 14.0
    - Uses `_draw_ui_text` (equivalent to `grim_draw_text_small_fmt`)
 
 3. **Cursor**
-   - Character: `"_"` (underscore) from `DAT_004712b8`
+   - Character: `"_"` (underscore) from `console_caret_string`
    - Alpha: `sin(t * 4.0) > 0.0 ? 1.0 : 0.4`
    - Position: `x = 6.0 + prompt_width + text_width + 14.0, y=screen_height - 127.0`
 
@@ -66,12 +66,12 @@ v38 = config_screen_height - 128.0;     // Base Y position
 
 The text is vertically centered within the panel (17 pixels from top of 53-pixel panel).
 
-### Original Decompiled Reference
+### Original static reference
 
-From `analysis/ghidra/raw/crimsonland.exe_decompiled.c` lines 37565-37586:
+Preserved excerpt from `typo_gameplay_update_and_render` at `0x004457c0`:
 ```c
 // Bind ind_panel texture
-(*grim_interface_ptr->vtable->grim_bind_texture)(DAT_0048f7c4,0);
+(*grim_interface_ptr->vtable->grim_bind_texture)(ui_hud_panel_texture,0);
 (*grim_interface_ptr->vtable->grim_set_uv)(0.0,0.0,1.0,1.0);
 (*grim_interface_ptr->vtable->grim_set_color)(1.0,1.0,1.0,0.7);
 
@@ -104,6 +104,5 @@ iVar5 = (*grim_measure_text_width)(text);
 
 ## Files Referenced
 
-- Original implementation: `analysis/ghidra/raw/crimsonland.exe_decompiled.c` lines 37565-37586
-- Original implementation: `analysis/ida/raw/crimsonland.exe/crimsonland.exe_decompiled.c` lines 51199-51462
+- Original implementation: `typo_gameplay_update_and_render` at `0x004457c0`
 - Current implementation: `src/crimson/modes/typo_mode.py` lines 36-41, 363-400

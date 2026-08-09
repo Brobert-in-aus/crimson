@@ -75,7 +75,7 @@ fn build21EverredPastures(
             try common.appendSpawn(
                 out_entries,
                 len,
-                edges.bottom,
+                .{ .x = edges.bottom.x, .y = 1088.0 },
                 0.0,
                 common.SpawnId.ai1_spider_sp1_blue_tint_1b,
                 40_500,
@@ -99,7 +99,7 @@ fn build22SpiderSpawns(
         len,
         corners.top_left,
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         1_500,
         1,
     );
@@ -108,7 +108,7 @@ fn build22SpiderSpawns(
         len,
         corners.bottom_right,
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         1_500,
         1,
     );
@@ -117,7 +117,7 @@ fn build22SpiderSpawns(
         len,
         corners.top_right,
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         1_500,
         1,
     );
@@ -126,7 +126,7 @@ fn build22SpiderSpawns(
         len,
         corners.bottom_left,
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         1_500,
         1,
     );
@@ -144,7 +144,7 @@ fn build22SpiderSpawns(
         len,
         .{ .x = 512.0, .y = 512.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_slow_0a,
+        common.SpawnId.den_spider_basic_0a,
         18_000,
         1,
     );
@@ -153,7 +153,7 @@ fn build22SpiderSpawns(
         len,
         .{ .x = 448.0, .y = 448.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         20_500,
         1,
     );
@@ -162,7 +162,7 @@ fn build22SpiderSpawns(
         len,
         .{ .x = 576.0, .y = 448.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         26_000,
         1,
     );
@@ -180,7 +180,7 @@ fn build22SpiderSpawns(
         len,
         .{ .x = 576.0, .y = 576.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         31_500,
         1,
     );
@@ -189,7 +189,7 @@ fn build22SpiderSpawns(
         len,
         .{ .x = 448.0, .y = 576.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         22_000,
         1,
     );
@@ -216,7 +216,7 @@ fn build23ArachnoidFarm(
                 len,
                 pos,
                 0.0,
-                common.SpawnId.alien_spawner_child_32_slow_0a,
+                common.SpawnId.den_spider_basic_0a,
                 trigger,
                 1,
             );
@@ -231,7 +231,7 @@ fn build23ArachnoidFarm(
                 len,
                 pos,
                 0.0,
-                common.SpawnId.alien_spawner_child_32_slow_0a,
+                common.SpawnId.den_spider_basic_0a,
                 trigger,
                 1,
             );
@@ -252,7 +252,7 @@ fn build23ArachnoidFarm(
                 len,
                 pos,
                 0.0,
-                common.SpawnId.alien_spawner_child_32_fast_10,
+                common.SpawnId.den_spider_weak_10,
                 trigger,
                 1,
             );
@@ -298,7 +298,7 @@ fn build24TwoFronts(
                 len,
                 .{ .x = 256.0, .y = 256.0 },
                 0.0,
-                common.SpawnId.alien_spawner_child_32_slow_0a,
+                common.SpawnId.den_spider_basic_0a,
                 trigger,
                 1,
             );
@@ -307,7 +307,7 @@ fn build24TwoFronts(
                 len,
                 .{ .x = 768.0, .y = 768.0 },
                 0.0,
-                common.SpawnId.alien_spawner_child_1d_fast_07,
+                common.SpawnId.den_alien_basic_07,
                 trigger,
                 1,
             );
@@ -318,7 +318,7 @@ fn build24TwoFronts(
                 len,
                 .{ .x = 768.0, .y = 256.0 },
                 0.0,
-                common.SpawnId.alien_spawner_child_32_slow_0a,
+                common.SpawnId.den_spider_basic_0a,
                 62_500,
                 1,
             );
@@ -327,7 +327,7 @@ fn build24TwoFronts(
                 len,
                 .{ .x = 256.0, .y = 768.0 },
                 0.0,
-                common.SpawnId.alien_spawner_child_1d_fast_07,
+                common.SpawnId.den_alien_basic_07,
                 62_500,
                 1,
             );
@@ -416,14 +416,11 @@ fn build26EvilZombiesAtLarge(
 }
 
 fn build27SurvivalOfTheFastest(
-    ctx: common.BuildContext,
-    rng: *common.QuestRng,
+    _: common.BuildContext,
+    _: *common.QuestRng,
     out_entries: []spawn_runtime.QuestSpawnEntry,
     len: *usize,
 ) common.QuestSpawnBuildError!void {
-    _ = rng;
-    const corners = common.insetCornerPoints(ctx.width, ctx.height, 128.0);
-
     var trigger: i32 = 500;
     var x: i32 = 0x100;
     while (x < 0x2B0) : (x += 0x48) {
@@ -432,7 +429,7 @@ fn build27SurvivalOfTheFastest(
             len,
             .{ .x = @as(f32, @floatFromInt(x)), .y = 256.0 },
             0.0,
-            common.SpawnId.alien_spawner_child_32_fast_10,
+            common.SpawnId.den_spider_weak_10,
             trigger,
             1,
         );
@@ -447,7 +444,7 @@ fn build27SurvivalOfTheFastest(
             len,
             .{ .x = 688.0, .y = @as(f32, @floatFromInt(y)) },
             0.0,
-            common.SpawnId.alien_spawner_child_32_fast_10,
+            common.SpawnId.den_spider_weak_10,
             trigger,
             1,
         );
@@ -462,7 +459,7 @@ fn build27SurvivalOfTheFastest(
             len,
             .{ .x = @as(f32, @floatFromInt(x_value)), .y = 688.0 },
             0.0,
-            common.SpawnId.alien_spawner_child_32_fast_10,
+            common.SpawnId.den_spider_weak_10,
             trigger,
             1,
         );
@@ -477,7 +474,7 @@ fn build27SurvivalOfTheFastest(
             len,
             .{ .x = 400.0, .y = @as(f32, @floatFromInt(y_value)) },
             0.0,
-            common.SpawnId.alien_spawner_child_32_fast_10,
+            common.SpawnId.den_spider_weak_10,
             trigger,
             1,
         );
@@ -492,7 +489,7 @@ fn build27SurvivalOfTheFastest(
             len,
             .{ .x = @as(f32, @floatFromInt(x)), .y = 400.0 },
             0.0,
-            common.SpawnId.alien_spawner_child_32_fast_10,
+            common.SpawnId.den_spider_weak_10,
             trigger,
             1,
         );
@@ -502,36 +499,36 @@ fn build27SurvivalOfTheFastest(
     try common.appendSpawn(
         out_entries,
         len,
-        corners.top_left,
+        .{ .x = 128.0, .y = 128.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         22_300,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.top_right,
+        .{ .x = 896.0, .y = 128.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         22_300,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.bottom_left,
+        .{ .x = 128.0, .y = 896.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         24_300,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.bottom_right,
+        .{ .x = 896.0, .y = 896.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_32_fast_10,
+        common.SpawnId.den_spider_weak_10,
         24_300,
         1,
     );
@@ -596,7 +593,7 @@ fn build29GhostPatrols(
         len,
         edges.right,
         0.0,
-        common.SpawnId.alien_const_red_fast_2b,
+        common.SpawnId.alien_deadly_fast_2b,
         1_500,
         2,
     );
@@ -623,7 +620,7 @@ fn build29GhostPatrols(
         len,
         .{ .x = -264.0, .y = edges.left.y },
         0.0,
-        common.SpawnId.alien_const_red_fast_2b,
+        common.SpawnId.alien_deadly_fast_2b,
         (loop_count - 1) * 2_500,
         1,
     );
@@ -673,31 +670,35 @@ fn build210Spideroids(
         6_000,
         1,
     );
-    try common.appendSpawn(
-        out_entries,
-        len,
-        .{ .x = edges.right.x, .y = 762.0 },
-        0.0,
-        common.SpawnId.spider_sp2_splitter_01,
-        9_000,
-        1,
-    );
-    try common.appendSpawn(
-        out_entries,
-        len,
-        edges.bottom,
-        0.0,
-        common.SpawnId.spider_sp2_splitter_01,
-        9_000,
-        1,
-    );
-    try common.appendSpawn(
-        out_entries,
-        len,
-        .{ .x = edges.left.x, .y = 762.0 },
-        0.0,
-        common.SpawnId.spider_sp2_splitter_01,
-        9_000,
-        1,
-    );
+    if (ctx.hardcore) {
+        try common.appendSpawn(
+            out_entries,
+            len,
+            .{ .x = edges.right.x, .y = 762.0 },
+            0.0,
+            common.SpawnId.spider_sp2_splitter_01,
+            9_000,
+            1,
+        );
+        try common.appendSpawn(
+            out_entries,
+            len,
+            edges.bottom,
+            0.0,
+            common.SpawnId.spider_sp2_splitter_01,
+            9_000,
+            1,
+        );
+    }
+    if (ctx.player_count >= 2 or ctx.hardcore) {
+        try common.appendSpawn(
+            out_entries,
+            len,
+            .{ .x = edges.left.x, .y = 762.0 },
+            0.0,
+            common.SpawnId.spider_sp2_splitter_01,
+            9_000,
+            1,
+        );
+    }
 }

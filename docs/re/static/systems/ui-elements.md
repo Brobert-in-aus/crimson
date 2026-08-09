@@ -76,8 +76,10 @@ Template-pool globals (seeded in `ui_menu_template_pool_init`) are also mapped:
 `ui_menu_item_subtemplate_block_t`:
 
 - `slot_00..slot_07` are `0x1c` stride records.
-- Per-slot `x`/`y` are high confidence from copy/offset loops in
-  `ui_menu_assets_init`.
+- `ui_element_set_rect` establishes the complete record as transformed
+  `x`/`y`, `z`, `rhw`, packed `color`, and texture `u`/`v`. It initializes the
+  first four slots as a one-pixel-inset quad, with `z = 0.5`, `rhw = 1.0`, and
+  white color, then adds the supplied XY offset.
 - `+0xe0` is `texture_handle` (`ui_menu_item_subtemplate_block_*_texture_handle`).
 - `+0xe4` is `quad_mode` (`ui_menu_item_subtemplate_block_*_mode`).
 
@@ -144,14 +146,14 @@ Offsets below are relative to the UI element base pointer.
 
 ## Related functions
 
-- `ui_element_render` (`FUN_00446c40`) — focus + render path.
+- `ui_element_render` (`0x00446c40`) — focus + render path.
 - `ui_focus_update` — focus navigation for the active element.
 - `ui_focus_draw` — focus highlight rendering.
 - `ui_button_update` — button helper that wraps element state and rendering.
 
 ## Key behaviors (decompiled)
 
-### Bounds calculation (`FUN_0044fb50`)
+### Bounds calculation (`ui_element_layout_calc`)
 
 Buttons use an inset rectangle derived from the element's *local* quad and its
 `pos_x/pos_y`:
@@ -184,7 +186,7 @@ For non-clickable elements it uses a constant alpha (`200`).
 
 ### Shadow and glow passes (`ui_element_render`)
 
-When `config_blob.reserved0[0x0e]` (aka `fx_detail_0`) is nonzero:
+When `config_blob.shadows_enabled` (`0x00480356`) is nonzero:
 
 - A shadow copy of the main quad is drawn at `(pos_x+7, pos_y+7)` with tint
   `0x44444444`.

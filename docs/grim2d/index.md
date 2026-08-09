@@ -38,10 +38,12 @@ High-confidence globals from the grim.dll decompilation:
 - **D3D core:** `grim_d3d8`, `grim_d3d_device`, `grim_d3d8_probe` (temporary Create8 check).
 - **Render targets:** `grim_backbuffer_surface` and `grim_render_target_surface`.
 - **Texture slots:** `grim_texture_slots` (handle-indexed texture pointer table).
-- **Config storage:** `grim_config_blob` plus `grim_config_var0_table`..`grim_config_var3_table`.
+- **Config storage:** `grim_config_blob`, the 128-entry `grim_config_values`
+  record table, and the zero-filled `grim_config_default` fallback.
 - **Font tables:** `grim_font2_char_map`, `grim_font2_glyph_widths`, `grim_font2_uv_u`,
   `grim_font2_uv_v`, and `grim_font2_texture_handle`.
 
 - **DirectInput:** `grim_dinput_keyboard`/`grim_keyboard_device`/`grim_keyboard_state`,
-  `grim_dinput_mouse`/`grim_mouse_device`/`grim_mouse_state`,
-  `grim_dinput_joystick`/`grim_joystick_device`/`grim_joystick_state`.
+  `grim_dinput_mouse`/`grim_mouse_device`/`grim_mouse_state`, and the
+  exact-matched joystick lifecycle around `grim_dinput_joystick`/
+  `grim_joystick_device`/`grim_joystick_state`.

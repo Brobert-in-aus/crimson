@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import math
 
-from crimson.creatures.spawn import CreatureFlags, CreatureTypeId, tick_rush_mode_spawns
+from crimson.creatures.spawn import (
+    CreatureFlags,
+    CreatureTypeId,
+    build_rush_mode_spawn_creature,
+    tick_rush_mode_spawns,
+)
 from crimson.math_parity import f32
 from crimson.rng_caller_static import RngCallerStatic
+from grim.geom import Vec2
 from grim.rand import Crand
 from tests.support.helpers import ScriptedCrand, assert_float_close
 
@@ -24,6 +30,36 @@ def test_tick_rush_mode_spawns_no_trigger() -> None:
     assert_float_close(cooldown, 84.0)
     assert spawns == ()
     assert rng.state == 1
+
+
+def test_rush_spawn_stats_round_each_native_x87_operation() -> None:
+    tint = (1.0, 1.0, 1.0, 1.0)
+
+    health_case = build_rush_mode_spawn_creature(
+        Vec2(),
+        tint,
+        Crand(1),
+        type_id=CreatureTypeId.ALIEN,
+        survival_elapsed_ms=474,
+    )
+    speed_case = build_rush_mode_spawn_creature(
+        Vec2(),
+        tint,
+        Crand(1),
+        type_id=CreatureTypeId.ALIEN,
+        survival_elapsed_ms=237,
+    )
+    size_case = build_rush_mode_spawn_creature(
+        Vec2(),
+        tint,
+        Crand(1),
+        type_id=CreatureTypeId.ALIEN,
+        survival_elapsed_ms=3792,
+    )
+
+    assert health_case.health == 10.047399520874023
+    assert speed_case.move_speed == 2.5023701190948486
+    assert size_case.size == 47.03792190551758
 
 
 def test_tick_rush_mode_spawns_triggers_two_creatures() -> None:
@@ -79,6 +115,22 @@ def test_tick_rush_mode_spawns_triggers_two_creatures() -> None:
     assert_float_close(spider.tint[3], 1.0)
 
     assert rng.state == 0x3D6C1037
+
+
+def test_tick_rush_mode_spawns_uses_native_upward_rounded_sine_scale() -> None:
+    rng = Crand(1)
+    _, spawns = tick_rush_mode_spawns(
+        -1.0,
+        0.0,
+        rng,
+        player_count=1,
+        survival_elapsed_ms=63,
+        terrain_width=1024.0,
+        terrain_height=1024.0,
+    )
+
+    assert spawns[0].tint is not None
+    assert spawns[0].tint[2] == 0.30639997124671936
 
 
 def test_tick_rush_mode_spawns_uses_exact_native_callers() -> None:

@@ -1,9 +1,24 @@
 """
 Binary Ninja script to apply our Ghidra maps (name_map/data_map).
 
+``name_map`` is function-only. Arrays, scalar globals, range sentinels, and
+function-pointer variables belong in ``data_map`` so they cannot be mistaken
+for callable entry points.
+
 Usage:
   - In Binary Ninja: open the binary and run this script (Tools -> Run Script).
   - Or from the console: import binja_import_maps as m; m.apply_maps(bv)
+
+Name-map rows may include ``local_types`` entries keyed by the address of an
+instruction that defines an SSA variable. Ambiguous addresses may select the
+original variable with ``source_name``. This preserves narrow presentation
+annotations when Binary Ninja loses a recovered pointee type across a
+compiler-generated reload. When a row's MLIL is unavailable, the importer
+retains and analyzes that function before applying its local types.
+
+Large recovered functions may also set ``analysis_skip_override`` to
+``never_skip``. This makes Binary Ninja retain their LLIL, MLIL, and HLIL even
+when the default analysis-time heuristic would otherwise discard them.
 
 Environment overrides:
   - CRIMSON_NAME_MAP: path to name_map.json / .csv
@@ -19,12 +34,142 @@ from pathlib import Path
 
 try:
     import binaryninja as bn
-except Exception:  # pragma: no cover - only runs inside Binary Ninja
+except Exception:  # noqa: BLE001  # pragma: no cover - Binary Ninja may fail while loading native plugins
     bn = None
 
 
 _SEEDED_TYPES = False
 _SEEDED_REPO_HEADERS = False
+
+_AUTHORITATIVE_REPO_TYPES = frozenset(
+    {
+        # The importer previously synthesized FILE as a one-byte opaque
+        # structure before the bundled CRT layout was recovered.
+        "FILE",
+        # The original database kept the projectile record's interior-cursor
+        # view as its primary layout, which rendered ordinary accesses as
+        # pos.tail.vy.*. Prefer the equivalent flat Binary Ninja view.
+        "projectile_t",
+        "projectile_pool_t",
+        # Particle render styles reinterpret the four-float scale block as
+        # RGBA, intensity as progress, and spin as rotation.
+        "particle_t",
+        "particle_binja_t",
+        # The FX constructor carries interior cursors through vector and color
+        # aggregates; use a flat view for readable induction-variable HLIL.
+        "fx_queue_entry_t",
+        "fx_queue_entry_binja_t",
+        # The database's older creature layout typed phase_seed as float even
+        # though allocation stores masked rand() integers and AI converts the
+        # member to float explicitly before using it as an orbit phase.
+        "creature_t",
+        "creature_binja_t",
+        "creature_lifecycle_stride_binja_t",
+        "creature_max_health_stride_binja_t",
+        # Creature metadata still carried an older field_0x20 member in the
+        # database after the write-only slot was characterized.
+        "creature_type_t",
+        "creature_type_table_t",
+        # The status initializer writes the reserved tail as four independent
+        # random dwords; retain both that word view and the raw byte span.
+        "game_status_t",
+        "game_status_binja_t",
+        # The older database treated the random tag at 0x38 as part of an
+        # eight-byte reserved span. Record construction, packing, checksums,
+        # and the standalone data symbol prove a uint32_t random_tag followed
+        # by only four reserved bytes.
+        "highscore_record_t",
+        # Both 0x40-byte persisted binding spans are complete per-player
+        # records, not 13 keys followed by unrelated padding.
+        "player_input_config_t",
+        "crimson_cfg_t",
+        # The construction base precedes the shifted public weapon_stats_t view
+        # by one dword and owns the ammo class at the start of every row.
+        "weapon_storage_entry_t",
+        "weapon_storage_table_t",
+        # Use the equivalent flat parameters view so onPause and request_exit
+        # survive anonymous-union lowering as named fields.
+        "mod_interface_t",
+        # Quest builders write an array through their first-element pointer.
+        # Keep both the element and table presentation layouts authoritative.
+        "quest_spawn_entry_next_block_t",
+        "quest_spawn_entry_position_block_t",
+        "quest_spawn_entry_trigger_cursor_t",
+        "quest_spawn_entry_template_cursor_t",
+        "quest_spawn_entry_t",
+        "quest_spawn_pair_binja_t",
+        "quest_spawn_entries_binja_t",
+        # This layout is shared by three ui_element_t rendering layers. Keep
+        # the recovered z/rhw/color/u/v members in sync with the canonical
+        # header instead of preserving older field_0xNN database members.
+        "ui_element_vertex_t",
+        "ui_element_vertex_binja_t",
+        "ui_element_t",
+        "ui_element_binja_t",
+        "ui_menu_item_subtemplate_slot_t",
+        "ui_menu_item_subtemplate_slot_binja_t",
+        # HUD reset loops carry an interior slide cursor. Keep the canonical
+        # compiler shape while presenting one flat owning record in HLIL.
+        "bonus_hud_slot_t",
+        "bonus_hud_slot_table_t",
+        "bonus_hud_slot_binja_t",
+    },
+)
+
+_REPO_TYPE_VIEW_OVERRIDES = {
+    "mod_interface_t": "mod_interface_binja_t",
+    "game_status_t": "game_status_binja_t",
+    # Keep the cursor-oriented compiler view in the matching header, but give
+    # Binary Ninja the equivalent flat record so ordinary IL uses field names.
+    "projectile_t": "projectile_binja_t",
+    "creature_t": "creature_binja_t",
+    "particle_t": "particle_binja_t",
+    "fx_queue_entry_t": "fx_queue_entry_binja_t",
+    "ui_element_vertex_t": "ui_element_vertex_binja_t",
+    "ui_element_t": "ui_element_binja_t",
+    "ui_menu_item_subtemplate_slot_t": (
+        "ui_menu_item_subtemplate_slot_binja_t"
+    ),
+    "bonus_hud_slot_t": "bonus_hud_slot_binja_t",
+}
+
+_REPO_TYPE_ARRAY_VIEW_OVERRIDES = {
+    "projectile_pool_t": ("projectile_binja_t", 0x60),
+    "bonus_hud_slot_table_t": ("bonus_hud_slot_binja_t", 0x10),
+}
+
+# Pointer arrays are not aggregate records for general importer overlap
+# purposes: data maps may intentionally name and type their individual slots.
+# This recovered table is the exception. Preserve its full array data variable
+# while still applying the 41 interior symbols and comments.
+_FORCED_DATA_AGGREGATES = frozenset(
+    {
+        "ui_element_table",
+    },
+)
+
+# These builders advance an entry cursor through a loop. Keeping the canonical
+# element-pointer signature gives Binary Ninja the correct 0x18 pointer stride;
+# the table wrapper is reserved for builders dominated by fixed-index stores.
+_QUEST_CURSOR_BUILDERS = frozenset(
+    {
+        "quest_build_arachnoid_farm",
+        "quest_build_deja_vu",
+        "quest_build_everred_pastures",
+        "quest_build_evil_zombies_at_large",
+        "quest_build_frontline_assault",
+        "quest_build_gauntlet",
+        "quest_build_nagolipoli",
+        "quest_build_surrounded_by_reptiles",
+        "quest_build_survival_of_the_fastest",
+        "quest_build_sweep_stakes",
+        "quest_build_target_practice",
+        "quest_build_the_killing",
+        "quest_build_the_massacre",
+        "quest_build_the_unblitzkrieg",
+        "quest_build_two_fronts",
+    },
+)
 
 _TYPE_REPLACEMENTS = {
     "IGrim2D": "void",
@@ -75,26 +220,32 @@ def _require_platform(bv):
 
 
 def _candidate_roots(bv=None) -> list[Path]:
-    roots: list[Path] = []
-    if "__file__" in globals():
-        try:
-            script_path = Path(__file__).resolve()
-            roots.append(script_path.parent)
-            if len(script_path.parents) >= 2:
-                roots.append(script_path.parents[1])
-        except Exception:
-            pass
+    bases: list[Path] = []
     if bv is not None:
         for value in (bv.file.original_filename, bv.file.filename):
             if value:
                 try:
-                    roots.append(Path(value).resolve().parent)
-                except Exception:
-                    pass
+                    bases.append(Path(value).resolve().parent)
+                except (OSError, RuntimeError) as exc:
+                    _log_error(f"Could not resolve Binary Ninja input path {value!r}: {exc}")
+    if "__file__" in globals():
+        try:
+            script_path = Path(__file__).resolve()
+            bases.append(script_path.parent)
+            if len(script_path.parents) >= 2:
+                bases.append(script_path.parents[1])
+        except (OSError, RuntimeError) as exc:
+            _log_error(f"Could not resolve script path: {exc}")
     try:
-        roots.append(Path.cwd())
-    except Exception:
-        pass
+        bases.append(Path.cwd())
+    except OSError as exc:
+        _log_error(f"Could not resolve current directory: {exc}")
+
+    roots: list[Path] = []
+    for base in bases:
+        for candidate in (base, *base.parents):
+            if candidate not in roots:
+                roots.append(candidate)
     return roots
 
 
@@ -196,6 +347,15 @@ def _parse_type_string(bv, type_text: str):
     return parsed_type
 
 
+def _data_map_symbol_type(row: dict):
+    kind = row.get("kind") or "data"
+    if kind == "data":
+        return bn.SymbolType.DataSymbol
+    if kind == "code_label":
+        return bn.SymbolType.LocalLabelSymbol
+    raise ValueError(f"unsupported data-map entry kind: {kind!r}")
+
+
 def _get_type_by_name(bv, name: str):
     return bv.get_type_by_name(name)
 
@@ -206,7 +366,7 @@ def _define_user_type(bv, name: str, type_obj) -> bool:
     try:
         bv.define_user_type(name, type_obj)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - Binary Ninja does not expose a stable exception hierarchy
         return False
 
 
@@ -214,16 +374,14 @@ def _undefine_user_type(bv, name) -> bool:
     try:
         bv.undefine_user_type(name)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 - Binary Ninja does not expose a stable exception hierarchy
         return False
 
 
 def _define_or_replace_user_type(bv, name, type_obj) -> bool:
-    if _define_user_type(bv, name, type_obj):
-        return True
-    if _undefine_user_type(bv, name):
-        return _define_user_type(bv, name, type_obj)
-    return False
+    if _get_type_by_name(bv, name) is not None and not _undefine_user_type(bv, name):
+        return False
+    return _define_user_type(bv, name, type_obj)
 
 
 def _define_alias_type(bv, name: str, type_obj) -> bool:
@@ -270,6 +428,12 @@ def _should_replace_incomplete_type(existing, replacement) -> bool:
         or replacement_width is None
         or existing_width == replacement_width
     )
+
+
+def _should_replace_repo_type(name: str, existing, replacement) -> bool:
+    if name in _AUTHORITATIVE_REPO_TYPES:
+        return not _types_equal(existing, replacement)
+    return _should_replace_incomplete_type(existing, replacement)
 
 
 def _define_opaque_struct_type(bv, name: str, size: int | None = None) -> bool:
@@ -362,6 +526,8 @@ def _seed_repo_headers(bv) -> None:
                 [
                     repo_root / "third_party" / "headers" / "crimsonland_ida_types.h",
                     repo_root / "third_party" / "headers" / "crimsonland_types.h",
+                    repo_root / "tools" / "match" / "include" / "crimsonland_console.h",
+                    repo_root / "tools" / "match" / "include" / "crimsonland_metadata.h",
                 ],
             )
 
@@ -369,6 +535,7 @@ def _seed_repo_headers(bv) -> None:
     repo_root = _find_repo_root(bv)
     if repo_root is not None:
         include_dirs.append(str(repo_root / "third_party" / "headers"))
+        include_dirs.append(str(repo_root / "tools" / "match" / "include"))
 
     seeded_total = 0
     for header_path in header_paths:
@@ -387,10 +554,25 @@ def _seed_repo_headers(bv) -> None:
             name_str = str(name)
             if not name_str:
                 raise RuntimeError(f"type header produced unnamed type in {header_path}")
+            view_name = _REPO_TYPE_VIEW_OVERRIDES.get(name_str)
+            if view_name is not None:
+                type_obj = types.get(view_name)
+                if type_obj is None:
+                    raise RuntimeError(
+                        f"missing Binary Ninja view {view_name} for {name_str}",
+                    )
+            array_view = _REPO_TYPE_ARRAY_VIEW_OVERRIDES.get(name_str)
+            if array_view is not None:
+                view_name, count = array_view
+                element_type = types.get(view_name)
+                if element_type is None:
+                    raise RuntimeError(
+                        f"missing Binary Ninja view {view_name} for {name_str}",
+                    )
+                type_obj = bn.Type.array(element_type, count)
             existing = _get_type_by_name(bv, name_str)
-            if existing is not None:
-                if not _should_replace_incomplete_type(existing, type_obj):
-                    continue
+            if existing is not None and not _should_replace_repo_type(name_str, existing, type_obj):
+                continue
             if not _define_or_replace_user_type(bv, name, type_obj):
                 raise RuntimeError(f"failed to define type {name_str} from {header_path}")
             seeded_total += 1
@@ -407,6 +589,16 @@ def _seed_common_types(bv) -> None:
         return
 
     _seed_repo_headers(bv)
+
+    # C++ matching views that have the same object layout as their canonical
+    # C records. Keep the class-facing names available to curated signatures
+    # without parsing the dependency-heavy compiler harness headers.
+    for alias, target in (("sfx_entry_cpp_t", "sfx_entry_t"),):
+        target_type = _get_type_by_name(bv, target)
+        if target_type is None:
+            raise RuntimeError(f"missing canonical type {target} for alias {alias}")
+        if not _define_alias_type(bv, alias, target_type):
+            raise RuntimeError(f"failed to define layout alias type {alias}")
 
     # Numeric typedefs that commonly appear in Ghidra-derived signatures.
     for name, type_obj in (
@@ -511,6 +703,21 @@ def _sanitize_signature(signature: str, bv=None) -> str:
     return _rewrite_type_tokens(signature, bv)
 
 
+def _presentation_signature(name: str, signature: str) -> str:
+    """Use layout-equivalent types that produce clearer Binary Ninja IL."""
+    if not name.startswith("quest_build_") or name in _QUEST_CURSOR_BUILDERS:
+        return signature
+
+    import re
+
+    return re.sub(
+        r"\bquest_spawn_entry_t\s*\*\s*entries\b",
+        "quest_spawn_entries_binja_t *table",
+        signature,
+        count=1,
+    )
+
+
 def _split_params(param_text: str) -> list[str]:
     parts: list[str] = []
     depth = 0
@@ -551,9 +758,12 @@ def _strip_param_names(signature: str) -> str:
         p = re.sub(r"\(\s*\*\s*[A-Za-z_][A-Za-z0-9_]*\s*\)", "(*)", p)
 
         ids = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", p)
-        if len(ids) >= 2 and ids[-1] not in keywords:
-            if not (len(ids) == 2 and ids[0] in {"struct", "union", "enum"}):
-                p = re.sub(rf"\b{re.escape(ids[-1])}\b\s*$", "", p).rstrip()
+        if (
+            len(ids) >= 2
+            and ids[-1] not in keywords
+            and not (len(ids) == 2 and ids[0] in {"struct", "union", "enum"})
+        ):
+            p = re.sub(rf"\b{re.escape(ids[-1])}\b\s*$", "", p).rstrip()
 
         new_params.append(p)
 
@@ -564,7 +774,18 @@ def _strip_param_names(signature: str) -> str:
 
 def _resolve_data_type(bv, type_text: str):
     _seed_common_types(bv)
-    return _parse_type_string(bv, _rewrite_type_tokens(type_text, bv))
+    rewritten = _rewrite_type_tokens(type_text, bv)
+    if rewritten.isidentifier():
+        named_type = _get_type_by_name(bv, rewritten)
+        if named_type is not None:
+            return named_type
+    return _parse_type_string(bv, rewritten)
+
+
+def _resolve_data_type_cached(bv, type_text: str, cache: dict[str, object]):
+    if type_text not in cache:
+        cache[type_text] = _resolve_data_type(bv, type_text)
+    return cache[type_text]
 
 
 def _deref_type(bv, type_obj):
@@ -598,10 +819,35 @@ def _find_enclosing_aggregate_range(
     return None
 
 
-def _apply_function_signature(bv, func, signature: str) -> None:
+def _types_equal(existing, desired) -> bool:
+    return existing == desired or str(existing) == str(desired)
+
+
+def _function_type_cache_key(signature: str) -> str:
+    import re
+
+    # A parsed function Type does not retain the declaration's top-level name.
+    # Collapse that name so declarations with identical parameter names/types
+    # share one Binary Ninja parser result.
+    return re.sub(
+        r"\b[A-Za-z_][A-Za-z0-9_]*\s*(?=\()",
+        "__mapped_function",
+        signature,
+        count=1,
+    )
+
+
+def _resolve_function_type(
+    bv,
+    signature: str,
+    cache: dict[str, object] | None = None,
+):
     _seed_common_types(bv)
 
     signature = _sanitize_signature(signature, bv)
+    cache_key = _function_type_cache_key(signature)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
     try:
         func_type = _parse_type_string(bv, signature)
     except Exception as first_exc:
@@ -615,15 +861,126 @@ def _apply_function_signature(bv, func, signature: str) -> None:
                 f"failed to parse function signature {signature!r} even after stripping parameter names",
             ) from second_exc
 
+    if cache is not None:
+        cache[cache_key] = func_type
+    return func_type
+
+
+def _apply_function_signature(
+    bv,
+    func,
+    signature: str,
+    cache: dict[str, object] | None = None,
+) -> bool:
+    func_type = _resolve_function_type(bv, signature, cache)
+    if _types_equal(func.type, func_type):
+        return False
     func.set_user_type(func_type)
+    return True
 
 
-def _set_function_comment(func, comment: str) -> None:
+def _written_variable_at(
+    func,
+    addr: int,
+    source_names: frozenset[str] = frozenset(),
+    mlil=None,
+):
+    """Resolve one SSA variable defined by an instruction address."""
+    if mlil is None:
+        mlil = getattr(func, "mlil_if_available", None)
+    if mlil is None:
+        mlil = func.mlil
+    if mlil is None:
+        raise LookupError("MLIL unavailable after map reanalysis")
+    ssa_form = mlil.ssa_form
+    if ssa_form is None:
+        raise LookupError("MLIL SSA unavailable after map reanalysis")
+
+    candidates = []
+    for block in ssa_form:
+        for instruction in block:
+            if instruction.address != addr:
+                continue
+            for ssa_var in instruction.vars_written:
+                var = getattr(ssa_var, "var", ssa_var)
+                if var not in candidates:
+                    candidates.append(var)
+
+    if source_names:
+        candidates = [
+            var for var in candidates if var.name in source_names
+        ]
+
+    if len(candidates) != 1:
+        selector = (
+            f" matching {sorted(source_names)!r}" if source_names else ""
+        )
+        raise LookupError(
+            f"expected one written variable at 0x{addr:x}{selector}, "
+            f"found {len(candidates)}",
+        )
+    return candidates[0]
+
+
+def _apply_function_local_types(
+    bv,
+    func,
+    entries: list[dict],
+    mlil=None,
+) -> int:
+    applied = 0
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise TypeError(f"unsupported local type entry: {entry!r}")
+        addr = _parse_address(entry.get("address"))
+        if addr is None:
+            raise ValueError(f"invalid local type address: {entry!r}")
+        type_text = entry.get("type") or ""
+        name = entry.get("name") or ""
+        if not type_text or not name:
+            raise ValueError(f"local type entry needs type and name: {entry!r}")
+
+        source_name = entry.get("source_name") or ""
+        source_names = (
+            frozenset((source_name, name)) if source_name else frozenset()
+        )
+        var = _written_variable_at(func, addr, source_names, mlil)
+        local_type = _resolve_data_type(bv, type_text)
+        if (
+            func.is_var_user_defined(var)
+            and var.name == name
+            and _types_equal(var.type, local_type)
+        ):
+            continue
+        func.create_user_var(var, local_type, name)
+        applied += 1
+    return applied
+
+
+def _set_function_comment(func, comment: str) -> bool:
+    if func.comment == comment:
+        return False
     func.comment = comment
+    return True
 
 
-def _set_data_comment(bv, addr: int, comment: str) -> None:
+def _set_data_comment(bv, addr: int, comment: str) -> bool:
+    if bv.get_comment_at(addr) == comment:
+        return False
     bv.set_comment_at(addr, comment)
+    return True
+
+
+def _set_data_type(bv, addr: int, data_type) -> bool:
+    existing = bv.get_data_var_at(addr)
+    if (
+        existing is not None
+        and existing.address == addr
+        and _types_equal(existing.type, data_type)
+    ):
+        return False
+    bv.define_user_data_var(addr, data_type)
+    return True
 
 
 def _ensure_address_valid(bv, addr: int) -> bool:
@@ -639,7 +996,50 @@ def _entry_label(row: dict, addr: int | None = None) -> str:
 
 
 def _update_analysis(bv) -> None:
+    if getattr(bv, "analysis_is_aborted", False):
+        try:
+            machine = bv.workflow.machine
+            machine.enable()
+        except Exception as exc:
+            raise RuntimeError(
+                "Binary Ninja analysis is aborted and its workflow could not be enabled",
+            ) from exc
+        if getattr(bv, "analysis_is_aborted", False):
+            raise RuntimeError(
+                "Binary Ninja analysis remained aborted after enabling its workflow",
+            )
+        _log_info("Re-enabled an aborted Binary Ninja analysis workflow")
     bv.update_analysis_and_wait()
+
+
+def _apply_analysis_skip_override(
+    func,
+    policy: str,
+    *,
+    retain_analysis: bool = True,
+) -> bool:
+    if policy != "never_skip":
+        raise ValueError(f"unsupported analysis_skip_override: {policy!r}")
+
+    current = func.analysis_skip_override
+    desired = type(current).NeverSkipFunctionAnalysis
+    changed = current != desired
+    if changed:
+        func.analysis_skip_override = desired
+
+    # The skip override prevents Binary Ninja from discarding fresh IL, but a
+    # large function whose advanced analysis was already released still needs
+    # an explicit retention request before reanalysis. Keep exactly one live
+    # request so replaying the map remains idempotent.
+    analysis_missing = retain_analysis and func.mlil_if_available is None
+    advanced_requests = getattr(func, "_advanced_analysis_requests", 0)
+    requested = analysis_missing and advanced_requests == 0
+    if requested:
+        func.request_advanced_analysis_data()
+
+    if requested:
+        func.reanalyze()
+    return changed or requested
 
 
 def _read_instruction_info(bv, func):
@@ -660,22 +1060,67 @@ def _is_direct_jump_wrapper(bv, func, addr: int) -> bool:
     return any(block.start == addr for block in func.basic_blocks)
 
 
+def _has_only_padding_before(bv, func, addr: int) -> bool:
+    if func.start >= addr:
+        return False
+    prefix = bv.read(func.start, addr - func.start)
+    return bool(prefix) and all(byte in (0x90, 0xCC) for byte in prefix)
+
+
+def _has_explicit_function_range(row: dict, addr: int) -> bool:
+    end = _parse_address(row.get("end"))
+    return end is not None and end > addr
+
+
+def _is_function_declaration(signature: str) -> bool:
+    """Distinguish function declarations from scalar/array/function-pointer data."""
+
+    open_paren = signature.find("(")
+    if open_paren < 0:
+        return False
+    return not signature[open_paren + 1 :].lstrip().startswith("*")
+
+
 def _resolve_function_for_name_row(bv, row: dict, addr: int):
     func = bv.get_function_at(addr)
-    if func is not None or not row.get("create"):
+    if func is not None:
         return func, False
 
     containing = list(bv.get_functions_containing(addr))
+    if len(containing) == 1 and _is_direct_jump_wrapper(bv, containing[0], addr):
+        bv.create_user_function(addr)
+        created = bv.get_function_at(addr)
+        if created is None:
+            raise RuntimeError(f"failed to create direct-jump target for {_entry_label(row, addr)}")
+        return created, True
+
     if not containing:
         bv.create_user_function(addr)
-        return bv.get_function_at(addr), True
+        created = bv.get_function_at(addr)
+        if created is None:
+            raise RuntimeError(f"failed to create {_entry_label(row, addr)}")
+        return created, True
+
+    # Some compiler/runtime entry points share code with a larger analyzer
+    # function. An explicit curated end makes that overlapping entry boundary
+    # authoritative without deleting the useful owner function.
+    if _has_explicit_function_range(row, addr):
+        bv.create_user_function(addr)
+        created = bv.get_function_at(addr)
+        if created is None:
+            raise RuntimeError(f"failed to create bounded overlap for {_entry_label(row, addr)}")
+        return created, True
 
     if len(containing) != 1:
         raise RuntimeError(f"refusing to create {_entry_label(row, addr)} inside multiple existing functions")
 
-    func = containing[0]
-    if _is_direct_jump_wrapper(bv, func, addr):
-        return func, False
+    if _has_only_padding_before(bv, containing[0], addr):
+        bv.remove_function(containing[0])
+        bv.create_user_function(addr)
+        created = bv.get_function_at(addr)
+        if created is None:
+            raise RuntimeError(f"failed to split padding-prefixed function for {_entry_label(row, addr)}")
+        return created, True
 
     raise RuntimeError(f"refusing to create {_entry_label(row, addr)} inside an existing function")
 
@@ -693,11 +1138,17 @@ def apply_name_map(bv, map_path: Path | None = None) -> dict[str, int]:
         "applied": 0,
         "renamed": 0,
         "signatures": 0,
+        "signature_errors": 0,
+        "local_types": 0,
+        "analysis_overrides": 0,
         "comments": 0,
         "created": 0,
         "missing": 0,
         "skipped": 0,
     }
+    pending_local_types = []
+    analysis_retainers = []
+    function_type_cache: dict[str, object] = {}
 
     for row in rows:
         if not isinstance(row, dict):
@@ -709,13 +1160,16 @@ def apply_name_map(bv, map_path: Path | None = None) -> dict[str, int]:
         addr = _parse_address(row.get("address"))
         if addr is None:
             raise ValueError(f"invalid function address in name map row: {row!r}")
+        signature = row.get("signature") or ""
+        if signature and not _is_function_declaration(signature):
+            raise TypeError(f"non-function declaration in name map row: {row!r}")
         func, created = _resolve_function_for_name_row(bv, row, addr)
         if created:
             stats["created"] += 1
         if func is None:
             raise LookupError(f"function not found for {_entry_label(row, addr)}")
 
-        changed = False
+        changed = created
         name = row.get("name") or ""
         if name and func.name != name:
             try:
@@ -725,23 +1179,57 @@ def apply_name_map(bv, map_path: Path | None = None) -> dict[str, int]:
             except Exception as exc:
                 raise RuntimeError(f"rename failed for {_entry_label(row, addr)}") from exc
 
-        signature = row.get("signature") or ""
+        signature = _presentation_signature(name, row.get("signature") or "")
         if signature:
+            signature_changed = False
             try:
-                _apply_function_signature(bv, func, signature)
-            except Exception as exc:
-                raise RuntimeError(f"signature parse/apply failed for {_entry_label(row, addr)}") from exc
-            stats["signatures"] += 1
-            changed = True
+                signature_changed = _apply_function_signature(
+                    bv,
+                    func,
+                    signature,
+                    function_type_cache,
+                )
+            except Exception as exc:  # noqa: BLE001 - isolate one rejected Binary Ninja signature
+                _log_error(f"Signature skipped for {_entry_label(row, addr)}: {exc}")
+                stats["signature_errors"] += 1
+            if signature_changed:
+                stats["signatures"] += 1
+                changed = True
 
         comment = row.get("comment") or ""
         if comment:
             try:
-                _set_function_comment(func, comment)
+                comment_changed = _set_function_comment(func, comment)
             except Exception as exc:
                 raise RuntimeError(f"comment apply failed for {_entry_label(row, addr)}") from exc
-            stats["comments"] += 1
-            changed = True
+            if comment_changed:
+                stats["comments"] += 1
+                changed = True
+
+        local_types = row.get("local_types") or []
+        if local_types and not isinstance(local_types, list):
+            raise TypeError(
+                f"local_types must be a list for {_entry_label(row, addr)}",
+            )
+
+        analysis_policy = row.get("analysis_skip_override") or ""
+        if analysis_policy:
+            try:
+                override_changed = _apply_analysis_skip_override(
+                    func,
+                    analysis_policy,
+                    retain_analysis=False,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"analysis override failed for {_entry_label(row, addr)}",
+                ) from exc
+            if override_changed:
+                stats["analysis_overrides"] += 1
+                changed = True
+
+        if local_types:
+            pending_local_types.append((local_types, row, addr))
 
         if changed:
             stats["applied"] += 1
@@ -749,9 +1237,58 @@ def apply_name_map(bv, map_path: Path | None = None) -> dict[str, int]:
     if stats["applied"]:
         _update_analysis(bv)
 
+    for entries, row, addr in pending_local_types:
+        # Updating function signatures and analysis policies can invalidate the
+        # Python Function wrapper retained above. Reacquire the current object
+        # before walking MLIL SSA for local-variable annotations.
+        func = bv.get_function_at(addr)
+        if func is None:
+            raise LookupError(
+                f"function disappeared before local type apply for "
+                f"{_entry_label(row, addr)}",
+            )
+        mlil = func.mlil_if_available
+        if mlil is None:
+            # Analyze missing local-type functions individually. Requesting
+            # advanced analysis for the whole annotated set at once can leave
+            # Binary Ninja's workers contending on internal type locks.
+            analysis_retainers.append(func)
+            if _apply_analysis_skip_override(func, "never_skip"):
+                stats["analysis_overrides"] += 1
+            _update_analysis(bv)
+            func = bv.get_function_at(addr)
+            if func is None:
+                raise LookupError(
+                    f"function disappeared after retained analysis for "
+                    f"{_entry_label(row, addr)}",
+                )
+            mlil = func.mlil_if_available
+            if mlil is None:
+                raise LookupError(
+                    f"MLIL unavailable after retained analysis for "
+                    f"{_entry_label(row, addr)}",
+                )
+        try:
+            stats["local_types"] += _apply_function_local_types(
+                bv,
+                func,
+                entries,
+                mlil,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"local type apply failed for {_entry_label(row, addr)}",
+            ) from exc
+
+    if stats["local_types"]:
+        _update_analysis(bv)
+
     _log_info(f"Applied name map: {map_path}")
     _log_info(
-        "Updated entries: {applied} (renamed {renamed}, signatures {signatures}, comments {comments})".format(
+        "Updated entries: {applied} (renamed {renamed}, signatures {signatures}, "
+        "signature errors {signature_errors}, "
+        "local types {local_types}, analysis overrides {analysis_overrides}, "
+        "comments {comments})".format(
             **stats,
         ),
     )
@@ -774,10 +1311,12 @@ def apply_data_map(bv, map_path: Path | None = None) -> dict[str, int]:
         "renamed": 0,
         "comments": 0,
         "types": 0,
+        "type_errors": 0,
         "missing": 0,
         "skipped": 0,
     }
     aggregate_ranges: list[tuple[int, int, str]] = []
+    data_type_cache: dict[str, object] = {}
 
     for row in rows:
         if not isinstance(row, dict):
@@ -795,11 +1334,12 @@ def apply_data_map(bv, map_path: Path | None = None) -> dict[str, int]:
         changed = False
         name = row.get("name") or ""
         if name:
+            symbol_type = _data_map_symbol_type(row)
             existing = bv.get_symbol_at(addr)
 
             if existing is None:
                 try:
-                    symbol = bn.Symbol(bn.SymbolType.DataSymbol, addr, name)
+                    symbol = bn.Symbol(symbol_type, addr, name)
                     bv.define_user_symbol(symbol)
                     stats["created"] += 1
                     changed = True
@@ -807,7 +1347,7 @@ def apply_data_map(bv, map_path: Path | None = None) -> dict[str, int]:
                     raise RuntimeError(f"create label failed for {_entry_label(row, addr)}") from exc
             elif existing.name != name:
                 try:
-                    symbol = bn.Symbol(bn.SymbolType.DataSymbol, addr, name)
+                    symbol = bn.Symbol(symbol_type, addr, name)
                     bv.define_user_symbol(symbol)
                     stats["renamed"] += 1
                     changed = True
@@ -817,30 +1357,46 @@ def apply_data_map(bv, map_path: Path | None = None) -> dict[str, int]:
         comment = row.get("comment") or ""
         if comment:
             try:
-                _set_data_comment(bv, addr, comment)
+                comment_changed = _set_data_comment(bv, addr, comment)
             except Exception as exc:
                 raise RuntimeError(f"comment apply failed for {_entry_label(row, addr)}") from exc
-            stats["comments"] += 1
-            changed = True
+            if comment_changed:
+                stats["comments"] += 1
+                changed = True
 
         type_text = row.get("type") or ""
         if type_text:
-            try:
-                data_type = _resolve_data_type(bv, type_text)
-            except Exception as exc:
-                raise RuntimeError(f"type resolution failed for {_entry_label(row, addr)} ({type_text})") from exc
             enclosing = _find_enclosing_aggregate_range(aggregate_ranges, addr)
-            if enclosing is None:
+            if enclosing is not None:
+                if not changed:
+                    stats["skipped"] += 1
+            else:
                 try:
-                    bv.define_user_data_var(addr, data_type)
-                    stats["types"] += 1
-                    changed = True
-                except Exception as exc:
-                    raise RuntimeError(f"type apply failed for {_entry_label(row, addr)} ({type_text})") from exc
-                if data_type.width > 1 and _is_aggregate_type(bv, data_type):
-                    aggregate_ranges.append((addr, addr + data_type.width, _entry_label(row, addr)))
-            elif not changed:
-                stats["skipped"] += 1
+                    data_type = _resolve_data_type_cached(
+                        bv,
+                        type_text,
+                        data_type_cache,
+                    )
+                except Exception as exc:  # noqa: BLE001 - isolate one rejected Binary Ninja data variable
+                    _log_error(f"Data type skipped for {_entry_label(row, addr)} ({type_text}): {exc}")
+                    stats["type_errors"] += 1
+                else:
+                    try:
+                        type_changed = _set_data_type(bv, addr, data_type)
+                    except Exception as exc:  # noqa: BLE001 - isolate one rejected Binary Ninja data variable
+                        _log_error(f"Data type skipped for {_entry_label(row, addr)} ({type_text}): {exc}")
+                        stats["type_errors"] += 1
+                    else:
+                        if type_changed:
+                            stats["types"] += 1
+                            changed = True
+                        if data_type.width > 1 and (
+                            name in _FORCED_DATA_AGGREGATES
+                            or _is_aggregate_type(bv, data_type)
+                        ):
+                            aggregate_ranges.append(
+                                (addr, addr + data_type.width, _entry_label(row, addr)),
+                            )
 
         if changed:
             stats["applied"] += 1
@@ -850,7 +1406,8 @@ def apply_data_map(bv, map_path: Path | None = None) -> dict[str, int]:
 
     _log_info(f"Applied data map: {map_path}")
     _log_info(
-        "Updated entries: {applied} (created {created}, renamed {renamed}, comments {comments}, types {types})".format(
+        "Updated entries: {applied} (created {created}, renamed {renamed}, comments {comments}, "
+        "types {types}, type errors {type_errors})".format(
             **stats,
         ),
     )

@@ -760,6 +760,7 @@ const BonusHudSlotState = struct {
     slide_x: f32 = -184.0,
     timer_value: f32 = 0.0,
     timer_value_alt: f32 = 0.0,
+    has_alt_timer: bool = false,
 };
 
 const HudBonusSpec = struct {
@@ -767,6 +768,7 @@ const HudBonusSpec = struct {
     icon_id: i32,
     timer_value: f32,
     timer_value_alt: f32 = 0.0,
+    has_alt_timer: bool = false,
 };
 
 const HudRuntimeState = struct {
@@ -831,6 +833,7 @@ const HudRuntimeState = struct {
             slot.icon_id = spec.icon_id;
             slot.timer_value = spec.timer_value;
             slot.timer_value_alt = spec.timer_value_alt;
+            slot.has_alt_timer = spec.has_alt_timer;
             slot.slide_x = @min(-2.0, slot.slide_x + @max(frame_dt, 0.0) * 350.0);
             matched[slot_index] = true;
         }
@@ -1468,12 +1471,12 @@ const App = struct {
                     true,
                     gameplay.runner.session.game_mode,
                     current_demo_info.visible,
-                    self.runtime.status.game_sequence_id,
+                    self.runtime.status.play_time_ms,
                     self.demo_trial_elapsed_ms,
                     dt_ms,
                 );
-                if (timer_tick.global_playtime_ms != self.runtime.status.game_sequence_id) {
-                    self.runtime.status.game_sequence_id = timer_tick.global_playtime_ms;
+                if (timer_tick.global_playtime_ms != self.runtime.status.play_time_ms) {
+                    self.runtime.status.play_time_ms = timer_tick.global_playtime_ms;
                     self.runtime.status_dirty = true;
                 }
                 self.demo_trial_elapsed_ms = timer_tick.quest_grace_elapsed_ms;
@@ -2153,7 +2156,7 @@ const App = struct {
         return demo_trial.demoTrialOverlayInfo(
             self.demo_enabled,
             gameplay.runner.session.game_mode,
-            self.runtime.status.game_sequence_id,
+            self.runtime.status.play_time_ms,
             self.demo_trial_elapsed_ms,
             gameplay.run_config.quest_level_key,
         );
@@ -2345,7 +2348,7 @@ const App = struct {
             self.player_count_override orelse @as(i32, @intCast(self.runtime.config.player_count));
         configured_run.player_count = livePlayerCountForMode(configured_run.game_mode, requested_player_count);
         configured_run.detail_preset = self.detail_preset_override orelse @as(i32, @intCast(std.math.clamp(self.runtime.config.detail_preset, @as(u32, 1), @as(u32, 5))));
-        configured_run.gore_disabled = if (self.gore_disabled_override) |disabled| @intFromBool(disabled) else @intCast(self.runtime.config.gore_disabled);
+        configured_run.violence_disabled = if (self.gore_disabled_override) |disabled| @intFromBool(disabled) else @intCast(self.runtime.config.violence_disabled);
         configured_run.hardcore = self.hardcore_override orelse (self.runtime.config.hardcore_flag != 0);
         configured_run.preserve_bugs = configured_run.preserve_bugs or self.preserve_bugs;
         configured_run.status_quest_unlock_index = @intCast(self.runtime.status.quest_unlock_index);
@@ -2539,7 +2542,7 @@ const App = struct {
             runner.session.game_mode,
             reason,
             run_config.preserve_bugs,
-            self.runtime.config.gore_disabled,
+            self.runtime.config.violence_disabled,
         );
         const save_error: ?[]const u8 = save_err: {
             self.runtime.saveStatusIfDirty() catch |err| break :save_err resultsStatusSaveErrorDetail(err);
@@ -2869,18 +2872,18 @@ const App = struct {
             runner.session.state.camera_shake_offset,
         );
         const entity_alpha: f32 = 1.0;
-        const fx_detail_0 = self.runtime.config.fx_detail_0 != 0;
-        const fx_detail_1 = self.runtime.config.fx_detail_1 != 0;
-        const fx_detail_2 = self.runtime.config.fx_detail_2 != 0;
+        const shadows_enabled = self.runtime.config.shadows_enabled != 0;
+        const flame_glow_enabled = self.runtime.config.flame_glow_enabled != 0;
+        const smoke_enabled = self.runtime.config.smoke_enabled != 0;
 
         camera.begin();
         drawWorld(runner, runtime_assets, ground);
         drawPlayers(runner, runtime_assets, self.network_live_render_time_s, entity_alpha, false);
-        drawCreatures(runner, runtime_assets, entity_alpha, fx_detail_0);
+        drawCreatures(runner, runtime_assets, entity_alpha, shadows_enabled);
         drawFreezeOverlay(runner, runtime_assets, entity_alpha);
         drawPlayers(runner, runtime_assets, self.network_live_render_time_s, entity_alpha, true);
-        drawProjectiles(runner, runtime_assets, self.network_live_render_time_s, entity_alpha, fx_detail_1);
-        drawWorldEffects(runner, runtime_assets, entity_alpha, fx_detail_1, fx_detail_2);
+        drawProjectiles(runner, runtime_assets, self.network_live_render_time_s, entity_alpha, flame_glow_enabled);
+        drawWorldEffects(runner, runtime_assets, entity_alpha, flame_glow_enabled, smoke_enabled);
         drawBonuses(runner, runtime_assets, self.network_live_render_time_s, entity_alpha);
         camera.end();
 
@@ -2926,9 +2929,9 @@ const App = struct {
                     .y = @floatFromInt(rl.getScreenHeight()),
                 },
             );
-            const fx_detail_0 = self.runtime.config.fx_detail_0 != 0;
-            const fx_detail_1 = self.runtime.config.fx_detail_1 != 0;
-            const fx_detail_2 = self.runtime.config.fx_detail_2 != 0;
+            const shadows_enabled = self.runtime.config.shadows_enabled != 0;
+            const flame_glow_enabled = self.runtime.config.flame_glow_enabled != 0;
+            const smoke_enabled = self.runtime.config.smoke_enabled != 0;
             const camera = buildWorldCamera(
                 runner.session.world_size,
                 &self.runtime.config,
@@ -2939,11 +2942,11 @@ const App = struct {
             camera.begin();
             drawWorld(runner, runtime_assets, if (gameplay.ground) |*ground| ground else null);
             drawPlayers(runner, runtime_assets, gameplay.render_time_s, entity_alpha, false);
-            drawCreatures(runner, runtime_assets, entity_alpha, fx_detail_0);
+            drawCreatures(runner, runtime_assets, entity_alpha, shadows_enabled);
             drawFreezeOverlay(runner, runtime_assets, entity_alpha);
             drawPlayers(runner, runtime_assets, gameplay.render_time_s, entity_alpha, true);
-            drawProjectiles(runner, runtime_assets, gameplay.render_time_s, entity_alpha, fx_detail_1);
-            drawWorldEffects(runner, runtime_assets, entity_alpha, fx_detail_1, fx_detail_2);
+            drawProjectiles(runner, runtime_assets, gameplay.render_time_s, entity_alpha, flame_glow_enabled);
+            drawWorldEffects(runner, runtime_assets, entity_alpha, flame_glow_enabled, smoke_enabled);
             drawBonuses(runner, runtime_assets, gameplay.render_time_s, entity_alpha);
             camera.end();
 
@@ -3514,7 +3517,7 @@ fn windowLaunchRunConfig(args: WindowArgs, config: formats.crimson_cfg.CrimsonCf
     const requested_player_count = args.player_count orelse @as(i32, @intCast(config.player_count));
     run_config.player_count = livePlayerCountForMode(run_config.game_mode, requested_player_count);
     run_config.detail_preset = args.detail_preset orelse @as(i32, @intCast(std.math.clamp(config.detail_preset, @as(u32, 1), @as(u32, 5))));
-    run_config.gore_disabled = if (args.gore_disabled) |disabled| @intFromBool(disabled) else @intCast(config.gore_disabled);
+    run_config.violence_disabled = if (args.gore_disabled) |disabled| @intFromBool(disabled) else @intCast(config.violence_disabled);
     run_config.hardcore = args.hardcore orelse (config.hardcore_flag != 0);
     run_config.preserve_bugs = args.preserve_bugs;
     run_config.status_quest_unlock_index = @intCast(status.quest_unlock_index);
@@ -3542,7 +3545,7 @@ fn runWindowStartSmoke(io: std.Io, config: formats.crimson_cfg.CrimsonCfg, statu
             quest_text,
             run_config.seed,
             run_config.detail_preset,
-            run_config.gore_disabled,
+            run_config.violence_disabled,
             run_config.hardcore,
             run_config.demo_mode_active,
             run_config.preserve_bugs,
@@ -4912,6 +4915,7 @@ fn nextDemoUpsellMessageIndex(index: usize) usize {
 fn setupDemoAttractVariant(runner: *live_runner.LiveRunner, variant_index_raw: i32) !void {
     const variant_index = @mod(variant_index_raw, demo_attract_variant_count);
     runner.session.creatures.reset();
+    runner.session.creatures.applyGameplayResetTargetPlayers(@intCast(runner.session.players().len));
     runner.session.bonuses.reset();
     runner.session.state.bonuses.weapon_power_up = 0.0;
 
@@ -5002,7 +5006,7 @@ fn setupDemoAttractVariant3(runner: *live_runner.LiveRunner) !void {
         if (@mod(idx, 3) != 0) {
             const x2 = @as(f32, @floatFromInt(runner.session.state.rng.randTagged(rng_callers.demo_setup_variant_3_alien_small_x) % 30)) + 32.0;
             const y2 = @as(f32, @floatFromInt(runner.session.state.rng.randTagged(rng_callers.demo_setup_variant_3_alien_small_y) % 899)) + 64.0;
-            try spawnDemoAttractCreature(runner, .alien_const_green_small_25, .{ .x = x2, .y = y2 }, false);
+            try spawnDemoAttractCreature(runner, .alien_small_green_man_25, .{ .x = x2, .y = y2 }, false);
         }
     }
 }
@@ -6025,7 +6029,7 @@ test "window network live runtime opens host session" {
 test "window network live runtime starts single-player lockstep host on update" {
     const io = std.Io.Threaded.global_single_threaded.io();
     var status = std.mem.zeroes(formats.game_cfg.Status);
-    status.game_sequence_id = 45;
+    status.play_time_ms = 45;
 
     var runtime = try NetworkLiveRuntime.initWithStatus(.{
         .role = .host,
@@ -6221,7 +6225,7 @@ test "window network live runtime carries quest level into network sessions" {
 test "window network host carries deterministic status into session start" {
     const io = std.Io.Threaded.global_single_threaded.io();
     var status = std.mem.zeroes(formats.game_cfg.Status);
-    status.game_sequence_id = 77;
+    status.play_time_ms = 77;
 
     var lockstep = try NetworkLiveRuntime.initWithStatus(.{
         .role = .host,
@@ -6235,7 +6239,7 @@ test "window network host carries deterministic status into session start" {
     defer lockstep.deinit(std.testing.allocator, io);
 
     switch (lockstep) {
-        .host => |host| try std.testing.expectEqual(@as(u32, 77), host.session.runtime.status.?.game_sequence_id),
+        .host => |host| try std.testing.expectEqual(@as(u32, 77), host.session.runtime.status.?.play_time_ms),
         .client, .rollback => return error.TestUnexpectedResult,
     }
 
@@ -6251,14 +6255,14 @@ test "window network host carries deterministic status into session start" {
     defer rollback.deinit(std.testing.allocator, io);
 
     switch (rollback) {
-        .rollback => |session| try std.testing.expectEqual(@as(u32, 77), session.session.options.status.?.game_sequence_id),
+        .rollback => |session| try std.testing.expectEqual(@as(u32, 77), session.session.options.status.?.play_time_ms),
         .host, .client => return error.TestUnexpectedResult,
     }
 }
 
 test "window network join ignores local deterministic status" {
     var status = std.mem.zeroes(formats.game_cfg.Status);
-    status.game_sequence_id = 77;
+    status.play_time_ms = 77;
 
     var rollback = try NetworkLiveRuntime.initWithStatus(.{
         .role = .join,
@@ -6856,6 +6860,24 @@ test "hudPlayerRowLayout stacks multiplayer rows like the Python HUD" {
     try std.testing.expectApproxEqAbs(@as(f32, 18.0), row1.ammo_base.y, 1e-6);
 }
 
+test "bonus HUD timer layout follows native alternate pointer presence" {
+    const single = bonusHudTimerLayout(false);
+    try std.testing.expectApproxEqAbs(@as(f32, 21.0), single.primary_y, 1e-6);
+    try std.testing.expectEqual(@as(?f32, null), single.secondary_y);
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), single.label_y, 1e-6);
+
+    const dual = bonusHudTimerLayout(true);
+    try std.testing.expectApproxEqAbs(@as(f32, 17.0), dual.primary_y, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 23.0), dual.secondary_y.?, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 2.0), dual.label_y, 1e-6);
+
+    var specs: [1]HudBonusSpec = undefined;
+    var count: usize = 0;
+    appendHudBonusSpec(&specs, &count, .shield, 1.0, 0.0, true);
+    try std.testing.expectEqual(@as(usize, 1), count);
+    try std.testing.expect(specs[0].has_alt_timer);
+}
+
 fn drawWorld(
     runner: *const live_runner.LiveRunner,
     runtime_assets: ?*const window_assets.RuntimeAssets,
@@ -7035,11 +7057,39 @@ fn drawPlayers(
     }
 }
 
+fn creatureRenderTint(
+    base_tint: [4]f32,
+    max_hp: f32,
+    energizer_timer: f32,
+    lifecycle_stage: f32,
+) [4]f32 {
+    var tint = base_tint;
+    if (energizer_timer > 0.0 and max_hp < 500.0) {
+        const t = @min(energizer_timer, 1.0);
+        tint[0] += (0.5 - tint[0]) * t;
+        tint[1] += (0.5 - tint[1]) * t;
+        tint[2] += (1.0 - tint[2]) * t;
+        tint[3] += (1.0 - tint[3]) * t;
+    }
+    if (lifecycle_stage < 0.0) {
+        tint[3] = @max(0.0, tint[3] + lifecycle_stage * 0.1);
+    }
+    return tint;
+}
+
+test "creature render tint preserves native tint and fade order" {
+    const tint = creatureRenderTint(.{ 0.25, 0.5, 0.75, 0.5 }, 100.0, 0.25, -1.0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3125), tint[0], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), tint[1], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8125), tint[2], 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.525), tint[3], 1e-6);
+}
+
 fn drawCreatures(
     runner: *const live_runner.LiveRunner,
     runtime_assets: ?*const window_assets.RuntimeAssets,
     entity_alpha: f32,
-    fx_detail_0: bool,
+    shadows_enabled: bool,
 ) void {
     const monster_vision_active = if (runner.player0Const()) |player|
         runtime_perks.perkActive(player, .monster_vision)
@@ -7063,21 +7113,16 @@ fn drawCreatures(
                 const cell = @as(f32, @floatFromInt(texture.width)) / 8.0;
                 if (cell > 0.0) {
                     const base_scale = creature.size / cell;
-                    var tint = rl.Color.white;
-                    if (runner.session.state.bonuses.energizer > 0.0 and creature.max_hp < 500.0) {
-                        tint = colorLerp(
-                            rl.Color.white,
-                            rl.Color.init(128, 128, 255, 255),
-                            @min(runner.session.state.bonuses.energizer, 1.0),
-                        );
-                    }
-                    if (creature.lifecycle_stage < 0.0) {
-                        tint = colorWithAlpha(tint, @max(0.0, 1.0 + creature.lifecycle_stage * 0.1));
-                    }
+                    const tint = creatureRenderTint(
+                        creature.tint,
+                        creature.max_hp,
+                        runner.session.state.bonuses.energizer,
+                        creature.lifecycle_stage,
+                    );
                     const shadow_enabled = !monster_vision_active;
-                    if (shadow_enabled and fx_detail_0) {
+                    if (shadow_enabled and shadows_enabled) {
                         const is_long = runtime_anim.creatureAnimIsLongStrip(creature.flags);
-                        var shadow_alpha: f32 = 0.4;
+                        var shadow_alpha: f32 = creature.tint[3] * 0.4;
                         if (creature.lifecycle_stage < 0.0) {
                             shadow_alpha = @max(
                                 @as(f32, 0.0),
@@ -7095,7 +7140,7 @@ fn drawCreatures(
                                 },
                                 base_scale * 1.07,
                                 creature.heading - std.math.pi / 2.0,
-                                colorWithAlpha(rl.Color.black, shadow_alpha),
+                                colorWithAlpha(rl.Color.black, shadow_alpha * entity_alpha),
                             );
                         }
                     }
@@ -7106,7 +7151,7 @@ fn drawCreatures(
                         toRlVec(creature.pos),
                         base_scale,
                         creature.heading - std.math.pi / 2.0,
-                        colorWithAlpha(tint, entity_alpha),
+                        colorFromUnitRgba(tint[0], tint[1], tint[2], tint[3] * entity_alpha),
                     );
                     continue;
                 }
@@ -7148,7 +7193,7 @@ fn drawProjectiles(
     runtime_assets: ?*const window_assets.RuntimeAssets,
     render_time_s: f32,
     entity_alpha: f32,
-    fx_detail_1: bool,
+    flame_glow_enabled: bool,
 ) void {
     for (runner.session.projectiles.entries, 0..) |projectile, proj_index| {
         if (!projectile.active) continue;
@@ -7158,7 +7203,7 @@ fn drawProjectiles(
                 .assets = assets,
                 .render_time_s = render_time_s,
                 .entity_alpha = entity_alpha,
-                .fx_detail_1 = fx_detail_1,
+                .flame_glow_enabled = flame_glow_enabled,
             })) continue;
         }
         rl.drawCircleV(toRlVec(projectile.pos), 3.0, colorWithAlpha(projectile_color, entity_alpha));
@@ -7169,16 +7214,16 @@ fn drawWorldEffects(
     runner: *const live_runner.LiveRunner,
     runtime_assets: ?*const window_assets.RuntimeAssets,
     entity_alpha: f32,
-    fx_detail_1: bool,
-    fx_detail_2: bool,
+    flame_glow_enabled: bool,
+    smoke_enabled: bool,
 ) void {
     if (runtime_assets) |assets| {
         window_effects.drawParticlePool(.{
             .session = &runner.session,
             .assets = assets,
             .entity_alpha = entity_alpha,
-            .fx_detail_1 = fx_detail_1,
-            .fx_detail_2 = fx_detail_2,
+            .flame_glow_enabled = flame_glow_enabled,
+            .smoke_enabled = smoke_enabled,
         });
     }
     for (runner.session.secondary_projectiles.entries) |projectile| {
@@ -7188,7 +7233,7 @@ fn drawWorldEffects(
                 .session = &runner.session,
                 .assets = assets,
                 .entity_alpha = entity_alpha,
-                .fx_detail_1 = fx_detail_1,
+                .flame_glow_enabled = flame_glow_enabled,
             })) continue;
         }
         rl.drawCircleV(toRlVec(projectile.pos), 6.0, colorWithAlpha(secondary_projectile_color, entity_alpha));
@@ -7198,15 +7243,15 @@ fn drawWorldEffects(
             .session = &runner.session,
             .assets = assets,
             .entity_alpha = entity_alpha,
-            .fx_detail_1 = fx_detail_1,
-            .fx_detail_2 = fx_detail_2,
+            .flame_glow_enabled = flame_glow_enabled,
+            .smoke_enabled = smoke_enabled,
         });
         window_effects.drawEffectPool(.{
             .session = &runner.session,
             .assets = assets,
             .entity_alpha = entity_alpha,
-            .fx_detail_1 = fx_detail_1,
-            .fx_detail_2 = fx_detail_2,
+            .flame_glow_enabled = flame_glow_enabled,
+            .smoke_enabled = smoke_enabled,
         });
     }
 }
@@ -7787,11 +7832,11 @@ fn collectHudBonusSpecs(session: *const runtime_session.DeterministicSession, de
     const state = &session.state;
     const players = session.playersConst();
 
-    appendHudBonusSpec(dest, count, .weapon_power_up, state.bonuses.weapon_power_up, 0.0);
-    appendHudBonusSpec(dest, count, .reflex_boost, state.bonuses.reflex_boost, 0.0);
-    appendHudBonusSpec(dest, count, .energizer, state.bonuses.energizer, 0.0);
-    appendHudBonusSpec(dest, count, .double_experience, state.bonuses.double_experience, 0.0);
-    appendHudBonusSpec(dest, count, .freeze, state.bonuses.freeze, 0.0);
+    appendHudBonusSpec(dest, count, .weapon_power_up, state.bonuses.weapon_power_up, 0.0, false);
+    appendHudBonusSpec(dest, count, .reflex_boost, state.bonuses.reflex_boost, 0.0, false);
+    appendHudBonusSpec(dest, count, .energizer, state.bonuses.energizer, 0.0, false);
+    appendHudBonusSpec(dest, count, .double_experience, state.bonuses.double_experience, 0.0, false);
+    appendHudBonusSpec(dest, count, .freeze, state.bonuses.freeze, 0.0, false);
 
     const player0 = if (players.len > 0) players[0] else null;
     const player1 = if (players.len > 1) players[1] else null;
@@ -7801,6 +7846,7 @@ fn collectHudBonusSpecs(session: *const runtime_session.DeterministicSession, de
         .fire_bullets,
         if (player0) |player| player.fire_bullets_timer else 0.0,
         if (player1) |player| player.fire_bullets_timer else 0.0,
+        player1 != null,
     );
     appendHudBonusSpec(
         dest,
@@ -7808,6 +7854,7 @@ fn collectHudBonusSpecs(session: *const runtime_session.DeterministicSession, de
         .shield,
         if (player0) |player| player.shield_timer else 0.0,
         if (player1) |player| player.shield_timer else 0.0,
+        player1 != null,
     );
     appendHudBonusSpec(
         dest,
@@ -7815,10 +7862,11 @@ fn collectHudBonusSpecs(session: *const runtime_session.DeterministicSession, de
         .speed,
         if (player0) |player| player.speed_bonus_timer else 0.0,
         if (player1) |player| player.speed_bonus_timer else 0.0,
+        player1 != null,
     );
 }
 
-fn appendHudBonusSpec(dest: []HudBonusSpec, count: *usize, bonus_id: game_ids.BonusId, timer_value: f32, timer_value_alt: f32) void {
+fn appendHudBonusSpec(dest: []HudBonusSpec, count: *usize, bonus_id: game_ids.BonusId, timer_value: f32, timer_value_alt: f32, has_alt_timer: bool) void {
     if (!(timer_value > 0.0 or timer_value_alt > 0.0)) return;
     if (count.* >= dest.len) return;
     dest[count.*] = .{
@@ -7826,6 +7874,7 @@ fn appendHudBonusSpec(dest: []HudBonusSpec, count: *usize, bonus_id: game_ids.Bo
         .icon_id = hudBonusIconId(bonus_id) orelse -1,
         .timer_value = @max(timer_value, 0.0),
         .timer_value_alt = @max(timer_value_alt, 0.0),
+        .has_alt_timer = has_alt_timer,
     };
     count.* += 1;
 }
@@ -7913,6 +7962,19 @@ fn drawQuestHud(runner: *const live_runner.LiveRunner, update: live_runner.Frame
     }
 }
 
+const BonusHudTimerLayout = struct {
+    primary_y: f32,
+    secondary_y: ?f32,
+    label_y: f32,
+};
+
+fn bonusHudTimerLayout(has_alt_timer: bool) BonusHudTimerLayout {
+    if (has_alt_timer) {
+        return .{ .primary_y = 17.0, .secondary_y = 23.0, .label_y = 2.0 };
+    }
+    return .{ .primary_y = 21.0, .secondary_y = null, .label_y = 6.0 };
+}
+
 fn drawBonusHud(runner: *const live_runner.LiveRunner, hud_state: *const HudRuntimeState, assets: *const window_assets.RuntimeAssets, scale: f32) void {
     var bonus_y: f32 = if (runner.session.game_mode == .quests) hs(201.0, scale) else hs(121.0, scale);
     const bonuses_texture = assets.texture(.bonuses);
@@ -7935,10 +7997,11 @@ fn drawBonusHud(runner: *const live_runner.LiveRunner, hud_state: *const HudRunt
                 rl.Color.white,
             );
         }
-        drawSmallText(assets, game_ids.bonusDisplayName(slot.bonus_id, runner.session.state.preserve_bugs), slide_x + hs(36.0, scale), bonus_y + hs(6.0, scale), HudTextColor.primary);
-        drawProgressBar(rl.Vector2.init(slide_x + hs(36.0, scale), bonus_y + hs(21.0, scale)), hs(100.0, scale), slot.timer_value * 0.05, rl.Color.init(26, 77, 153, 179), scale);
-        if (slot.timer_value_alt > 0.0) {
-            drawProgressBar(rl.Vector2.init(slide_x + hs(36.0, scale), bonus_y + hs(27.0, scale)), hs(100.0, scale), slot.timer_value_alt * 0.05, rl.Color.init(26, 77, 153, 179), scale);
+        const timer_layout = bonusHudTimerLayout(slot.has_alt_timer);
+        drawSmallText(assets, game_ids.bonusDisplayName(slot.bonus_id, runner.session.state.preserve_bugs), slide_x + hs(36.0, scale), bonus_y + hs(timer_layout.label_y, scale), HudTextColor.primary);
+        drawProgressBar(rl.Vector2.init(slide_x + hs(36.0, scale), bonus_y + hs(timer_layout.primary_y, scale)), hs(100.0, scale), slot.timer_value * 0.05, rl.Color.init(26, 77, 153, 179), scale);
+        if (timer_layout.secondary_y) |secondary_y| {
+            drawProgressBar(rl.Vector2.init(slide_x + hs(36.0, scale), bonus_y + hs(secondary_y, scale)), hs(100.0, scale), slot.timer_value_alt * 0.05, rl.Color.init(26, 77, 153, 179), scale);
         }
         bonus_y += hs(52.0, scale);
     }

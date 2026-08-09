@@ -18,7 +18,7 @@ class StubCreature:
     ai_mode: CreatureAiMode = CreatureAiMode.ORBIT_PLAYER
     link_index: int = 0
     target_offset: Vec2 | None = None
-    phase_seed: float = 0.0
+    phase_seed: int = 0
     orbit_angle: float = 0.0
     orbit_radius: float = 0.0
     heading: float = 0.0
@@ -55,7 +55,7 @@ def test_ai7_tick_link_timer_positive_rolls_back_negative() -> None:
 
 
 def test_ai_mode_0_orbits_when_close() -> None:
-    c = StubCreature(pos=Vec2(), ai_mode=CreatureAiMode.ORBIT_PLAYER, phase_seed=0.0)
+    c = StubCreature(pos=Vec2(), ai_mode=CreatureAiMode.ORBIT_PLAYER, phase_seed=0)
     ai = creature_ai_update_target(c, player_pos=Vec2(100.0, 0.0), creatures=[c], dt=1.0 / 60.0)
     assert_float_close(ai.move_scale, 1.0)
     assert_float_close(c.target.x, 185.0)
@@ -104,6 +104,27 @@ def test_ai_mode_6_orbits_linked_creature() -> None:
     assert_float_close(c.target.y, 0.0)
 
 
+def test_ai_mode_6_keeps_native_orbit_link_x87_staging() -> None:
+    link = StubCreature(
+        pos=Vec2(49.17198181152344, -107.8695297241211),
+        hp=10.0,
+    )
+    c = StubCreature(
+        pos=Vec2(),
+        ai_mode=CreatureAiMode.ORBIT_LINK,
+        link_index=0,
+        orbit_angle=-4.216711521148682,
+        orbit_radius=101.34416198730469,
+        heading=-2.0916693210601807,
+    )
+
+    creature_ai_update_target(c, player_pos=Vec2(), creatures=[link, c], dt=1.0 / 60.0)
+
+    assert c.force_target == 0
+    assert c.target.x == 150.48397827148438
+    assert c.target.y == -110.4227066040039
+
+
 def test_ai_mode_7_orbit_radius_timer_counts_down() -> None:
     c = StubCreature(pos=Vec2(), ai_mode=CreatureAiMode.HOLD_TIMER, orbit_radius=1.5)
     ai = creature_ai_update_target(c, player_pos=Vec2(100.0, 0.0), creatures=[c], dt=0.5)
@@ -113,8 +134,46 @@ def test_ai_mode_7_orbit_radius_timer_counts_down() -> None:
 
 
 def test_ai_targets_and_heading_are_float32_quantized() -> None:
-    c = StubCreature(pos=Vec2(0.125, -0.25), ai_mode=CreatureAiMode.ORBIT_PLAYER, phase_seed=13.0)
+    c = StubCreature(pos=Vec2(0.125, -0.25), ai_mode=CreatureAiMode.ORBIT_PLAYER, phase_seed=13)
     creature_ai_update_target(c, player_pos=Vec2(123.5, 456.25), creatures=[c], dt=1.0 / 60.0)
     assert_float_close(c.target.x, f32(c.target.x))
     assert_float_close(c.target.y, f32(c.target.y))
     assert_float_close(c.target_heading, f32(c.target_heading))
+
+
+def test_ai_orbit_distance_uses_native_per_operation_f32_rounding() -> None:
+    c = StubCreature(
+        pos=Vec2(-40.0, 305.0),
+        ai_mode=CreatureAiMode.ORBIT_PLAYER,
+        phase_seed=50,
+    )
+
+    creature_ai_update_target(
+        c,
+        player_pos=Vec2(506.59539794921875, 535.6737060546875),
+        creatures=[c],
+        dt=0.03200000151991844,
+    )
+
+    assert c.target.x == 2.31048583984375
+    assert c.target.y == 535.673583984375
+    assert c.target_heading == 2.9601876735687256
+
+
+def test_ai_orbit_target_keeps_trig_wide_until_first_multiply() -> None:
+    c = StubCreature(
+        pos=Vec2(-30.34019660949707, 845.064208984375),
+        ai_mode=CreatureAiMode.ORBIT_PLAYER,
+        phase_seed=316,
+    )
+
+    creature_ai_update_target(
+        c,
+        player_pos=Vec2(364.858154296875, 678.1124267578125),
+        creatures=[c],
+        dt=0.04100000113248825,
+    )
+
+    assert c.target.x == 69.8948974609375
+    assert c.target.y == 463.69183349609375
+    assert c.target_heading == 0.25701460242271423

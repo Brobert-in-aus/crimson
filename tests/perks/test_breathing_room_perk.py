@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from crimson.creatures.runtime import CREATURE_LIFECYCLE_ALIVE, CreatureState
 from crimson.gameplay import GameplayState
+from crimson.math_parity import f32
 from crimson.perks import PerkId
 from crimson.perks.runtime.apply import perk_apply
 from crimson.sim.state_types import PlayerState
@@ -33,3 +34,28 @@ def test_perk_apply_breathing_room_reduces_health_and_starts_creature_death_stag
     assert_float_close(creatures[2].lifecycle_stage, -5.0 - dt)
     assert state.bonus_spawn_guard is False
     assert player.perk_counts[int(PerkId.BREATHING_ROOM)] == 1
+
+
+def test_perk_apply_breathing_room_rounds_each_native_float_operation() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(), health=1.0)
+
+    perk_apply(state, [player], PerkId.BREATHING_ROOM)
+
+    assert player.health == f32(0.3333333134651184)
+
+
+def test_perk_apply_breathing_room_rounds_creature_lifecycle_store() -> None:
+    state = GameplayState()
+    player = PlayerState(index=0, pos=Vec2(), health=90.0)
+    creature = CreatureState(active=True, lifecycle_stage=1.2345678)
+
+    perk_apply(
+        state,
+        [player],
+        PerkId.BREATHING_ROOM,
+        dt=0.1,
+        creatures=[creature],
+    )
+
+    assert creature.lifecycle_stage == f32(f32(1.2345678) - f32(0.1))

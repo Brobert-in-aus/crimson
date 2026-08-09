@@ -45,7 +45,7 @@ pub fn buildHighscoreRecordForGameOver(
 
     var record_rng = state.rng;
     var record = highscores.HighScoreRecord.blankWithRandValue(record_rng.rand());
-    record.setScoreXp(@intCast(@max(0, player.experience)));
+    record.setScoreXp(@intCast(@max(0, state.highscore_score_xp)));
     record.setSurvivalElapsedMs(@intCast(@max(0, survival_elapsed_ms)));
     record.setCreatureKillCount(@intCast(@max(0, creature_kill_count)));
     record.setMostUsedWeaponId(
@@ -104,10 +104,11 @@ test "build highscore record uses weapon stats and shots" {
         .index = 0,
         .pos = .{},
     };
-    player.experience = 1234;
+    player.experience = 9999;
     player.weapon.weapon_id = .pistol;
 
-    state.weapon_shots_fired[0][2] = 10;
+    state.highscore_score_xp = 1234;
+    state.weapon_usage_time[2] = 10;
     state.shots_fired[0] = 20;
     state.shots_hit[0] = 15;
 

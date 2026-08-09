@@ -1,6 +1,6 @@
 'use strict';
 
-// Mod API runtime probe for Crimsonland (Frida 17.5.2+).
+// Mod API runtime probe for Crimsonland (Frida 17.15.4).
 //
 // Goal: confirm mod API vtable slots (log/cvar/texture/sound/music/key/exec + unknowns)
 // and capture arguments/returns in one pass while running mods.
@@ -50,8 +50,8 @@ const LINK_BASE = {
 };
 
 const ADDR = {
-  mod_api_context: 0x00481a80,      // DAT_00481a80
-  plugin_interface_ptr: 0x004824d4, // DAT_004824d4
+  mod_api_context: 0x00481a80,
+  plugin_interface_ptr: 0x004824d4,
 };
 
 const MOD_API_KNOWN = {

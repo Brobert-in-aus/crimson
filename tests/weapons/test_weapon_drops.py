@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from crimson.game_modes import GameMode
 from crimson.gameplay import GameplayState
 from crimson.persistence import save_status
@@ -75,6 +77,16 @@ def test_prepare_weapon_availability_unlocks_quest_weapon_ids() -> None:
     assert not state.weapon_available[WeaponId.SHOTGUN]
 
 
+def test_prepare_weapon_availability_keeps_full_version_unlocks_in_demo_mode() -> None:
+    status = _status_default()
+    status.quest_unlock_index_full = 0x28
+    state = GameplayState(status=status, demo_mode_active=True)
+
+    prepare_weapon_availability(state)
+
+    assert state.weapon_available[WeaponId.SPLITTER_GUN]
+
+
 def test_weapon_pick_random_available_enforces_unlocked() -> None:
     status = _status_default()
     status.quest_unlock_index = 0
@@ -88,6 +100,23 @@ def test_weapon_pick_random_available_enforces_unlocked() -> None:
 
     assert picked == WeaponId.PISTOL
     assert isinstance(picked, WeaponId)
+
+
+def test_weapon_pick_random_available_rejects_uninitialized_availability() -> None:
+    rng = _SeqRng([0])
+    state = GameplayState(rng=_as_rng(rng))
+
+    with pytest.raises(RuntimeError, match="call prepare_weapon_availability"):
+        weapon_pick_random_available(state)
+
+    assert rng._idx == 0
+
+
+def test_weapon_pick_random_available_has_no_synthetic_retry_cap() -> None:
+    state = GameplayState(rng=_as_rng(_SeqRng([1] * 1001 + [0])))
+    state.weapon_available[WeaponId.PISTOL] = True
+
+    assert weapon_pick_random_available(state) == WeaponId.PISTOL
 
 
 def test_weapon_pick_random_available_rerolls_used_weapons() -> None:

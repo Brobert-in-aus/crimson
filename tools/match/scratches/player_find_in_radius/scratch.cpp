@@ -1,27 +1,38 @@
 #include <math.h>
 #include "crimsonland_gameplay.h"
 
-extern "C" int player_find_in_radius(int owner_id, float *pos, float radius)
+static __inline float vec2_distance(const vec2f_t *lhs, const vec2f_t *rhs)
+{
+    float dx = lhs->x - rhs->x;
+    float dy = lhs->y - rhs->y;
+    float distance_sq = dx * dx;
+    distance_sq += dy * dy;
+    return (float)sqrt(distance_sq);
+}
+
+extern "C" int player_find_in_radius(
+    int owner_id,
+    const vec2f_t *pos,
+    float radius)
 {
     int skip_index = -1 - owner_id;
     int player_index = 0;
 
-    if (config_blob.player_count <= 0) {
-        return -1;
-    }
-
-    float *health = &player_state_table[0].health;
-    do {
-        if (player_index != skip_index && *health > 0.0f) {
-            float dx = health[-4] - pos[0];
-            float dy = health[-3] - pos[1];
-            if ((float)sqrt(dy * dy + dx * dx) - radius < health[4] * 0.14285715f + 3.0f) {
-                return player_index;
-            }
+    while (player_index < config_blob.player_count) {
+        if (player_index != skip_index
+            && player_state_table[player_index].health > 0.0f
+            && vec2_distance(
+                    &player_state_table[player_index].position,
+                    pos)
+                    - radius
+                < player_state_table[player_index].size * 0.14285715f + 3.0f) {
+            goto found;
         }
         ++player_index;
-        health += sizeof(player_state_t) / sizeof(float);
-    } while (player_index < config_blob.player_count);
+    }
 
     return -1;
+
+found:
+    return player_index;
 }

@@ -53,16 +53,16 @@ const tutorial_stage_text = [_][]const u8{
     "Now pick up the bonuses by walking over them",
     "Now learn to shoot and move at the same time.\nClick the left Mouse button to shoot.",
     "Now, move the mouse to aim at the monsters",
-    "It will help you to move and shoot at the same time. Just keep moving!",
-    "Now let's learn about Perks. You'll receive a perk when you gain enough experience points.",
-    "Perks can give you extra abilities, or boost your skills. Choose wisely!",
-    "Great! Now you are ready to start playing Crimsonland",
+    "It will help you to move and shoot and aim at the same time, so practice!",
+    "Now let's learn about Perks. You can pick a Perk by clicking\nthe 'level up' sign at the upper right corner of the screen.",
+    "Perks can give you extra abilities that help\nyou survive in Crimsonland.",
+    "Great! Now you are ready to start playing Crimsonland!",
 };
 
 const tutorial_hint_text = [_][]const u8{
-    "This is the speed powerup, it makes you move faster!",
-    "This is a weapon powerup. Picking it up gives you a new weapon.",
-    "This powerup doubles all experience points you gain while it's active.",
+    "This is the speed powerup, it makes you move faster for\na limited amount of time.",
+    "This is a weapon powerup. Picking it up gets\nyou another weapon. This one is a submachine gun.",
+    "This powerup doubles all experience points gained when\nx2 powerup is active.",
     "This is the nuke powerup, picking it up causes a huge\nexplosion harming all monsters nearby!",
     "Reflex Boost powerup slows down time giving you a chance to react better",
     "",
@@ -70,9 +70,9 @@ const tutorial_hint_text = [_][]const u8{
 };
 
 const tutorial_hint_text_bugs = [_][]const u8{
-    "This is the speed powerup, it makes you move faster!",
-    "This is a weapon powerup. Picking it you gets a new weapon.",
-    "This powerup doubles all experience points you gain while it's active.",
+    "This is the speed powerup, it makes you move faster for\na limited amount of time.",
+    "This is a weapon powerup. Picking it you gets\nyou another weapon. This one is a submachine gun.",
+    "This powerup doubles all experience points gained when\nx2 powerup is active.",
     "This is the nuke powerup, picking it up causes a huge\nexposion harming all monsters nearby!",
     "Reflex Boost powerup slows down time giving you a chance to react better",
     "",
@@ -152,14 +152,14 @@ pub fn tutorialStage5BonusCarrierConfig(repeat_spawn_count: i32) ?struct { bonus
 fn buildTutorialStage3FireSpawns(actions: *TutorialFrameActions) void {
     const heading = std.math.pi;
     actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = -164.0, .y = 412.0 }, .heading = heading });
-    actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_pale_green_26), .pos = .{ .x = -184.0, .y = 512.0 }, .heading = heading });
+    actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_small_gray_26), .pos = .{ .x = -184.0, .y = 512.0 }, .heading = heading });
     actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = -154.0, .y = 612.0 }, .heading = heading });
 }
 
 fn buildTutorialStage4ClearSpawns(actions: *TutorialFrameActions) void {
     const heading = std.math.pi;
     actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 1188.0, .y = 412.0 }, .heading = heading });
-    actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_pale_green_26), .pos = .{ .x = 1208.0, .y = 512.0 }, .heading = heading });
+    actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_small_gray_26), .pos = .{ .x = 1208.0, .y = 512.0 }, .heading = heading });
     actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 1178.0, .y = 612.0 }, .heading = heading });
 }
 
@@ -168,19 +168,19 @@ fn buildTutorialStage5RepeatSpawns(actions: *TutorialFrameActions, repeat_spawn_
     const heading = std.math.pi;
     if ((repeat_spawn_count & 1) == 0) {
         if (repeat_spawn_count < 6) {
-            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_weapon_bonus_27), .pos = .{ .x = 1056.0, .y = 1056.0 }, .heading = heading });
+            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_bonus_carrier_27), .pos = .{ .x = 1056.0, .y = 1056.0 }, .heading = heading });
         }
         actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 1188.0, .y = 1136.0 }, .heading = heading });
-        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_pale_green_26), .pos = .{ .x = 1208.0, .y = 512.0 }, .heading = heading });
+        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_small_gray_26), .pos = .{ .x = 1208.0, .y = 512.0 }, .heading = heading });
         actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 1178.0, .y = 612.0 }, .heading = heading });
         if (repeat_spawn_count == 4) {
-            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.spider_sp1_const_blue_40), .pos = .{ .x = 512.0, .y = 1056.0 }, .heading = heading });
+            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.spider_small_blue_40), .pos = .{ .x = 512.0, .y = 1056.0 }, .heading = heading });
         }
         return;
     }
 
     if (repeat_spawn_count < 6) {
-        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_weapon_bonus_27), .pos = .{ .x = -32.0, .y = 1056.0 }, .heading = heading });
+        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_bonus_carrier_27), .pos = .{ .x = -32.0, .y = 1056.0 }, .heading = heading });
     }
     buildTutorialStage3FireSpawns(actions);
 }
@@ -198,15 +198,18 @@ fn tickHint(
     frame_dt_ms: i32,
     hint_bonus_died: bool,
 ) void {
-    if (!state.hint_fade_in and hint_bonus_died) {
-        state.hint_fade_in = true;
-        state.hint_index += 1;
-        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 128.0, .y = 128.0 }, .heading = std.math.pi });
-        actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_pale_green_26), .pos = .{ .x = 152.0, .y = 160.0 }, .heading = std.math.pi });
-    }
-
     const delta = frame_dt_ms * 3;
-    state.hint_alpha += if (state.hint_fade_in) delta else -delta;
+    if (!state.hint_fade_in) {
+        if (hint_bonus_died) {
+            state.hint_fade_in = true;
+            state.hint_index += 1;
+            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_const_green_24), .pos = .{ .x = 128.0, .y = 128.0 }, .heading = std.math.pi });
+            actions.appendSpawnTemplate(.{ .template_id = @intFromEnum(spawn_mod.SpawnId.alien_small_gray_26), .pos = .{ .x = 152.0, .y = 160.0 }, .heading = std.math.pi });
+        }
+        state.hint_alpha -= delta;
+    } else {
+        state.hint_alpha += delta;
+    }
     state.hint_alpha = std.math.clamp(state.hint_alpha, @as(i32, 0), @as(i32, 1000));
     actions.hint_index = state.hint_index;
     actions.hint_alpha = if (hintText(state.hint_index, state.preserve_bugs).len == 0)
@@ -322,6 +325,50 @@ pub fn tickTutorialTimeline(
     };
 }
 
+test "tutorial copy preserves the native script" {
+    try std.testing.expectEqualStrings(
+        "It will help you to move and shoot and aim at the same time, so practice!",
+        promptText(5),
+    );
+    try std.testing.expectEqualStrings(
+        "Now let's learn about Perks. You can pick a Perk by clicking\nthe 'level up' sign at the upper right corner of the screen.",
+        promptText(6),
+    );
+    try std.testing.expectEqualStrings(
+        "Perks can give you extra abilities that help\nyou survive in Crimsonland.",
+        promptText(7),
+    );
+    try std.testing.expectEqualStrings(
+        "Great! Now you are ready to start playing Crimsonland!",
+        promptText(8),
+    );
+
+    try std.testing.expectEqualStrings(
+        "This is the speed powerup, it makes you move faster for\na limited amount of time.",
+        hintText(0, true),
+    );
+    try std.testing.expectEqualStrings(
+        "This is a weapon powerup. Picking it you gets\nyou another weapon. This one is a submachine gun.",
+        hintText(1, true),
+    );
+    try std.testing.expectEqualStrings(
+        "This powerup doubles all experience points gained when\nx2 powerup is active.",
+        hintText(2, true),
+    );
+    try std.testing.expectEqualStrings(
+        "This is the nuke powerup, picking it up causes a huge\nexposion harming all monsters nearby!",
+        hintText(3, true),
+    );
+    try std.testing.expectEqualStrings(
+        "This is a weapon powerup. Picking it up gets\nyou another weapon. This one is a submachine gun.",
+        hintText(1, false),
+    );
+    try std.testing.expectEqualStrings(
+        "This is the nuke powerup, picking it up causes a huge\nexplosion harming all monsters nearby!",
+        hintText(3, false),
+    );
+}
+
 test "tutorial stage 1 movement spawns three point bonuses" {
     const result = tickTutorialTimeline(.{
         .stage_index = 1,
@@ -329,4 +376,24 @@ test "tutorial stage 1 movement spawns three point bonuses" {
     }, 16, true, false, false, false, 0, false);
     try std.testing.expectEqual(@as(usize, 3), result.actions.spawn_bonus_count);
     try std.testing.expect(result.actions.play_levelup_sfx);
+}
+
+test "tutorial hint fade changes direction after the carrier death frame" {
+    var state: tutorial_state.TutorialState = .{
+        .hint_index = -1,
+        .hint_alpha = 300,
+        .hint_fade_in = false,
+    };
+    var actions: TutorialFrameActions = .{};
+
+    tickHint(&state, &actions, 16, true);
+    try std.testing.expect(state.hint_fade_in);
+    try std.testing.expectEqual(@as(i32, 0), state.hint_index);
+    try std.testing.expectEqual(@as(i32, 252), state.hint_alpha);
+    try std.testing.expectEqual(@as(usize, 2), actions.spawn_template_count);
+
+    actions = .{};
+    tickHint(&state, &actions, 16, false);
+    try std.testing.expectEqual(@as(i32, 300), state.hint_alpha);
+    try std.testing.expectEqual(@as(usize, 0), actions.spawn_template_count);
 }

@@ -1,24 +1,181 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 import crimson.sim.world_state as world_state_mod
+from crimson.bonuses import BonusId
 from crimson.creatures.damage_types import CreatureDamageType
 from crimson.creatures.runtime import CreatureDeath, CreatureUpdateResult
 from crimson.creatures.spawn import CreatureFlags, CreatureTypeId
-from crimson.effects import FxQueue, FxQueueRotated
+from crimson.effects import FxQueue, FxQueueRotated, ParticlePool, ParticleStyleId
 from crimson.game_modes import GameMode
 from crimson.owner_ref import OwnerRef
 from crimson.projectiles.runtime import PrimaryStepCtx, SecondarySpawnSpec
 from crimson.projectiles.types import ProjectileHit, ProjectileTemplateId, SecondaryProjectileTypeId
+from crimson.rng_caller_static import RngCallerStatic
 from crimson.sim.input import PlayerInput
 from crimson.sim.state_types import PlayerState
 from crimson.sim.world_state import WorldState
+from crimson.weapon_runtime import weapon_assign_player
+from crimson.weapons import WeaponId
 from grim.geom import Vec2
 from grim.sfx_map import SfxId
 from tests.support.helpers import ScriptedCrand, assert_rng_progression
+
+
+def test_weapon_guard_runs_before_same_frame_locked_splitter_pickup() -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0))
+    weapon_assign_player(player, WeaponId.PISTOL, state=world.state)
+    world.players.append(player)
+    entry = world.state.bonus_pool.spawn_at(
+        pos=player.pos,
+        bonus_id=BonusId.WEAPON,
+        duration_override=int(WeaponId.SPLITTER_GUN),
+        state=world.state,
+        emit_burst=False,
+    )
+    assert entry is not None
+
+    first = world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert len(first.pickups) == 1
+    assert player.weapon.weapon_id == WeaponId.SPLITTER_GUN
+
+    world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert player.weapon.weapon_id == WeaponId.PISTOL
+
+
+def test_weapon_usage_time_precedes_same_frame_weapon_pickup() -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0))
+    weapon_assign_player(player, WeaponId.PISTOL, state=world.state)
+    world.players.append(player)
+    entry = world.state.bonus_pool.spawn_at(
+        pos=player.pos,
+        bonus_id=BonusId.WEAPON,
+        duration_override=int(WeaponId.ASSAULT_RIFLE),
+        state=world.state,
+        emit_burst=False,
+    )
+    assert entry is not None
+
+    first = world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert len(first.pickups) == 1
+    assert player.weapon.weapon_id == WeaponId.ASSAULT_RIFLE
+    assert world.state.weapon_usage_time[WeaponId.PISTOL] == 16
+    assert world.state.weapon_usage_time[WeaponId.ASSAULT_RIFLE] == 0
+
+    world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert world.state.weapon_usage_time[WeaponId.PISTOL] == 16
+    assert world.state.weapon_usage_time[WeaponId.ASSAULT_RIFLE] == 16
+
+
+def test_highscore_score_stages_before_same_frame_points_pickup() -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+    player = PlayerState(index=0, pos=Vec2(512.0, 512.0), experience=10)
+    world.players.append(player)
+    entry = world.state.bonus_pool.spawn_at(
+        pos=player.pos,
+        bonus_id=BonusId.POINTS,
+        duration_override=500,
+        state=world.state,
+        emit_burst=False,
+    )
+    assert entry is not None
+
+    first = world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert len(first.pickups) == 1
+    assert world.state.highscore_score_xp == 10
+    assert player.experience == 510
+
+    world.step(
+        0.016,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert world.state.highscore_score_xp == 510
 
 
 def test_projectile_kill_awards_xp_same_step() -> None:
@@ -220,10 +377,64 @@ def test_detonation_followup_does_not_duplicate_resolved_death_sfx() -> None:
     # Native detonation follow-up re-enters creature death handling for side effects,
     # but does not perform a second death-SFX random pick.
     assert len(events.deaths) == 2
-    assert sum(
-        key in {SfxId.ALIEN_DIE_01, SfxId.ALIEN_DIE_02, SfxId.ALIEN_DIE_03, SfxId.ALIEN_DIE_04}
-        for key in events.sfx
-    ) == 1
+    assert (
+        sum(
+            key in {SfxId.ALIEN_DIE_01, SfxId.ALIEN_DIE_02, SfxId.ALIEN_DIE_03, SfxId.ALIEN_DIE_04}
+            for key in events.sfx
+        )
+        == 1
+    )
+
+
+def test_bubblegun_expiry_reenters_active_zero_hp_death_and_owns_sfx(mocker) -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+    world.players.append(PlayerState(index=0, pos=Vec2(512.0, 512.0)))
+
+    creature = world.creatures.entries[0]
+    creature.active = True
+    creature.type_id = CreatureTypeId.ZOMBIE
+    creature.pos = Vec2(256.0, 256.0)
+    creature.hp = 0.0
+    creature.max_hp = 25.0
+    creature.size = 50.0
+    creature.reward_value = 0.0
+    creature.lifecycle_stage = 16.0
+
+    mocker.patch.object(world.creatures, "update", return_value=CreatureUpdateResult())
+    rng = ScriptedCrand(2, fallback=ScriptedCrand.Fallback.REPEAT_LAST)
+    world.state.rng = rng
+    world.state.particles = ParticlePool(rng=rng)
+    particle = world.state.particles.entries[0]
+    particle.active = True
+    particle.render_flag = False
+    particle.intensity = 0.81
+    particle.style_id = ParticleStyleId.BUBBLEGUN
+    particle.target_id = 0
+    particle.owner = OwnerRef.from_player(0)
+    before_calls = rng.calls
+
+    events = world.step(
+        0.1,
+        inputs=None,
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert not creature.active
+    assert len(events.deaths) == 1
+    assert events.sfx == [SfxId.ZOMBIE_DIE_03]
+    assert rng.records_since(before_calls)[0].caller == RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_BUBBLEGUN_EXPIRY_SFX
 
 
 def test_projectile_lethal_hit_records_death_before_particles_update(mocker) -> None:
@@ -286,8 +497,7 @@ def test_projectile_lethal_hit_records_death_before_particles_update(mocker) -> 
 
     assert record_death.call_count == 1
     assert any(
-        key in {SfxId.ALIEN_DIE_01, SfxId.ALIEN_DIE_02, SfxId.ALIEN_DIE_03, SfxId.ALIEN_DIE_04}
-        for key in events.sfx
+        key in {SfxId.ALIEN_DIE_01, SfxId.ALIEN_DIE_02, SfxId.ALIEN_DIE_03, SfxId.ALIEN_DIE_04} for key in events.sfx
     )
 
 
@@ -562,7 +772,7 @@ def test_perk_effects_step_uses_previous_aim_before_player_update() -> None:
         _ = state, dt, creatures, fx_queue
         seen["aim"] = players[0].aim
 
-    world_state_mod.perks_update_effects = _fake_perk_update  # type: ignore[assignment]
+    world_state_mod.perks_update_effects = cast(Any, _fake_perk_update)
     try:
         world.step(
             0.016,

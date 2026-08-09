@@ -31,8 +31,8 @@ def _test_config(**updates: object) -> CrimsonConfig:
                 cfg.gameplay.player_count = int(cast(Any, value))
             case "game_mode":
                 cfg.gameplay.mode = GameMode(int(cast(Any, value)))
-            case "fx_detail_0":
-                cfg.display.set_fx_detail(0, bool(value))
+            case "shadows_enabled":
+                cfg.display.shadows_enabled = bool(value)
             case _:
                 raise KeyError(f"unsupported config update: {key}")
     return cfg
@@ -376,7 +376,7 @@ def test_local_input_mouse_point_click_marks_move_to_cursor_press(
     assert out.reload_pressed is True
     assert out.move_to_cursor_pressed is True
     assert interpreter._states[0].move_target == mouse_world
-    expected = (mouse_world - player.pos).normalized()
+    expected, _distance = (mouse_world - player.pos).normalized_with_length()
     assert_float_close(float(out.move.x), float(expected.x))
     assert_float_close(float(out.move.y), float(expected.y))
 
@@ -427,12 +427,36 @@ def test_local_input_computer_move_mode_far_from_center_heads_toward_center(
         creatures=creatures,
     )
 
-    expected = (Vec2(512.0, 512.0) - player.pos).normalized()
+    expected, _distance = (Vec2(512.0, 512.0) - player.pos).normalized_with_length()
     assert_float_close(float(out.move.x), float(expected.x))
     assert_float_close(float(out.move.y), float(expected.y))
 
 
-def test_local_input_computer_aim_scheme_forces_computer_movement(
+def test_local_input_computer_move_mode_without_target_orbits_center(
+    mocker: MockerFixture,
+) -> None:
+    _patch_no_user_input(mocker)
+
+    interpreter = local_input.LocalInputInterpreter()
+    player = PlayerState(index=0, pos=Vec2(612.0, 512.0), aim=Vec2(672.0, 512.0))
+    config = _set_player_modes(_test_config(), move_mode=MovementControlType.COMPUTER)
+
+    out = interpreter.build_player_input(
+        player_index=0,
+        player=player,
+        config=config,
+        mouse_screen=Vec2(),
+        mouse_world=Vec2(),
+        screen_center=Vec2(),
+        dt=0.1,
+        creatures=[],
+    )
+
+    assert_float_close(float(out.move.x), 0.0)
+    assert_float_close(float(out.move.y), 1.0)
+
+
+def test_local_input_computer_aim_scheme_preserves_configured_movement(
     mocker: MockerFixture,
 ) -> None:
     _patch_no_user_input(mocker)
@@ -440,7 +464,11 @@ def test_local_input_computer_aim_scheme_forces_computer_movement(
     interpreter = local_input.LocalInputInterpreter()
     player = PlayerState(index=0, pos=Vec2(500.0, 500.0), aim=Vec2(560.0, 500.0))
     creatures = [_DummyCreature(pos=Vec2(560.0, 500.0), active=True, hp=20.0)]
-    config = _set_player_modes(_test_config(), aim_scheme=AimScheme.COMPUTER)
+    config = _set_player_modes(
+        _test_config(),
+        aim_scheme=AimScheme.COMPUTER,
+        move_mode=MovementControlType.DUAL_ACTION_PAD,
+    )
 
     out = interpreter.build_player_input(
         player_index=0,
@@ -453,8 +481,7 @@ def test_local_input_computer_aim_scheme_forces_computer_movement(
         creatures=creatures,
     )
 
-    assert_float_close(float(out.move.x), 1.0)
-    assert_float_close(float(out.move.y), 0.0)
+    assert out.move == Vec2()
 
 
 def test_local_input_joystick_aim_uses_pov_not_aim_keybinds(

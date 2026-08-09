@@ -124,7 +124,7 @@ def build_4_3_lizard_zombie_pact(ctx: QuestContext, *, rng: CrandLike, full_vers
                 spawn(
                     Vec2(356.0, float(idx * 0xB4 + 0x100)),
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_31_FAST_0C,
+                    spawn_id=SpawnId.DEN_LIZARD_WEAK_0C,
                     trigger_ms=trigger,
                     count=idx + 1,
                 ),
@@ -133,7 +133,7 @@ def build_4_3_lizard_zombie_pact(ctx: QuestContext, *, rng: CrandLike, full_vers
                 spawn(
                     Vec2(356.0, float(idx * 0xB4 + 0x180)),
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_31_FAST_0C,
+                    spawn_id=SpawnId.DEN_LIZARD_WEAK_0C,
                     trigger_ms=trigger,
                     count=idx + 2,
                 ),
@@ -226,7 +226,7 @@ def build_4_5_the_massacre(ctx: QuestContext, *, rng: CrandLike, full_version: b
                 spawn_at(
                     edges_wide.right,
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_CONST_RED_FAST_2B,
+                    spawn_id=SpawnId.ALIEN_DEADLY_FAST_2B,
                     trigger_ms=trigger,
                     count=wave + 1,
                 ),
@@ -245,7 +245,7 @@ def build_4_5_the_massacre(ctx: QuestContext, *, rng: CrandLike, full_version: b
 )
 def build_4_6_the_unblitzkrieg(ctx: QuestContext, *, rng: CrandLike, full_version: bool = True) -> list[SpawnEntry]:
     def spawn_id_for(toggle: bool) -> SpawnId:
-        return SpawnId.ALIEN_SPAWNER_CHILD_31_SLOW_0D if toggle else SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07
+        return SpawnId.DEN_LIZARD_WEAK_SLOWER_0D if toggle else SpawnId.DEN_ALIEN_BASIC_07
 
     entries: list[SpawnEntry] = []
     trigger = 500
@@ -286,7 +286,7 @@ def build_4_6_the_unblitzkrieg(ctx: QuestContext, *, rng: CrandLike, full_versio
         spawn(
             Vec2(512.0, 512.0),
             heading=0.0,
-            spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+            spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
             trigger_ms=trigger,
             count=1,
         ),
@@ -405,7 +405,7 @@ def build_4_6_the_unblitzkrieg(ctx: QuestContext, *, rng: CrandLike, full_versio
 )
 def build_4_7_gauntlet(ctx: QuestContext, *, rng: CrandLike, full_version: bool = True) -> list[SpawnEntry]:
     entries: list[SpawnEntry] = []
-    player_count = ctx.player_count + (4 if full_version else 0)
+    player_count = ctx.player_count + (4 if ctx.hardcore else 0)
     center = center_point(ctx.width, ctx.height)
     edges = edge_midpoints(ctx.width)
 
@@ -417,7 +417,7 @@ def build_4_7_gauntlet(ctx: QuestContext, *, rng: CrandLike, full_version: bool 
                 spawn(
                     pos,
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_32_SLOW_0A,
+                    spawn_id=SpawnId.DEN_SPIDER_BASIC_0A,
                     trigger_ms=trigger,
                     count=1,
                 ),
@@ -473,7 +473,7 @@ def build_4_7_gauntlet(ctx: QuestContext, *, rng: CrandLike, full_version: bool 
                 spawn(
                     pos,
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_32_SLOW_0A,
+                    spawn_id=SpawnId.DEN_SPIDER_BASIC_0A,
                     trigger_ms=trigger,
                     count=1,
                 ),
@@ -491,7 +491,7 @@ def build_4_7_gauntlet(ctx: QuestContext, *, rng: CrandLike, full_version: bool 
 )
 def build_4_8_syntax_terror(ctx: QuestContext, *, rng: CrandLike, full_version: bool = True) -> list[SpawnEntry]:
     entries: list[SpawnEntry] = []
-    player_count = ctx.player_count + (4 if full_version else 0)
+    player_count = ctx.player_count + (4 if ctx.hardcore else 0)
     outer_seed = 0x14C9
     outer_index = 0
     trigger_base = 1500
@@ -506,7 +506,7 @@ def build_4_8_syntax_terror(ctx: QuestContext, *, rng: CrandLike, full_version: 
                     spawn(
                         Vec2(float(x), float(y)),
                         heading=0.0,
-                        spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                        spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                         trigger_ms=trigger,
                         count=1,
                     ),
@@ -533,7 +533,7 @@ def build_4_9_the_annihilation(ctx: QuestContext, *, rng: CrandLike, full_versio
         spawn(
             Vec2(128.0, float(half_w)),
             heading=0.0,
-            spawn_id=SpawnId.ALIEN_CONST_RED_FAST_2B,
+            spawn_id=SpawnId.ALIEN_DEADLY_FAST_2B,
             trigger_ms=500,
             count=2,
         ),
@@ -548,7 +548,7 @@ def build_4_9_the_annihilation(ctx: QuestContext, *, rng: CrandLike, full_versio
             spawn(
                 Vec2(x, y),
                 heading=0.0,
-                spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                 trigger_ms=trigger,
                 count=1,
             ),
@@ -566,7 +566,7 @@ def build_4_9_the_annihilation(ctx: QuestContext, *, rng: CrandLike, full_versio
             spawn(
                 Vec2(x, y),
                 heading=0.0,
-                spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                 trigger_ms=trigger,
                 count=1,
             ),
@@ -589,35 +589,34 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
         spawn(
             Vec2(128.0, 128.0),
             heading=0.0,
-            spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+            spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
             trigger_ms=3000,
             count=1,
         ),
         spawn(
             Vec2(896.0, 128.0),
             heading=0.0,
-            spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+            spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
             trigger_ms=6000,
             count=1,
         ),
         spawn(
             Vec2(128.0, 896.0),
             heading=0.0,
-            spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+            spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
             trigger_ms=9000,
             count=1,
         ),
         spawn(
             Vec2(896.0, 896.0),
             heading=0.0,
-            spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+            spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
             trigger_ms=12000,
             count=1,
         ),
     ]
 
-    center = center_point(ctx.width, ctx.height)
-    edges_wide = edge_midpoints(ctx.width, ctx.height, offset=128.0)
+    center = Vec2(512.0, 512.0)
 
     trigger = 13000
     for pos, _angle in ring_points(center, 80.0, 6, step=1.0471976):
@@ -625,7 +624,7 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
             spawn(
                 pos,
                 heading=0.0,
-                spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                 trigger_ms=trigger,
                 count=1,
             ),
@@ -636,7 +635,7 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
         spawn(
             Vec2(512.0, 512.0),
             heading=0.0,
-            spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_3C_SLOW_0B,
+            spawn_id=SpawnId.DEN_SPIDER_PLASMA_SHOOTERS_0B,
             trigger_ms=trigger,
             count=1,
         ),
@@ -646,12 +645,12 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
     y = 0x100
     toggle = False
     while y < 0x300:
-        x = edges_wide.right.x if toggle else edges_wide.left.x
+        x = 1152.0 if toggle else -128.0
         entries.append(
             spawn(
                 Vec2(x, float(y)),
                 heading=0.0,
-                spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                 trigger_ms=trigger,
                 count=2,
             ),
@@ -666,21 +665,23 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
             spawn(
                 pos,
                 heading=0.0,
-                spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                 trigger_ms=trigger,
                 count=1,
             ),
         )
         trigger += 300
 
-    if full_version:
+    if ctx.hardcore:
         trigger = 62800
-        for pos, _angle in ring_points(center, 180.0, 12, step=0.5235988, start=0.5235988):
+        for ring_index in range(12):
+            angle = float(ring_index + 1) * 0.5235988
+            pos = center + Vec2.from_angle(angle) * 180.0
             entries.append(
                 spawn(
                     pos,
                     heading=0.0,
-                    spawn_id=SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07,
+                    spawn_id=SpawnId.DEN_ALIEN_BASIC_07,
                     trigger_ms=trigger,
                     count=1,
                 ),
@@ -691,12 +692,12 @@ def build_4_10_the_end_of_all(ctx: QuestContext, *, rng: CrandLike, full_version
     y = 0x100
     toggle = False
     while y < 0x300:
-        x = edges_wide.right.x if toggle else edges_wide.left.x
+        x = 1152.0 if toggle else -128.0
         entries.append(
             spawn(
                 Vec2(x, float(y)),
                 heading=0.0,
-                spawn_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                spawn_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                 trigger_ms=trigger,
                 count=2,
             ),

@@ -18,7 +18,19 @@ from .bonuses.hud import BonusHudState
 from .bonuses.pool import BonusPool
 from .effects import EffectPool, ParticlePool, SpriteEffectPool
 from .game_modes import GameMode
-from .math_parity import NATIVE_HALF_PI, NATIVE_PI, NATIVE_TAU, f32
+from .math_parity import (
+    NATIVE_HALF_PI,
+    NATIVE_PI,
+    NATIVE_TAU,
+    f32,
+    x87_fpatan,
+    x87_pc24_add,
+    x87_pc24_div,
+    x87_pc24_hypot,
+    x87_pc24_mul,
+    x87_pc24_mul_chain,
+    x87_pc24_sub,
+)
 from .movement_controls import MovementControlType
 from .perks import PerkId
 from .perks.helpers import perk_active
@@ -32,7 +44,7 @@ from .projectiles.runtime import (
 from .projectiles.types import ProjectileTemplateId
 from .rng_caller_static import RngCallerStatic
 from .sim.state_types import PERK_COUNT_SIZE
-from .sim.timing import ftol_ms_i32
+from .sim.timing import ftol_ms_i32, reflex_boost_time_scale_factor
 from .tutorial import TutorialOverlayState, TutorialState
 from .typo.state import TypoState
 from .weapon_runtime import (
@@ -76,6 +88,7 @@ if TYPE_CHECKING:
 
 
 WEAPON_COUNT_SIZE = max(int(entry.weapon_id) for entry in WEAPON_TABLE) + 1
+WEAPON_USAGE_TIME_SLOT_COUNT = 64
 
 
 class BonusTimers(msgspec.Struct):
@@ -86,7 +99,6 @@ class BonusTimers(msgspec.Struct):
     freeze: float = 0.0
 
 
-_RELOAD_PRELOAD_UNDERFLOW_EPS = 1e-7
 _RELATIVE_MOVE_HEADING_NONE = -1.0
 _RELATIVE_MOVE_HEADING_FORWARD = 0.0
 _RELATIVE_MOVE_HEADING_FORWARD_RIGHT = float(f32(0.7853982))
@@ -98,7 +110,6 @@ _RELATIVE_MOVE_HEADING_LEFT = float(f32(4.712389))
 _RELATIVE_MOVE_HEADING_FORWARD_LEFT = float(f32(5.4977875))
 _RELATIVE_MOVE_TURN_ALIGN_SCALE = float(f32(7.957747))
 _AIM_POINT_RADIUS = 60.0
-_LOW_HEALTH_BLEED_DIR_OFFSET = 1.5707964 - 0.5
 _LOW_HEALTH_BLOODSPILL_SFX: tuple[SfxId, SfxId] = (SfxId.BLOODSPILL_01, SfxId.BLOODSPILL_02)
 
 
@@ -134,7 +145,6 @@ class GameplayState(msgspec.Struct):
     bonus_hud: BonusHudState = msgspec.field(default_factory=BonusHudState)
     bonus_pool: BonusPool = msgspec.field(default_factory=BonusPool)
     deferred_freeze_corpse_fx: list[DeferredFreezeCorpseFx] = msgspec.field(default_factory=list)
-    player_death_hook_skip_indices: set[int] = msgspec.field(default_factory=set)
     shock_chain_links_left: int = 0
     shock_chain_projectile_id: int = -1
     survival_reward_weapon_guard_id: WeaponId = WeaponId.PISTOL
@@ -154,6 +164,8 @@ class GameplayState(msgspec.Struct):
     weapon_shots_fired: list[list[int]] = msgspec.field(
         default_factory=lambda: [[0] * WEAPON_COUNT_SIZE for _ in range(4)],
     )
+    weapon_usage_time: list[int] = msgspec.field(default_factory=lambda: [0] * WEAPON_USAGE_TIME_SLOT_COUNT)
+    highscore_score_xp: int = 0
     debug_god_mode: bool = False
 
     def __post_init__(self) -> None:
@@ -176,15 +188,21 @@ def player_frame_dt_after_roundtrip(*, dt: float, time_scale_active: bool, refle
     if not time_scale_active or dt_f32 <= 0.0:
         return float(dt_f32)
 
-    reflex_f32 = float(f32(float(reflex_boost_timer)))
-    time_scale_factor = float(f32(0.3))
-    if reflex_f32 < 1.0:
-        time_scale_factor = float(f32((1.0 - float(reflex_f32)) * 0.7 + 0.3))
+    time_scale_factor = reflex_boost_time_scale_factor(
+        reflex_boost_timer=reflex_boost_timer,
+        time_scale_active=True,
+    )
     if time_scale_factor <= 0.0:
         return float(dt_f32)
 
-    movement_dt = float(f32((0.6 / float(time_scale_factor)) * float(dt_f32)))
-    roundtrip_dt = float(f32(float(time_scale_factor) * float(movement_dt) * 1.6666666))
+    movement_dt = x87_pc24_mul(
+        x87_pc24_div(f32(0.6), time_scale_factor),
+        dt_f32,
+    )
+    roundtrip_dt = x87_pc24_mul(
+        x87_pc24_mul(time_scale_factor, movement_dt),
+        f32(1.6666666),
+    )
     return float(roundtrip_dt)
 
 
@@ -256,7 +274,7 @@ def survival_progression_update(
     survival_check_level_up(players[0], state.perk_selection)
 
 
-_SURVIVAL_RECENT_DEATH_CENTROID_SCALE = 0.33333334
+_SURVIVAL_RECENT_DEATH_CENTROID_SCALE = f32(0.33333334)
 
 
 def survival_record_recent_death(state: GameplayState, *, pos: Vec2) -> None:
@@ -306,15 +324,23 @@ def survival_update_weapon_handouts(
 
     if int(state.survival_recent_death_count) == 3 and (not bool(state.survival_reward_fire_seen)):
         pos0, pos1, pos2 = state.survival_recent_death_pos
-        centroid_x = f32(
-            float(f32(float(pos0.x) + float(pos1.x) + float(pos2.x))) * _SURVIVAL_RECENT_DEATH_CENTROID_SCALE,
+        centroid_x = x87_pc24_mul(
+            x87_pc24_add(
+                x87_pc24_add(float(pos0.x), float(pos1.x)),
+                float(pos2.x),
+            ),
+            _SURVIVAL_RECENT_DEATH_CENTROID_SCALE,
         )
-        centroid_y = f32(
-            float(f32(float(pos0.y) + float(pos1.y) + float(pos2.y))) * _SURVIVAL_RECENT_DEATH_CENTROID_SCALE,
+        centroid_y = x87_pc24_mul(
+            x87_pc24_add(
+                x87_pc24_add(float(pos0.y), float(pos1.y)),
+                float(pos2.y),
+            ),
+            _SURVIVAL_RECENT_DEATH_CENTROID_SCALE,
         )
-        dx = float(player.pos.x) - float(centroid_x)
-        dy = float(player.pos.y) - float(centroid_y)
-        if math.sqrt(dx * dx + dy * dy) < 16.0 and float(player.health) < 15.0:
+        dx = x87_pc24_sub(float(player.pos.x), centroid_x)
+        dy = x87_pc24_sub(float(player.pos.y), centroid_y)
+        if x87_pc24_hypot(dx, dy) < 16.0 and float(player.health) < 15.0:
             _weapon_assign_player(player, WeaponId.BLADE_GUN, state=state)
             state.survival_reward_weapon_guard_id = WeaponId.BLADE_GUN
             state.survival_reward_fire_seen = True
@@ -333,6 +359,36 @@ def survival_enforce_reward_weapon_guard(state: GameplayState, players: Sequence
             _weapon_assign_player(player, WeaponId.PISTOL, state=state)
 
 
+def gameplay_enforce_weapon_guards(state: GameplayState, players: Sequence[PlayerState]) -> None:
+    """Apply the weapon revocation gates embedded in native world rendering."""
+
+    # Native gameplay_render_world checks exactly the two fixed player slots.
+    # Corrected mode extends the same entitlement policy to generalized co-op.
+    guarded_players = players[:2] if state.preserve_bugs else players
+    unlock_index_full = int(state.status.quest_unlock_index_full) if state.status is not None else 0
+    if unlock_index_full < 40:
+        for player in guarded_players:
+            if player.weapon.weapon_id == WeaponId.SPLITTER_GUN:
+                _weapon_assign_player(player, WeaponId.PISTOL, state=state)
+
+    survival_enforce_reward_weapon_guard(state, guarded_players)
+
+
+def gameplay_accumulate_weapon_usage_time(
+    state: GameplayState,
+    players: Sequence[PlayerState],
+    frame_dt_ms: int,
+) -> None:
+    """Accumulate native high-score weapon time for the fixed player-0 slot."""
+
+    if not players:
+        return
+    weapon_id = int(players[0].weapon.weapon_id)
+    if not 0 <= weapon_id < len(state.weapon_usage_time):
+        return
+    state.weapon_usage_time[weapon_id] = (int(state.weapon_usage_time[weapon_id]) + int(frame_dt_ms)) & 0xFFFFFFFF
+
+
 def _distance_f32_xy(ax: float, ay: float, bx: float, by: float) -> float:
     dx = f32(float(ax) - float(bx))
     dy = f32(float(ay) - float(by))
@@ -343,6 +399,7 @@ def _distance_f32_xy(ax: float, ay: float, bx: float, by: float) -> float:
 def _player_apply_move_with_spawn_avoidance(
     player: PlayerState,
     *,
+    perk_player: PlayerState,
     delta: Vec2,
     spawn_slots: Sequence[SpawnSlotInit] | None,
     creatures: Sequence[CreatureState] | None,
@@ -351,7 +408,7 @@ def _player_apply_move_with_spawn_avoidance(
 
     dx = float(delta.x)
     dy = float(delta.y)
-    if perk_active(player, PerkId.ALTERNATE_WEAPON):
+    if perk_active(perk_player, PerkId.ALTERNATE_WEAPON):
         dx = float(f32(float(dx) * 0.8))
         dy = float(f32(float(dy) * 0.8))
 
@@ -402,9 +459,8 @@ def _player_apply_move_with_spawn_avoidance(
 
 def _direction_from_heading_native(heading: float) -> Vec2:
     # Native uses `fcos/fsin(heading - 1.5707964f)` (float32 half-pi literal),
-    # but this path keeps x87-style precision for trig and rounds at downstream
-    # float32 storage boundaries (delta/aim writes), not inside this helper.
-    radians = float(heading) - float(NATIVE_HALF_PI)
+    # with gameplay's x87 arithmetic in 24-bit precision before the trig op.
+    radians = x87_pc24_sub(float(heading), float(NATIVE_HALF_PI))
     return Vec2(math.cos(radians), math.sin(radians))
 
 
@@ -435,45 +491,82 @@ def _resolve_aim_scheme_for_update(input_state: PlayerInput, state: GameplayStat
     return AimScheme.MOUSE
 
 
-def _player_accelerate_move_speed(player: PlayerState, dt: float) -> None:
+def _player_accelerate_move_speed(player: PlayerState, perk_player: PlayerState, dt: float) -> None:
     dt = float(f32(float(dt)))
-    if perk_active(player, PerkId.LONG_DISTANCE_RUNNER):
+    if perk_active(perk_player, PerkId.LONG_DISTANCE_RUNNER):
         if player.move_speed < 2.0:
-            player.move_speed = float(f32(float(player.move_speed) + float(dt) * 4.0))
+            acceleration = f32(float(dt) * 4.0)
+            player.move_speed = float(f32(float(player.move_speed) + float(acceleration)))
         player.move_speed = float(f32(float(player.move_speed) + float(dt)))
-        if player.move_speed > 2.8:
-            player.move_speed = 2.8
+        if player.move_speed > f32(2.8):
+            player.move_speed = f32(2.8)
     else:
-        player.move_speed = float(f32(float(player.move_speed) + float(dt) * 5.0))
+        acceleration = f32(float(dt) * 5.0)
+        player.move_speed = float(f32(float(player.move_speed) + float(acceleration)))
         if player.move_speed > 2.0:
             player.move_speed = 2.0
 
 
 def _player_decelerate_move_speed(player: PlayerState, dt: float) -> None:
     dt = float(f32(float(dt)))
-    player.move_speed = float(f32(float(player.move_speed) - float(dt) * 15.0))
+    deceleration = f32(float(dt) * 15.0)
+    player.move_speed = float(f32(float(player.move_speed) - float(deceleration)))
     if player.move_speed < 0.0:
         player.move_speed = 0.0
 
 
 def _player_apply_move_speed_caps(player: PlayerState) -> None:
-    if player.weapon.weapon_id == WeaponId.MEAN_MINIGUN and player.move_speed > 0.8:
-        player.move_speed = 0.8
+    if player.weapon.weapon_id == WeaponId.MEAN_MINIGUN and player.move_speed > f32(0.8):
+        player.move_speed = f32(0.8)
 
 
 def _player_move_delta_from_heading(
     *,
     player: PlayerState,
     movement_dt: float,
+    speed_multiplier: float,
     speed_scale: float,
 ) -> Vec2:
     move = _direction_from_heading_native(float(player.heading))
-    move_dx = float(f32(float(move.x) * float(player.move_speed) * float(speed_scale)))
-    move_dy = float(f32(float(move.y) * float(player.move_speed) * float(speed_scale)))
+    move_dx = float(
+        f32(
+            float(move.x) * float(player.move_speed) * float(speed_multiplier) * float(speed_scale),
+        ),
+    )
+    move_dy = float(
+        f32(
+            float(move.y) * float(player.move_speed) * float(speed_multiplier) * float(speed_scale),
+        ),
+    )
     return Vec2(
         f32(float(movement_dt) * float(move_dx)),
         f32(float(movement_dt) * float(move_dy)),
     )
+
+
+def _player_turn_aligned_velocity_native(
+    *,
+    direction: Vec2,
+    move_speed: float,
+    angle_diff: float,
+    speed_multiplier: float,
+) -> Vec2:
+    # `player_update` evaluates this x87 chain in the game's 24-bit precision
+    # mode. In particular, the direction*speed and subsequent alignment
+    # product round before the remaining multipliers; keeping the whole chain
+    # wide can move a backward-diagonal step one ULP too far.
+    alignment = x87_pc24_sub(float(NATIVE_PI), float(angle_diff))
+
+    def component(value: float) -> float:
+        return x87_pc24_mul_chain(
+            float(value),
+            float(move_speed),
+            float(alignment),
+            float(speed_multiplier),
+            float(_RELATIVE_MOVE_TURN_ALIGN_SCALE),
+        )
+
+    return Vec2(component(direction.x), component(direction.y))
 
 
 def _player_aim_point_from_heading(player: PlayerState, heading: float, *, radius: float = _AIM_POINT_RADIUS) -> Vec2:
@@ -486,10 +579,9 @@ def _player_aim_point_from_heading(player: PlayerState, heading: float, *, radiu
 
 def _aim_heading_from_aim_point_native(player_pos: Vec2, aim_pos: Vec2) -> float:
     # `player_update` (0x004136b0): aim_heading = (float)(fpatan(pos_y-aim_y, pos_x-aim_x) - 1.5707964)
-    # Keep atan2 wide and narrow once at store to mirror x87-style rounding.
-    dy = float(player_pos.y) - float(aim_pos.y)
-    dx = float(player_pos.x) - float(aim_pos.x)
-    return float(f32(math.atan2(float(dy), float(dx)) - float(NATIVE_HALF_PI)))
+    dy = x87_pc24_sub(player_pos.y, aim_pos.y)
+    dx = x87_pc24_sub(player_pos.x, aim_pos.x)
+    return x87_pc24_sub(x87_fpatan(dy, dx), NATIVE_HALF_PI)
 
 
 def _player_update_aim_by_scheme(
@@ -558,8 +650,15 @@ def player_update(
     prev_pos = player.pos
 
     if player.health <= 0.0:
-        player.death_timer -= dt * 20.0
+        player.death_timer = x87_pc24_sub(
+            player.death_timer,
+            x87_pc24_mul(dt, f32(20.0)),
+        )
         return
+
+    # Native's player_update perk queries all read the global slot-zero table,
+    # even while the overlay-selected player's fields are being updated.
+    perk_player = players[0] if state.preserve_bugs and players else player
 
     # Native low-health warning pulse (`player_update` @ 0x004136b0): once
     # `player_take_damage` has armed `low_health_timer` (!= 100.0), count down
@@ -568,10 +667,19 @@ def player_update(
         next_low_health_timer = float(f32(float(player.low_health_timer) - float(dt)))
         player.low_health_timer = next_low_health_timer
         if next_low_health_timer < 0.0:
-            bleed_dir_angle = float(player.aim_heading) + _LOW_HEALTH_BLEED_DIR_OFFSET
+            bleed_dir_angle = x87_pc24_sub(
+                x87_pc24_add(float(player.aim_heading), NATIVE_HALF_PI),
+                f32(0.5),
+            )
             bleed_pos = Vec2(
-                f32(math.cos(bleed_dir_angle) * -6.0 + float(player.pos.x)),
-                f32(math.sin(bleed_dir_angle) * -6.0 + float(player.pos.y)),
+                x87_pc24_add(
+                    x87_pc24_mul(math.cos(bleed_dir_angle), f32(-6.0)),
+                    float(player.pos.x),
+                ),
+                x87_pc24_add(
+                    x87_pc24_mul(math.sin(bleed_dir_angle), f32(-6.0)),
+                    float(player.pos.y),
+                ),
             )
             aim_heading = float(player.aim_heading)
             for _ in range(3):
@@ -582,7 +690,7 @@ def player_update(
                     rng=state.rng,
                     detail_preset=int(detail_preset),
                     violence_disabled=0,
-            )
+                )
             bloodspill_sfx = _LOW_HEALTH_BLOODSPILL_SFX[
                 state.rng.rand_tagged(RngCallerStatic.PLAYER_UPDATE_LOW_HEALTH_BLOODSPILL) & 1
             ]
@@ -600,12 +708,16 @@ def player_update(
             damping_scalar = 0.3
     state.player_spread_damping_scalar = float(damping_scalar)
 
-    player.muzzle_flash_alpha = max(0.0, player.muzzle_flash_alpha - dt * 2.0)
+    player.muzzle_flash_alpha = max(
+        0.0,
+        x87_pc24_sub(
+            player.muzzle_flash_alpha,
+            x87_pc24_mul(dt, f32(2.0)),
+        ),
+    )
     cooldown_decay = float(f32(float(dt) * (1.5 if state.bonuses.weapon_power_up > 0.0 else 1.0)))
     next_shot_cooldown = float(f32(float(player.weapon.shot_cooldown) - float(cooldown_decay)))
     player.weapon.shot_cooldown = max(0.0, float(next_shot_cooldown))
-    if 0.0 < float(player.weapon.shot_cooldown) < 1e-6:
-        player.weapon.shot_cooldown = 0.0
 
     speed_bonus_active = player.speed_bonus_timer > 0.0
     if player.aux_timer > 0.0:
@@ -621,23 +733,24 @@ def player_update(
 
     movement_dt = float(dt)
     if state.time_scale_active and movement_dt > 0.0:
-        reflex_f32 = float(f32(float(state.bonuses.reflex_boost)))
-        time_scale_factor = float(f32(0.3))
-        if reflex_f32 < 1.0:
-            time_scale_factor = float(f32((1.0 - float(reflex_f32)) * 0.7 + 0.3))
+        time_scale_factor = reflex_boost_time_scale_factor(
+            reflex_boost_timer=state.bonuses.reflex_boost,
+            time_scale_active=True,
+        )
         if time_scale_factor > 0.0:
             # Native computes `frame_dt = (0.6 / _time_scale_factor) * frame_dt`
             # and stores back to float before movement/heading logic.
-            movement_dt = float(f32((0.6 / float(time_scale_factor)) * float(movement_dt)))
+            movement_dt = x87_pc24_mul(
+                x87_pc24_div(f32(0.6), time_scale_factor),
+                movement_dt,
+            )
 
-    perk_tick_stationary = abs(float(player.move_speed)) <= 1e-9
     apply_player_perk_ticks(
         player=player,
         player_pos_before_move=prev_pos,
         dt=dt,
         state=state,
         players=players,
-        stationary=perk_tick_stationary,
         owner_ref_for_player=_owner_ref_for_player,
         owner_ref_for_player_projectiles=_owner_ref_for_player_projectiles,
         projectile_spawn=_projectile_spawn,
@@ -650,9 +763,7 @@ def player_update(
     move = _direction_from_heading_native(float(player.heading))
     speed = 0.0
     move_delta_override: Vec2 | None = None
-    player_controlled_movement = (
-        (not state.demo_mode_active) and move_mode != MovementControlType.COMPUTER and aim_scheme != AimScheme.COMPUTER
-    )
+    player_controlled_movement = (not state.demo_mode_active) and move_mode != MovementControlType.COMPUTER
     if player_controlled_movement:
         if move_mode == MovementControlType.RELATIVE:
             turning_left = bool(input_state.turn_left_pressed)
@@ -680,19 +791,21 @@ def player_update(
                 turned = True
 
             if moving_forward:
-                _player_accelerate_move_speed(player, movement_dt)
+                _player_accelerate_move_speed(player, perk_player, movement_dt)
                 _player_apply_move_speed_caps(player)
                 move_delta_override = _player_move_delta_from_heading(
                     player=player,
                     movement_dt=movement_dt,
+                    speed_multiplier=speed_multiplier,
                     speed_scale=25.0,
                 )
             elif moving_backward:
-                _player_accelerate_move_speed(player, movement_dt)
+                _player_accelerate_move_speed(player, perk_player, movement_dt)
                 phase_sign = -1.0
                 move_delta_override = _player_move_delta_from_heading(
                     player=player,
                     movement_dt=movement_dt,
+                    speed_multiplier=speed_multiplier,
                     speed_scale=-25.0,
                 )
             else:
@@ -702,6 +815,7 @@ def player_update(
                 move_delta_override = _player_move_delta_from_heading(
                     player=player,
                     movement_dt=movement_dt,
+                    speed_multiplier=speed_multiplier,
                     speed_scale=25.0,
                 )
         elif move_mode == MovementControlType.STATIC:
@@ -759,20 +873,17 @@ def player_update(
                     float(movement_dt),
                 )
                 player.aim_heading = float(f32(float(player.aim_heading) + float(turn_delta)))
-                _player_accelerate_move_speed(player, movement_dt)
+                _player_accelerate_move_speed(player, perk_player, movement_dt)
                 _player_apply_move_speed_caps(player)
                 move = _direction_from_heading_native(float(player.heading))
-                turn_align = (
-                    (float(NATIVE_PI) - float(angle_diff))
-                    * float(speed_multiplier)
-                    * float(_RELATIVE_MOVE_TURN_ALIGN_SCALE)
+                turn_aligned_velocity = _player_turn_aligned_velocity_native(
+                    direction=move,
+                    move_speed=float(player.move_speed),
+                    angle_diff=float(angle_diff),
+                    speed_multiplier=float(speed_multiplier),
                 )
-                move_dx = float(
-                    f32(float(move.x) * float(player.move_speed) * float(turn_align)),
-                )
-                move_dy = float(
-                    f32(float(move.y) * float(player.move_speed) * float(turn_align)),
-                )
+                move_dx = float(turn_aligned_velocity.x)
+                move_dy = float(turn_aligned_velocity.y)
 
             move_delta_override = Vec2(
                 f32(float(movement_dt) * float(move_dx)),
@@ -782,13 +893,12 @@ def player_update(
             moving_input = raw_mag > (0.0 if move_mode == MovementControlType.MOUSE_POINT_CLICK else 0.2)
             turn_alignment_scale = 1.0
             if moving_input:
-                inv = 1.0 / raw_mag if raw_mag > 1e-9 else 0.0
-                move = raw_move * inv
+                move = raw_move.normalized()
                 target_heading = _normalize_heading_angle(move.to_heading())
                 angle_diff = _player_heading_approach_target(player, target_heading, movement_dt)
                 move = _direction_from_heading_native(float(player.heading))
                 turn_alignment_scale = max(0.0, (math.pi - angle_diff) / math.pi)
-                _player_accelerate_move_speed(player, movement_dt)
+                _player_accelerate_move_speed(player, perk_player, movement_dt)
             else:
                 _player_decelerate_move_speed(player, movement_dt)
                 move = _direction_from_heading_native(float(player.heading))
@@ -805,15 +915,14 @@ def player_update(
 
         turn_alignment_scale = 1.0
         if moving_input:
-            inv = 1.0 / raw_mag if raw_mag > 1e-9 else 0.0
-            move = raw_move * inv
+            move = raw_move.normalized()
             # Native normalizes this heading into [0, 2pi] before calling
             # `player_heading_approach_target` (see ghidra @ 0x00413fxx).
             target_heading = _normalize_heading_angle(move.to_heading())
             angle_diff = _player_heading_approach_target(player, target_heading, movement_dt)
             move = _direction_from_heading_native(float(player.heading))
             turn_alignment_scale = max(0.0, (math.pi - angle_diff) / math.pi)
-            _player_accelerate_move_speed(player, movement_dt)
+            _player_accelerate_move_speed(player, perk_player, movement_dt)
         else:
             _player_decelerate_move_speed(player, movement_dt)
             move = _direction_from_heading_native(float(player.heading))
@@ -837,59 +946,65 @@ def player_update(
         move_delta = move_delta_override
     _player_apply_move_with_spawn_avoidance(
         player,
+        perk_player=perk_player,
         delta=move_delta,
         spawn_slots=spawn_slots,
         creatures=creatures,
     )
 
-    player.move_phase += phase_sign * movement_dt * player.move_speed * 19.0
+    phase_speed_dt = f32(float(movement_dt) * float(player.move_speed))
+    phase_step = f32(float(phase_speed_dt) * 19.0)
+    player.move_phase = f32(float(player.move_phase) + float(phase_sign) * float(phase_step))
 
     move_delta = player.pos - prev_pos
-    reload_stationary = abs(move_delta.x) <= 1e-9 and abs(move_delta.y) <= 1e-9
+    reload_stationary = move_delta.x == 0.0 and move_delta.y == 0.0
     if not reload_stationary:
         # Native clears these post-perk-tick timers after movement when position changed.
         player.man_bomb_timer = 0.0
         player.living_fortress_timer = 0.0
     reload_scale = 1.0
-    if reload_stationary and perk_active(player, PerkId.STATIONARY_RELOADER):
+    if reload_stationary and perk_active(perk_player, PerkId.STATIONARY_RELOADER):
         reload_scale = 3.0
 
     # Reload + reload perks.
-    if perk_active(player, PerkId.ANXIOUS_LOADER) and input_state.fire_pressed and player.weapon.reload_timer > 0.0:
-        anxious_next = f32(float(player.weapon.reload_timer) - 0.05)
+    if (
+        perk_active(perk_player, PerkId.ANXIOUS_LOADER)
+        and input_state.fire_pressed
+        and player.weapon.reload_timer > 0.0
+    ):
+        anxious_next = x87_pc24_sub(
+            float(player.weapon.reload_timer),
+            f32(0.05),
+        )
         player.weapon.reload_timer = float(anxious_next)
         if float(anxious_next) <= 0.0:
             # Native restarts the tail of the reload at `frame_dt * 0.8` when
             # Anxious Loader overcuts the timer.
-            player.weapon.reload_timer = float(f32(float(dt) * 0.8))
+            player.weapon.reload_timer = x87_pc24_mul(float(dt), f32(0.8))
 
     reload_timer_now = float(f32(float(player.weapon.reload_timer)))
     dt_f32 = float(f32(float(dt)))
+    reload_step = x87_pc24_mul(f32(float(reload_scale)), dt_f32)
     # Native preloads ammo one frame before reload timer underflows using the
     # unscaled `frame_dt` (before Stationary Reloader scale is applied). That
     # can miss reload completion when Stationary Reloader is active, leaving the
     # clip empty and causing a one-shot reload loop (fixed by default).
     preload_dt = dt_f32
     if not state.preserve_bugs:
-        preload_dt = float(f32(float(reload_scale) * float(dt_f32)))
+        preload_dt = reload_step
 
-    reload_preload_underflow = float(f32(reload_timer_now - preload_dt))
-    # Native can complete reload and fire on the same frame when held fire
-    # meets an almost-zero reload boundary. Treat near-zero underflow as
-    # completion for fire-held ticks to avoid a spurious empty-shot reload loop.
-    preload_crossed = reload_preload_underflow < -_RELOAD_PRELOAD_UNDERFLOW_EPS
-    preload_fire_boundary = input_state.fire_down and reload_preload_underflow <= _RELOAD_PRELOAD_UNDERFLOW_EPS
-    if player.weapon.reload_active and reload_timer_now > 0.0 and (preload_crossed or preload_fire_boundary):
+    reload_preload_underflow = x87_pc24_sub(reload_timer_now, preload_dt)
+    if reload_timer_now > 0.0 and reload_preload_underflow < 0.0:
         player.weapon.ammo = float(player.weapon.clip_size)
 
     if player.weapon.reload_timer > 0.0:
         if (
-            perk_active(player, PerkId.ANGRY_RELOADER)
+            perk_active(perk_player, PerkId.ANGRY_RELOADER)
             and player.weapon.reload_timer_max > 0.5
-            and (player.weapon.reload_timer_max * 0.5) < player.weapon.reload_timer
+            and x87_pc24_mul(player.weapon.reload_timer_max, f32(0.5)) < player.weapon.reload_timer
         ):
-            half = player.weapon.reload_timer_max * 0.5
-            next_timer = float(f32(float(player.weapon.reload_timer) - float(reload_scale) * float(dt)))
+            half = x87_pc24_mul(player.weapon.reload_timer_max, f32(0.5))
+            next_timer = x87_pc24_sub(float(player.weapon.reload_timer), reload_step)
             player.weapon.reload_timer = next_timer
             if next_timer <= half:
                 count = 7 + int(player.weapon.reload_timer_max * 4.0)
@@ -907,12 +1022,15 @@ def player_update(
                 state.bonus_spawn_guard = False
                 state.sfx_queue.append(SfxId.EXPLOSION_SMALL)
         else:
-            player.weapon.reload_timer = float(f32(float(player.weapon.reload_timer) - float(reload_scale) * float(dt)))
+            player.weapon.reload_timer = x87_pc24_sub(
+                float(player.weapon.reload_timer),
+                reload_step,
+            )
 
     if player.weapon.reload_timer < 0.0:
         player.weapon.reload_timer = 0.0
 
-    has_alt_weapon_perk = perk_active(player, PerkId.ALTERNATE_WEAPON)
+    has_alt_weapon_perk = perk_active(perk_player, PerkId.ALTERNATE_WEAPON)
     single_player_mode = (len(players) == 1) if players is not None else True
     # Native gates on `grim_is_key_active` (key held), so holding reload chains
     # reloads back-to-back as each one completes.
@@ -925,7 +1043,7 @@ def player_update(
         and bool(single_player_mode)
     )
     if manual_reload_allowed:
-        _player_start_reload(player, state)
+        _player_start_reload(player, state, players=players)
 
     _player_update_aim_by_scheme(
         player=player,
@@ -939,10 +1057,13 @@ def player_update(
     # Native cools spread after perk timers/movement but before weapon fire.
     # Keeping this below `apply_player_perk_ticks` preserves Fire Cough spread
     # sampling order while still applying cooldown before `player_fire_weapon`.
-    if perk_active(player, PerkId.SHARPSHOOTER):
-        player.spread_heat = 0.02
+    if perk_active(perk_player, PerkId.SHARPSHOOTER):
+        player.spread_heat = f32(0.02)
     else:
-        player.spread_heat = max(0.01, player.spread_heat - dt * 0.4)
+        player.spread_heat = max(
+            f32(0.01),
+            x87_pc24_sub(player.spread_heat, x87_pc24_mul(dt, f32(0.4))),
+        )
 
     fire_gate_open_pre_reload = player.weapon.shot_cooldown <= 0.0 and player.weapon.reload_timer == 0.0
 
@@ -967,7 +1088,7 @@ def player_update(
                 swapped_alt_weapon = True
                 weapon = _weapon_entry(player.weapon.weapon_id)
                 state.sfx_queue.append(weapon.reload_sound)
-                player.weapon.shot_cooldown = float(player.weapon.shot_cooldown) + 0.1
+                player.weapon.shot_cooldown = x87_pc24_add(player.weapon.shot_cooldown, f32(0.1))
                 state.player_alt_weapon_swap_cooldown_ms = 200
             else:
                 state.player_alt_weapon_swap_cooldown_ms = 0
@@ -981,9 +1102,6 @@ def player_update(
     force_pre_swap_fire_gate = swapped_alt_weapon and fire_gate_open_pre_reload and input_state.fire_down
     if force_pre_swap_fire_gate:
         player.weapon.shot_cooldown = 0.0
-
-    if input_state.fire_down:
-        state.survival_reward_fire_seen = True
 
     _fire_weapon(
         _WeaponFireCtx(
@@ -1000,9 +1118,9 @@ def player_update(
     )
 
     while player.move_phase > 14.0:
-        player.move_phase -= 14.0
+        player.move_phase = f32(float(player.move_phase) - 14.0)
     while player.move_phase < 0.0:
-        player.move_phase += 14.0
+        player.move_phase = f32(float(player.move_phase) + 14.0)
 
     half_size = max(0.0, float(player.size) * 0.5)
     clamped_pos = player.pos.clamp_rect(
@@ -1041,9 +1159,9 @@ def _player_heading_approach_target_with_delta(
     diff = wrapped if direct >= wrapped else direct
 
     dt_f32 = float(f32(float(dt)))
-    # Native computes `player_heading_turn_delta = frame_dt * diff * 5.0` via
-    # float32 temporaries/spills. Quantize `frame_dt * diff` to float32 before
-    # applying the `* 5.0` to match x87 store boundaries.
+    # Native computes `frame_dt * diff * 5.0` under x87 PC=24. Quantize after
+    # each multiply to model that precision even though the intermediate stays
+    # on the x87 stack.
     scaled = float(f32(float(dt_f32) * float(diff)))
     if direct <= wrapped:
         if target > heading:

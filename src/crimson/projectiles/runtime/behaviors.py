@@ -15,7 +15,7 @@ from ...creatures.damage_types import CreatureDamageType
 from ...creatures.lifecycle import creature_lifecycle_is_collidable
 from ...creatures.spawn import CreatureFlags
 from ...effects import EffectPool
-from ...math_parity import NATIVE_HALF_PI, NATIVE_PI, f32
+from ...math_parity import NATIVE_HALF_PI, NATIVE_PI, f32, x87_pc24_mul, x87_pc24_sub
 from ...owner_ref import OwnerRef
 from ...rng_caller_static import RngCallerStatic
 from ...weapons import weapon_entry_for_projectile_type_id
@@ -29,7 +29,11 @@ from ..types import (
     Projectile,
     ProjectileTemplateId,
 )
-from .collision import _apply_damage_to_creature, _within_native_find_radius
+from .collision import (
+    _apply_damage_to_creature,
+    _within_native_find_radius,
+    creature_find_nearest_active,
+)
 
 if TYPE_CHECKING:
     from ...creatures.runtime import CreatureState
@@ -70,9 +74,9 @@ _ProjectileHitPerkHook = Callable[[_ProjectileHitPerkCtx], None]
 
 
 def _projectile_hit_perk_poison_bullets(ctx: _ProjectileHitPerkCtx) -> None:
-    # Native gates on the global perk count, so the rand is drawn for every
-    # projectile hit while any player owns the perk - including creature-owned
-    # projectiles such as splitter children and shock-chain segments.
+    # Native gates on player slot zero, so the rand is drawn for every projectile
+    # hit while that player owns the perk - including creature-owned projectiles
+    # such as splitter children and shock-chain segments.
     if (
         ctx.poison_bullets_active
         and (ctx.rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_POISON_BULLETS_GATE) & 7) == 1
@@ -84,7 +88,7 @@ _PROJECTILE_HIT_PERK_HOOKS: tuple[_ProjectileHitPerkHook, ...] = (_projectile_hi
 
 
 def _life_timer_sub_f32(life_timer: float, amount: float) -> float:
-    return float(f32(float(life_timer) - float(amount)))
+    return x87_pc24_sub(life_timer, amount)
 
 
 def _linger_default(ctx: _ProjectileUpdateCtx, proj: Projectile) -> None:
@@ -92,7 +96,8 @@ def _linger_default(ctx: _ProjectileUpdateCtx, proj: Projectile) -> None:
 
 
 def _linger_gauss_gun(ctx: _ProjectileUpdateCtx, proj: Projectile) -> None:
-    proj.life_timer = _life_timer_sub_f32(float(proj.life_timer), float(ctx.dt) * 0.1)
+    decay = x87_pc24_mul(ctx.dt, f32(0.1))
+    proj.life_timer = _life_timer_sub_f32(proj.life_timer, decay)
 
 
 def _linger_ion_aoe(
@@ -103,9 +108,10 @@ def _linger_ion_aoe(
     damage_per_second: float,
     base_radius: float,
 ) -> None:
-    proj.life_timer = _life_timer_sub_f32(float(proj.life_timer), float(ctx.dt) * float(life_decay_scale))
-    damage = float(ctx.dt) * float(damage_per_second)
-    radius = float(ctx.ion_scale) * float(base_radius)
+    decay = x87_pc24_mul(ctx.dt, f32(life_decay_scale))
+    proj.life_timer = _life_timer_sub_f32(proj.life_timer, decay)
+    damage = x87_pc24_mul(ctx.dt, f32(damage_per_second))
+    radius = x87_pc24_mul(f32(ctx.ion_scale), f32(base_radius))
     for creature_idx, creature in enumerate(ctx.creatures):
         if not creature.active:
             continue
@@ -212,21 +218,13 @@ def _post_hit_ion_rifle(ctx: _ProjectileUpdateCtx, hit: _ProjectileHitInfo) -> N
             runtime_state.shock_chain_links_left = links_left - 1
 
             origin_pos = hit.proj.pos
-            min_dist_sq = 100.0 * 100.0
-
-            best_idx = 0 if bool(runtime_state.preserve_bugs) else -1
-            best_dist_sq = 1e12
-            for creature_id, creature in enumerate(creatures):
-                if creature_id == hit_creature:
-                    continue
-                if not creature.active:
-                    continue
-                d_sq = Vec2.distance_sq(origin_pos, creature.pos)
-                if d_sq <= min_dist_sq:
-                    continue
-                if d_sq < best_dist_sq:
-                    best_dist_sq = d_sq
-                    best_idx = creature_id
+            best_idx = creature_find_nearest_active(
+                creatures=creatures,
+                origin=origin_pos,
+                exclude_id=hit_creature,
+                min_dist=100.0,
+                preserve_bugs=bool(runtime_state.preserve_bugs),
+            )
 
             if best_idx < 0:
                 _post_hit_ion_common(ctx, hit)
@@ -239,7 +237,6 @@ def _post_hit_ion_rifle(ctx: _ProjectileUpdateCtx, hit: _ProjectileHitInfo) -> N
             delta = target.pos - origin.pos
             angle = float(f32(math.atan2(float(delta.y), float(delta.x)) - NATIVE_HALF_PI - NATIVE_PI))
 
-            prev_guard = bool(runtime_state.bonus_spawn_guard)
             runtime_state.bonus_spawn_guard = True
             try:
                 proj_id = ctx.pool.spawn(
@@ -250,7 +247,7 @@ def _post_hit_ion_rifle(ctx: _ProjectileUpdateCtx, hit: _ProjectileHitInfo) -> N
                     travel_budget=hit.proj.travel_budget,
                 )
             finally:
-                runtime_state.bonus_spawn_guard = prev_guard
+                runtime_state.bonus_spawn_guard = False
             runtime_state.shock_chain_projectile_id = proj_id
     _post_hit_ion_common(ctx, hit)
 
@@ -264,9 +261,7 @@ def _post_hit_plasma_cannon(ctx: _ProjectileUpdateCtx, hit: _ProjectileHitInfo) 
     plasma_meta = float(plasma_entry.travel_budget)
 
     runtime_state = ctx.runtime_state
-    prev_guard = False
     if runtime_state is not None:
-        prev_guard = bool(runtime_state.bonus_spawn_guard)
         runtime_state.bonus_spawn_guard = True
     try:
         for ring_idx in range(12):
@@ -281,7 +276,7 @@ def _post_hit_plasma_cannon(ctx: _ProjectileUpdateCtx, hit: _ProjectileHitInfo) 
             )
     finally:
         if runtime_state is not None:
-            runtime_state.bonus_spawn_guard = prev_guard
+            runtime_state.bonus_spawn_guard = False
 
     _spawn_plasma_cannon_hit_effects(
         ctx.effects,

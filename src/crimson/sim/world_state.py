@@ -12,17 +12,18 @@ from ..bonuses.pickup_fx import emit_bonus_pickup_effects
 from ..bonuses.update import bonus_update, bonus_update_pre_pickup_timers
 from ..camera import camera_shake_update
 from ..creatures.anim import creature_anim_advance_phase
-from ..creatures.damage import creature_apply_damage_with_lethal_followup
+from ..creatures.damage import creature_apply_damage_with_lethal_followup, creature_death_sfx_for_slot
 from ..creatures.damage_runtime import CreatureDamageRuntime
 from ..creatures.runtime import CreatureDeath, CreaturePool, CreatureUpdateOptions
-from ..creatures.spawn import CreatureAiMode, CreatureFlags, CreatureTypeId, SpawnEnv
+from ..creatures.spawn import SpawnEnv
 from ..effects import FxQueue, FxQueueRotated
 from ..game_modes import GameMode
 from ..gameplay import (
     build_gameplay_state,
+    gameplay_accumulate_weapon_usage_time,
+    gameplay_enforce_weapon_guards,
     player_frame_dt_after_roundtrip,
     player_update,
-    survival_enforce_reward_weapon_guard,
     survival_progression_update,
 )
 from ..owner_ref import OwnerRef
@@ -43,6 +44,7 @@ from .presentation_step import (
     queue_projectile_decals_pre_hit,
 )
 from .state_types import BonusPickupEvent, GameplayState, PlayerState
+from .timing import ftol_ms_i32
 from .world_defs import CREATURE_ANIM
 
 
@@ -51,6 +53,7 @@ class WorldEvents(msgspec.Struct):
     deaths: tuple[CreatureDeath, ...]
     pickups: list[BonusPickupEvent]
     sfx: list[SfxId]
+    secondary_hit_count: int = 0
     trigger_game_tune: bool = False
     hit_sfx: list[SfxId] = msgspec.field(default_factory=list)
 
@@ -120,7 +123,7 @@ class _WorldStepRuntime(ProjectileHitRuntime, CreatureDamageRuntime, PlayerDeath
     def on_creature_lethal(
         self,
         creature_index: int,
-        resolve_death_sfx: Callable[[], tuple[SfxId, ...]],
+        resolve_damage_followup: Callable[[], tuple[SfxId, ...]],
     ) -> None:
         self.world._record_creature_death(
             creature_index=int(creature_index),
@@ -130,7 +133,7 @@ class _WorldStepRuntime(ProjectileHitRuntime, CreatureDamageRuntime, PlayerDeath
             fx_queue=self.fx_queue,
             deaths=self.deaths,
             sfx=self.sfx,
-            resolve_death_sfx=resolve_death_sfx,
+            resolve_damage_followup=resolve_damage_followup,
         )
 
     def on_secondary_detonation_kill(self, creature_index: int) -> None:
@@ -205,8 +208,6 @@ class _WorldStepRuntime(ProjectileHitRuntime, CreatureDamageRuntime, PlayerDeath
         creature = self.world.creatures.entries[idx]
         if not creature.active:
             return
-        if float(creature.hp) <= 0.0:
-            return
         creature.last_hit_owner = owner
         self.world._record_creature_death(
             creature_index=idx,
@@ -219,6 +220,14 @@ class _WorldStepRuntime(ProjectileHitRuntime, CreatureDamageRuntime, PlayerDeath
             keep_corpse=False,
         )
 
+    def on_bubblegun_expiry_sfx(self, creature_index: int, sound_slot: int) -> None:
+        idx = int(creature_index)
+        if not (0 <= idx < len(self.world.creatures.entries)):
+            return
+        sfx_id = creature_death_sfx_for_slot(self.world.creatures.entries[idx].type_id, int(sound_slot))
+        if sfx_id is not None:
+            self.sfx.append(sfx_id)
+
     def on_player_lethal(self, player: PlayerState, *, dt: float) -> None:
         self.world._run_player_death_hooks(
             player=player,
@@ -229,9 +238,16 @@ class _WorldStepRuntime(ProjectileHitRuntime, CreatureDamageRuntime, PlayerDeath
             deaths=self.deaths,
         )
 
-    def build_events(self, *, hits: list[ProjectileHit], pickups: list[BonusPickupEvent]) -> WorldEvents:
+    def build_events(
+        self,
+        *,
+        hits: list[ProjectileHit],
+        secondary_hit_count: int,
+        pickups: list[BonusPickupEvent],
+    ) -> WorldEvents:
         return WorldEvents(
             hits=hits,
+            secondary_hit_count=int(secondary_hit_count),
             deaths=tuple(self.deaths),
             pickups=pickups,
             sfx=self.sfx,
@@ -276,12 +292,17 @@ class WorldState(msgspec.Struct):
             creatures=creatures,
         )
 
+    def world_dt_after_perk_steps(self, dt: float) -> float:
+        world_dt = float(dt)
+        for step in _WORLD_DT_STEPS:
+            world_dt = float(step(dt=world_dt, players=self.players))
+        return float(world_dt)
+
     def step(
         self,
         dt: float,
         *,
         apply_world_dt_steps: bool = True,
-        dt_player_local: float | None = None,
         defer_camera_shake_update: bool = False,
         defer_freeze_corpse_fx: bool = False,
         mid_step_runtime: WorldMidStepRuntime | None = None,
@@ -298,13 +319,10 @@ class WorldState(msgspec.Struct):
     ) -> WorldEvents:
         dt = float(dt)
         fx_queue.violence_disabled = int(violence_disabled)
-        self.state.player_death_hook_skip_indices.clear()
         if apply_world_dt_steps:
-            for step in _WORLD_DT_STEPS:
-                dt = float(step(dt=dt, players=self.players))
+            dt = self.world_dt_after_perk_steps(dt)
+        frame_dt_ms = ftol_ms_i32(dt)
         inputs = normalize_input_frame(inputs, player_count=len(self.players)).as_list()
-        prev_positions = [(player.pos.x, player.pos.y) for player in self.players]
-        prev_health = [float(player.health) for player in self.players]
         # Native Freeze pickup shatters corpses that existed at tick start;
         # same-tick kills are not included in that pass.
         freeze_corpse_indices_at_tick_start = {
@@ -359,7 +377,7 @@ class WorldState(msgspec.Struct):
                 ),
             ),
         )
-        self.state.secondary_projectiles.step(
+        secondary_hit_count = self.state.secondary_projectiles.step(
             SecondaryStepCtx(
                 dt=float(dt),
                 creatures=self.creatures.entries,
@@ -370,15 +388,6 @@ class WorldState(msgspec.Struct):
                 play_rocket_hit_audio=step_runtime.play_secondary_rocket_hit_audio,
             ),
         )
-        self._run_post_damage_player_death_hooks(
-            prev_health=prev_health,
-            dt=float(dt),
-            world_size=float(world_size),
-            detail_preset=int(detail_preset),
-            fx_queue=fx_queue,
-            deaths=step_runtime.deaths,
-        )
-
         # Native updates the sprite pool before the particle loop, so sprites
         # spawned by particles only advance on the next tick.
         self.state.sprite_effects.update(dt)
@@ -391,8 +400,6 @@ class WorldState(msgspec.Struct):
         )
         reload_active_any = any(bool(entry.reload_down) or bool(entry.reload_pressed) for entry in inputs)
         player_dt = float(dt)
-        if dt_player_local is not None:
-            player_dt = float(dt_player_local)
         for idx, player in enumerate(self.players):
             input_state = inputs[idx] if idx < len(inputs) else PlayerInput()
             player_update(
@@ -408,18 +415,17 @@ class WorldState(msgspec.Struct):
                 player_death_runtime=step_runtime,
                 reload_active_any=bool(reload_active_any),
             )
-            if dt_player_local is None:
-                player_dt = player_frame_dt_after_roundtrip(
-                    dt=player_dt,
-                    time_scale_active=bool(self.state.time_scale_active),
-                    reflex_boost_timer=float(self.state.bonuses.reflex_boost),
-                )
+            player_dt = player_frame_dt_after_roundtrip(
+                dt=player_dt,
+                time_scale_active=bool(self.state.time_scale_active),
+                reflex_boost_timer=float(self.state.bonuses.reflex_boost),
+            )
         dt = float(player_dt)
         if dt > 0.0:
             self._advance_creature_anim(dt)
-            self._advance_player_anim(dt, prev_positions)
         if mid_step_runtime is not None:
             mid_step_runtime.run_mid_step()
+        self.state.highscore_score_xp = int(self.players[0].experience) if self.players else 0
         if not bool(defer_camera_shake_update):
             camera_shake_update(self.state, dt)
         # Native level-up/perk-pending check runs before `bonus_update` in
@@ -433,6 +439,8 @@ class WorldState(msgspec.Struct):
         # Native latches `time_scale_active` late (post mode update, pre bonus decrement); next-frame dt uses it.
         self.state.time_scale_active = float(self.state.bonuses.reflex_boost) > 0.0
         bonus_update_pre_pickup_timers(self.state, dt)
+        gameplay_accumulate_weapon_usage_time(self.state, self.players, frame_dt_ms)
+        gameplay_enforce_weapon_guards(self.state, self.players)
         pickups = bonus_update(
             self.state,
             self.players,
@@ -450,14 +458,14 @@ class WorldState(msgspec.Struct):
                 pickups=pickups,
                 detail_preset=int(detail_preset),
             )
-        survival_enforce_reward_weapon_guard(self.state, self.players)
         if self.state.sfx_queue:
             step_runtime.sfx.extend(self.state.sfx_queue)
             self.state.sfx_queue.clear()
-        # Player-damage VO RNG work lives inside `player_take_damage` for native
-        # ordering parity (VO draw before heading-jitter draw).
-        self.state.player_death_hook_skip_indices.clear()
-        return step_runtime.build_events(hits=hits, pickups=pickups)
+        return step_runtime.build_events(
+            hits=hits,
+            secondary_hit_count=int(secondary_hit_count),
+            pickups=pickups,
+        )
 
     def _run_player_death_hooks(
         self,
@@ -482,36 +490,6 @@ class WorldState(msgspec.Struct):
                 deaths=deaths,
             )
 
-    def _run_post_damage_player_death_hooks(
-        self,
-        *,
-        prev_health: list[float],
-        dt: float,
-        world_size: float,
-        detail_preset: int,
-        fx_queue: FxQueue,
-        deaths: list[CreatureDeath],
-    ) -> None:
-        for idx, player in enumerate(self.players):
-            if idx >= len(prev_health):
-                continue
-            if float(prev_health[idx]) < 0.0:
-                continue
-            if float(player.health) >= 0.0:
-                continue
-            player_idx = int(player.index)
-            if player_idx in self.state.player_death_hook_skip_indices:
-                self.state.player_death_hook_skip_indices.discard(player_idx)
-                continue
-            self._run_player_death_hooks(
-                player=player,
-                dt=float(dt),
-                world_size=float(world_size),
-                detail_preset=int(detail_preset),
-                fx_queue=fx_queue,
-                deaths=deaths,
-            )
-
     def _record_creature_death(
         self,
         *,
@@ -523,7 +501,7 @@ class WorldState(msgspec.Struct):
         deaths: list[CreatureDeath],
         keep_corpse: bool = True,
         sfx: list[SfxId],
-        resolve_death_sfx: Callable[[], tuple[SfxId, ...]] | None = None,
+        resolve_damage_followup: Callable[[], tuple[SfxId, ...]] | None = None,
     ) -> None:
         death = self.creatures.handle_death(
             int(creature_index),
@@ -538,8 +516,8 @@ class WorldState(msgspec.Struct):
             keep_corpse=bool(keep_corpse),
         )
         deaths.append(death)
-        if resolve_death_sfx is not None:
-            sfx.extend(resolve_death_sfx())
+        if resolve_damage_followup is not None:
+            sfx.extend(resolve_damage_followup())
 
     def _prepare_projectile_hit_presentation(
         self,
@@ -606,25 +584,4 @@ class WorldState(msgspec.Struct):
                 local_scale=float(creature.move_scale),
                 flags=creature.flags,
                 ai_mode=int(creature.ai_mode),
-            )
-
-    def _advance_player_anim(self, dt: float, prev_positions: list[tuple[float, float]]) -> None:
-        info = CREATURE_ANIM.get(CreatureTypeId.TROOPER)
-        if info is None:
-            return
-        for idx, player in enumerate(self.players):
-            if idx >= len(prev_positions):
-                continue
-            prev_x, prev_y = prev_positions[idx]
-            speed = Vec2(player.pos.x - prev_x, player.pos.y - prev_y).length()
-            move_speed = speed / dt / 120.0 if dt > 0.0 else 0.0
-            player.move_phase, _ = creature_anim_advance_phase(
-                player.move_phase,
-                anim_rate=info.anim_rate,
-                move_speed=move_speed,
-                dt=dt,
-                size=float(player.size),
-                local_scale=1.0,
-                flags=CreatureFlags(0),
-                ai_mode=CreatureAiMode.ORBIT_PLAYER,
             )

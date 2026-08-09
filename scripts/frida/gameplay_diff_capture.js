@@ -5,7 +5,7 @@
 // - deterministic command/event summaries for first-divergence debugging
 // - compact before/after snapshots and entity samples on every tick
 // - emits a single JSONL stream with explicit run markers:
-//   session_start, run_start, tick, run_end, session_end
+//   session_start, run_start, tick, run_end
 //
 // Attach:
 //   frida -n crimsonland.exe -l C:\share\frida\gameplay_diff_capture.js
@@ -20,15 +20,77 @@ const DEFAULT_OUT_NAME = "gameplay_diff_capture.jsonl";
 const DEFAULT_TRACKED_STATES = "6,7,8,9,10,12,14,18";
 const DEFAULT_CONSOLE_EVENTS =
   "start,ready,capture_shutdown,error,hook_error,hook_skip,tickless_event";
-const CAPTURE_FORMAT_VERSION = 15;
+const CAPTURE_FORMAT_VERSION = 25;
+const REQUIRED_FRIDA_VERSION = "17.15.4";
+// Keep this JSON-compatible: src/crimson/dbg/format_contract.py parses it and
+// compares every field set with the authoritative Python msgspec structs.
+// BEGIN CAPTURE_FIELD_SETS
+const CAPTURE_FIELD_SETS = {
+  "session_start": ["event", "capture_format_version", "session_id", "out_path", "platform", "arch", "frida_version", "script_version", "config", "session_fingerprint"],
+  "session_start.config": ["out_path", "out_path_source", "capture_profile", "config_env_overrides", "console_all_events", "console_events", "include_caller", "include_backtrace", "emit_ticks_outside_tracked_states", "tracked_states", "player_count_override", "focus_tick", "focus_radius", "heartbeat_ms", "max_head_per_kind", "max_events_per_tick", "max_rng_head_per_tick", "max_rng_caller_kinds", "enable_rng_roll_log", "max_rng_roll_log_events", "max_rng_outside_tick_head", "enable_rng_state_mirror", "max_creature_delta_ids", "creature_sample_limit", "projectile_sample_limit", "secondary_projectile_sample_limit", "bonus_sample_limit", "enable_input_hooks", "enable_rng_hooks", "enable_sfx_hooks", "enable_damage_hooks", "enable_effect_hooks", "creature_damage_projectile_only", "enable_spawn_hooks", "enable_creature_spawn_hook", "enable_creature_death_hook", "enable_bonus_spawn_hook", "enable_creature_lifecycle_digest", "enable_creature_micro_hooks", "creature_micro_slots", "creature_micro_tick_start", "creature_micro_tick_end", "creature_micro_max_head_per_tick"],
+  "session_start.session_fingerprint": ["session_id", "ptrs_hash", "module_hash"],
+  "run_start": [
+    "event", "run_id", "mode_id", "player_count", "reason",
+    "quest_stage_major", "quest_stage_minor", "global_tick_index",
+    "rng_state_before_bootstrap", "rng_state_after_bootstrap",
+    "rng_bootstrap_calls", "pool_residue", "settings"
+  ],
+  "run_start.settings": ["tick_rate", "quest_fail_retry_count", "hardcore", "detail_preset", "violence_disabled", "world_size", "status"],
+  "run_start.settings.status": ["quest_unlock_index", "quest_unlock_index_full", "weapon_usage_counts", "quest_play_counts", "mode_play_survival", "mode_play_rush", "mode_play_typo", "mode_play_other", "play_time_ms", "reserved_seed_words"],
+  "run_start.pool_residue[]": ["index", "active", "phase_seed", "state_flag", "collision_flag", "collision_timer", "lifecycle_stage", "pos", "vel", "hp", "max_hp", "heading", "target_heading", "size", "hit_flash_timer", "tint", "force_target", "target", "contact_damage", "move_speed", "attack_cooldown", "reward_value", "type_id", "target_player", "link_index", "target_offset", "orbit_angle", "orbit_radius_u32", "flags", "ai_mode", "anim_phase"],
+  "tick": ["event", "run_id", "tick_index", "global_tick_index", "elapsed_ms", "dt_ms_i32", "mode_id", "channels", "quest_stage_major", "quest_stage_minor", "rng_calls", "rng_outside_before", "rng_state_enter_u32", "rng_state_leave_u32", "evidence"],
+  "tick.evidence": ["event_counts", "event_overflow", "event_heads", "diagnostics", "input_queries", "input_player_keys", "input_approx", "before", "after", "samples", "frame_dt_ms", "frame_dt_ms_i32", "checkpoint_private", "clocks"],
+  "tick.evidence.checkpoint_private": ["elapsed_ms", "deaths", "events"],
+  "tick.evidence.checkpoint_private.events": ["hit_count", "pickup_count", "sfx_count", "sfx_head", "hit_head"],
+  "tick.evidence.clocks": ["time_played_ms_raw", "quest_spawn_timeline_raw", "summed_replay_clock_ms", "canonical_elapsed_ms"],
+  "tick.channels": ["replay_step", "checkpoint", "sim_state", "entity_samples", "rng_stream", "timing_samples"],
+  "tick.channels.replay_step": ["dt", "inputs", "prelude", "postlude", "commands"],
+  "tick.channels.replay_step.inputs[]": ["move_x", "move_y", "aim_x", "aim_y", "flags"],
+  "tick.channels.checkpoint": ["tick_index", "rng_state", "elapsed_ms", "score_xp", "kills", "creature_count", "perk_pending", "players", "bonus_timers", "deaths", "perk", "events", "tutorial", "typo"],
+  "tick.channels.checkpoint.players[]": ["pos", "health", "weapon_id", "ammo", "experience", "level"],
+  "tick.channels.checkpoint.deaths[]": ["creature_index", "type_id", "reward_value", "xp_awarded", "owner_id"],
+  "tick.channels.checkpoint.perk": ["pending_count", "choices_dirty", "choices", "player_nonzero_counts"],
+  "tick.channels.checkpoint.events": ["hit_count", "pickup_count", "sfx_count", "sfx_head", "hit_head"],
+  "tick.channels.sim_state": ["gameplay", "players"],
+  "tick.channels.sim_state.gameplay": ["mode_id", "quest_stage_major", "quest_stage_minor", "perk_pending_count", "perk_choices_dirty", "bonus_timers"],
+  "tick.channels.sim_state.gameplay.bonus_timers": ["weapon_power_up_ms", "reflex_boost_ms", "energizer_ms", "double_experience_ms", "freeze_ms"],
+  "tick.channels.sim_state.players[]": ["index", "pos", "heading", "move_speed", "move_phase", "aim", "aim_heading", "health", "weapon", "experience", "level"],
+  "tick.channels.sim_state.players[].weapon": ["weapon_id", "ammo", "clip_size", "reload_active", "reload_timer", "reload_timer_max", "shot_cooldown"],
+  "tick.channels.entity_samples": ["creatures", "projectiles", "secondary_projectiles", "bonuses"],
+  "tick.channels.entity_samples.creatures[]": ["uid", "generation", "pool_kind", "index", "active", "type_id", "hp", "pos", "tint", "flags", "ai_mode", "link_index", "force_target", "target", "target_player", "target_offset", "heading", "target_heading", "collision_timer", "attack_cooldown", "orbit_angle", "orbit_radius", "lifecycle_stage", "vel", "move_speed"],
+  "tick.channels.entity_samples.projectiles[]": ["uid", "generation", "pool_kind", "index", "active", "type_id", "angle", "pos", "vel", "life_timer", "speed_scale", "damage_pool", "hit_radius", "travel_budget", "owner_id"],
+  "tick.channels.entity_samples.secondary_projectiles[]": ["uid", "generation", "pool_kind", "index", "active", "type_id", "angle", "pos", "vel", "speed", "trail_timer", "owner_id", "target_id"],
+  "tick.channels.entity_samples.bonuses[]": ["uid", "generation", "pool_kind", "index", "active", "bonus_id", "picked", "time_left", "time_max", "pos", "amount"],
+  "tick.channels.rng_stream[]": ["tick_call_index", "value_15", "state_before_u32", "state_after_u32", "caller"],
+  "tick.channels.timing_samples[]": ["tick_index", "gameplay_frame", "phase", "write_kind", "frame_dt_f32", "frame_dt_ms_i32", "frame_dt_ms_f32", "time_scale_active_entry", "time_scale_active_current", "time_scale_factor", "bonus_reflex_boost_timer", "mode_fn", "player_index"],
+  "tick.rng_outside_before": ["calls", "dropped", "caller_counts", "head"],
+  "tick.rng_outside_before.head[]": ["state_before_u32", "state_after_u32", "value_15", "caller_static", "replay_operation_index"],
+  "run_end": ["event", "run_id", "mode_id", "quest_stage_major", "quest_stage_minor", "ticks_written", "reason", "global_tick_index", "trailing_prelude", "rng_outside_tail"],
+  "run_end.rng_outside_tail": ["calls", "dropped", "caller_counts", "head"],
+  "run_end.rng_outside_tail.head[]": ["state_before_u32", "state_after_u32", "value_15", "caller_static", "replay_operation_index"],
+  "run_error": ["event", "error", "run_id", "mode_id", "quest_stage_major", "quest_stage_minor", "global_tick_index"],
+  "error": ["event", "error", "run_id", "global_tick_index"]
+};
+// END CAPTURE_FIELD_SETS
 // First rng caller of native run setup (terrain_generate prelude roll 1). The
 // rand state observed before this draw is the state a replay must seed from to
 // reproduce the run's setup draws (terrain stamps, quest build) value-for-value.
 const RUN_SETUP_FIRST_RNG_CALLER_STATIC = "0x004181cc";
+const FRAME_DISCARDED_RNG_CALLER_STATIC = "0x0040cac7";
+const PERK_SELECTION_APPLY_RETURN_STATIC = 0x004060fa;
 const LINK_BASE = ptr("0x00400000");
 const GAME_MODULE = "crimsonland.exe";
 const GRIM_MODULE = "grim.dll";
+const GAME_MODE_DEMO = 0;
+const GAME_MODE_SURVIVAL = 1;
+const GAME_MODE_RUSH = 2;
 const GAME_MODE_QUESTS = 3;
+const GAME_MODE_TYPO = 4;
+const GAME_MODE_TUTORIAL = 8;
+const GAME_STATE_GAME_OVER = 7;
+const GAME_STATE_QUEST_RESULTS = 8;
+const GAME_STATE_GAMEPLAY = 9;
+const GAME_STATE_QUEST_FAILED = 12;
 const MOVE_MODE_UNKNOWN = 0;
 const MOVE_MODE_RELATIVE = 1;
 const MOVE_MODE_STATIC = 2;
@@ -148,7 +210,6 @@ function parseStringSet(raw, fallbackCsv) {
 const CONFIG_ENV_KEYS = [
   "CRIMSON_FRIDA_DIR",
   "CRIMSON_FRIDA_OUT_PATH",
-  "CRIMSON_FRIDA_APPEND",
   "CRIMSON_FRIDA_CONSOLE_ALL_EVENTS",
   "CRIMSON_FRIDA_CONSOLE_EVENTS",
   "CRIMSON_FRIDA_INCLUDE_CALLER",
@@ -160,7 +221,6 @@ const CONFIG_ENV_KEYS = [
   "CRIMSON_FRIDA_FOCUS_TICK",
   "CRIMSON_FRIDA_FOCUS_RADIUS",
   "CRIMSON_FRIDA_HEARTBEAT_MS",
-  "CRIMSON_FRIDA_FLUSH_CAPTURE_WRITES",
   "CRIMSON_FRIDA_MAX_HEAD",
   "CRIMSON_FRIDA_MAX_EVENTS_PER_TICK",
   "CRIMSON_FRIDA_RNG_HEAD",
@@ -224,10 +284,20 @@ function toHex(value, width) {
 }
 
 const LOG_DIR = getEnv("CRIMSON_FRIDA_DIR") || DEFAULT_LOG_DIR;
+const HOST_CONFIG =
+  globalThis.CRIMSON_CAPTURE_HOST_CONFIG &&
+  typeof globalThis.CRIMSON_CAPTURE_HOST_CONFIG === "object"
+    ? globalThis.CRIMSON_CAPTURE_HOST_CONFIG
+    : null;
+const HOST_OUT_PATH =
+  HOST_CONFIG && typeof HOST_CONFIG.out_path === "string" && HOST_CONFIG.out_path.trim()
+    ? HOST_CONFIG.out_path.trim()
+    : null;
+const ENV_OUT_PATH = getEnv("CRIMSON_FRIDA_OUT_PATH");
 
 const CONFIG = {
-  outPath: getEnv("CRIMSON_FRIDA_OUT_PATH") || joinPath(LOG_DIR, DEFAULT_OUT_NAME),
-  logMode: getEnv("CRIMSON_FRIDA_APPEND") === "1" ? "append" : "truncate",
+  outPath: HOST_OUT_PATH || ENV_OUT_PATH || joinPath(LOG_DIR, DEFAULT_OUT_NAME),
+  outPathSource: HOST_OUT_PATH ? "host" : ENV_OUT_PATH ? "environment" : "default",
   consoleAllEvents: parseBoolEnv("CRIMSON_FRIDA_CONSOLE_ALL_EVENTS", false),
   consoleEvents: parseStringSet(getEnv("CRIMSON_FRIDA_CONSOLE_EVENTS"), DEFAULT_CONSOLE_EVENTS),
   includeCaller: parseBoolEnv("CRIMSON_FRIDA_INCLUDE_CALLER", true),
@@ -239,7 +309,6 @@ const CONFIG = {
   focusTick: parseIntEnv("CRIMSON_FRIDA_FOCUS_TICK", -1),
   focusRadius: Math.max(0, parseIntEnv("CRIMSON_FRIDA_FOCUS_RADIUS", 0)),
   heartbeatMs: Math.max(100, parseIntEnv("CRIMSON_FRIDA_HEARTBEAT_MS", 1000)),
-  flushCaptureWrites: parseBoolEnv("CRIMSON_FRIDA_FLUSH_CAPTURE_WRITES", false),
   maxHeadPerKind: parseLimitEnv("CRIMSON_FRIDA_MAX_HEAD", -1, 0),
   maxEventsPerTick: parseLimitEnv("CRIMSON_FRIDA_MAX_EVENTS_PER_TICK", -1, 0),
   maxRngHeadPerTick: parseLimitEnv("CRIMSON_FRIDA_RNG_HEAD", -1, 0),
@@ -274,6 +343,7 @@ const CONFIG = {
 };
 
 const FN = {
+  perks_generate_choices: 0x004045a0,
   perk_apply: 0x004055e0,
   player_update: 0x004136b0,
   gameplay_update_and_render: 0x0040aab0,
@@ -326,10 +396,14 @@ const FN_GRIM_RVA = {
 const DATA = {
   config_player_count: 0x0048035c,
   config_game_mode: 0x00480360,
-  config_player_mode_flags: 0x00480364,
-  config_aim_scheme: 0x0048038c,
+  config_movement_schemes: 0x00480364,
+  config_aim_schemes: 0x0048038c,
   config_key_reload: 0x004807c4,
+  config_hardcore: 0x00480790,
+  config_violence_disabled: 0x004807b4,
+  config_detail_preset: 0x004807b8,
   perk_choice_ids: 0x004807e8,
+  perk_selection_index: 0x0048089c,
   frame_dt: 0x00480840,
   frame_dt_ms: 0x00480844,
   perk_lean_mean_exp_tick_timer_s: 0x004808a4,
@@ -344,6 +418,7 @@ const DATA = {
   quest_spawn_timeline: 0x00486fd0,
   quest_stage_major: 0x00487004,
   quest_stage_minor: 0x00487008,
+  time_scale_active: 0x0048700e,
   bonus_reflex_boost_timer: 0x00487014,
   bonus_freeze_timer: 0x00487018,
   bonus_weapon_power_up_timer: 0x0048701c,
@@ -352,6 +427,7 @@ const DATA = {
   creature_kill_count: 0x00487074,
   quest_transition_timer_ms: 0x00487088,
   time_played_ms: 0x0048718c,
+  quest_fail_retry_count: 0x00487194,
   player_alt_weapon_swap_cooldown_ms: 0x0048719c,
   quest_stage_banner_timer_ms: 0x00487244,
   ui_elements_timeline: 0x00487248,
@@ -372,8 +448,11 @@ const DATA = {
   player_move_dx: 0x004908cc,
   player_move_dy: 0x004908d0,
   player_health: 0x004908d4,
+  player_heading: 0x004908dc,
   player_aim_x: 0x00490900,
   player_aim_y: 0x00490904,
+  player_move_speed: 0x00490918,
+  player_move_phase: 0x00490944,
   player_hot_tempered_timer: 0x0049094c,
   player_man_bomb_timer: 0x00490950,
   player_living_fortress_timer: 0x00490954,
@@ -430,33 +509,49 @@ const DATA = {
 };
 
 const REQUIRED_REPLAY_FN_NAMES = [
+  "perks_generate_choices",
+  "perk_apply",
+  "bonus_apply",
+  "creature_find_in_radius",
   "gameplay_update_and_render",
   "game_state_set",
   "quest_start_selected",
   "quest_mode_update",
   "rush_mode_update",
   "survival_update",
-  "typo_gameplay_update_and_render",
+  "input_any_key_pressed",
+  "input_primary_just_pressed",
+  "input_primary_is_down",
+  "grim_is_key_down",
+  "grim_is_key_active",
 ];
 
 const REQUIRED_REPLAY_DATA_NAMES = [
   "config_player_count",
   "config_game_mode",
-  "config_player_mode_flags",
-  "config_aim_scheme",
+  "config_movement_schemes",
+  "config_aim_schemes",
   "config_key_reload",
+  "config_hardcore",
+  "config_violence_disabled",
+  "config_detail_preset",
+  "perk_choice_ids",
+  "perk_selection_index",
   "game_state_prev",
   "game_state_id",
   "game_state_pending",
   "frame_dt",
   "frame_dt_ms",
+  "time_scale_active",
   "time_played_ms",
+  "quest_fail_retry_count",
   "creature_active_count",
   "creature_kill_count",
   "perk_pending_count",
   "perk_choices_dirty",
   "quest_stage_major",
   "quest_stage_minor",
+  "quest_spawn_timeline",
   "bonus_reflex_boost_timer",
   "bonus_freeze_timer",
   "bonus_weapon_power_up_timer",
@@ -469,8 +564,11 @@ const REQUIRED_REPLAY_DATA_NAMES = [
   "player_move_dx",
   "player_move_dy",
   "player_health",
+  "player_heading",
   "player_aim_x",
   "player_aim_y",
+  "player_move_speed",
+  "player_move_phase",
   "player_aim_heading",
   "player_weapon_id",
   "player_clip_size",
@@ -506,7 +604,9 @@ const COUNTS = {
 };
 
 const STATUS_WEAPON_USAGE_COUNT = 53;
-const PERK_CHOICE_COUNT = 8;
+const STATUS_QUEST_PLAY_COUNT = 91;
+const STATUS_RESERVED_SEED_WORDS_BYTE_SIZE = 16;
+const PERK_CHOICE_COUNT = 7;
 const PERK_COUNT_PER_PLAYER = 0x80;
 const PROJECTILE_UPDATE_START = 0x00420b90;
 const PROJECTILE_UPDATE_END = 0x00422c6f;
@@ -534,6 +634,8 @@ const srandContextByTid = {};
 const bloodSplatterContextByTid = {};
 const creatureUpdateMicroContextByTid = {};
 const angleApproachContextByTid = {};
+let x87ControlWordReader = null;
+let x87ControlWordCode = null;
 const outState = {
   outFile: null,
   outWarned: false,
@@ -541,6 +643,7 @@ const outState = {
   captureMetaTemplate: null,
   captureStarted: false,
   captureClosed: false,
+  captureFailure: null,
   captureTickCount: 0,
   runActive: false,
   currentRunId: 0,
@@ -555,6 +658,7 @@ const outState = {
   currentRunElapsedRawStartMs: null,
   currentRunElapsedRawLastMs: null,
   currentRunElapsedNormalizedMs: null,
+  pendingRunCloseReason: null,
   lastTickIndexGlobal: null,
   shutdownComplete: false,
   gameplayFrame: 0,
@@ -589,8 +693,10 @@ const outState = {
   perkApplyOutsideTickPendingHead: [],
   perkApplyOutsideTickPendingCalls: 0,
   perkApplyOutsideTickPendingDropped: 0,
+  pendingReplayPrelude: [],
+  replayPreludeOperationStackByTid: {},
+  runSetupRngActive: false,
   pending_timing_samples: [],
-  lastSrandSeed: null,
   lastTickElapsedMs: null,
   lastTickGameplayFrame: null,
   lastCreatureDigest: null,
@@ -600,6 +706,31 @@ const outState = {
   lastHookActivity: null,
   lastException: null,
 };
+
+function initializeX87ControlWordReader() {
+  if (Process.arch !== "ia32") return;
+  try {
+    const code = Memory.alloc(Process.pageSize);
+    if (!Memory.protect(code, Process.pageSize, "rwx")) return;
+    // push eax; fnstcw [esp]; pop eax; and eax, 0xffff; ret
+    code.writeByteArray([0x50, 0xd9, 0x3c, 0x24, 0x58, 0x25, 0xff, 0xff, 0x00, 0x00, 0xc3]);
+    Memory.protect(code, Process.pageSize, "r-x");
+    x87ControlWordCode = code;
+    x87ControlWordReader = new NativeFunction(code, "uint32", []);
+  } catch (_) {
+    x87ControlWordReader = null;
+    x87ControlWordCode = null;
+  }
+}
+
+function readX87ControlWord() {
+  if (x87ControlWordReader == null) return null;
+  try {
+    return x87ControlWordReader() & 0xffff;
+  } catch (_) {
+    return null;
+  }
+}
 
 function _diagIntOrNull(value) {
   return typeof value === "number" && Number.isFinite(value) ? value | 0 : null;
@@ -634,7 +765,7 @@ function recordHookActivity(name, phase, context) {
     phase: String(phase || ""),
     thread_id: context && context.threadId != null ? _diagIntOrNull(context.threadId) : null,
     return_address: context ? _diagPtrToString(context.returnAddress) : null,
-    tick_index_global: _diagTickIndex(),
+    global_tick_index: _diagTickIndex(),
     gameplay_frame: _diagGameplayFrame(),
     state_id: outState.currentStateId == null ? null : outState.currentStateId | 0,
     run_id: outState.runActive ? outState.currentRunId | 0 : null,
@@ -652,7 +783,7 @@ function buildProcessExceptionPayload(details) {
     thread_id: details && details.threadId != null ? _diagIntOrNull(details.threadId) : null,
     pc: context ? _diagPtrToString(context.pc) : null,
     sp: context ? _diagPtrToString(context.sp) : null,
-    tick_index_global: _diagTickIndex(),
+    global_tick_index: _diagTickIndex(),
     gameplay_frame: _diagGameplayFrame(),
     state_id: outState.currentStateId == null ? null : outState.currentStateId | 0,
     run_id: outState.runActive ? outState.currentRunId | 0 : null,
@@ -703,8 +834,19 @@ function endEntityUidTick(kind) {
 function nextEntityUid(kind, index) {
   const states = outState.entityUidStates || {};
   const state = states[kind];
-  if (!state) return { uid: 0, generation: 0 };
   const idx = index | 0;
+  const kindIds = {
+    creature: 1,
+    projectile: 2,
+    secondary_projectile: 3,
+    bonus: 4,
+  };
+  const kindId = kindIds[kind];
+  if (kindId == null) failCaptureContract("unknown entity pool kind: " + String(kind));
+  if (!state) failCaptureContract("missing entity uid state: " + String(kind));
+  if (idx < 0 || idx >= 1000000) {
+    failCaptureContract("entity pool index out of range: " + String(idx));
+  }
   const key = String(idx);
   if (!state.activeIndices[key]) {
     const previous = state.generationByIndex[key] == null ? 0 : state.generationByIndex[key] | 0;
@@ -712,8 +854,11 @@ function nextEntityUid(kind, index) {
   }
   state.seenInTick[key] = true;
   const generation = state.generationByIndex[key] == null ? 0 : state.generationByIndex[key] | 0;
+  if (generation < 0 || generation >= 1000) {
+    failCaptureContract("entity generation out of range: " + String(generation));
+  }
   return {
-    uid: idx,
+    uid: kindId * 1000000000 + generation * 1000000 + idx,
     generation: generation,
   };
 }
@@ -776,11 +921,13 @@ function tickModeId(tickObj) {
 }
 
 function tickQuestMajor(tickObj) {
+  if (tickModeId(tickObj) !== GAME_MODE_QUESTS) return 0;
   if (!tickObj || tickObj.quest_stage_major == null) return -1;
   return tickObj.quest_stage_major | 0;
 }
 
 function tickQuestMinor(tickObj) {
+  if (tickModeId(tickObj) !== GAME_MODE_QUESTS) return 0;
   if (!tickObj || tickObj.quest_stage_minor == null) return -1;
   return tickObj.quest_stage_minor | 0;
 }
@@ -795,20 +942,35 @@ function runKeyForTick(tickObj) {
   );
 }
 
-function requireRunStartSeedU32(tickObj) {
-  if (outState.lastSrandSeed != null) return outState.lastSrandSeed >>> 0;
-  return emitCaptureContractError("missing_run_start_seed", tickObj);
+function noteCaptureIoFailure(operation, error) {
+  if (outState.captureFailure) return;
+  outState.captureFailure = {
+    operation: String(operation || "capture_io"),
+    error: String(error || "unknown"),
+  };
+  try {
+    send({
+      event: "capture_runtime_error",
+      error: "capture_io_failed",
+      details: outState.captureFailure,
+    });
+  } catch (_) {}
 }
 
 function openOutFile() {
-  if (outState.outFile) return;
+  if (outState.outFile) return true;
   const outPath = outState.currentOutPath || CONFIG.outPath;
-  if (!outPath) return;
-  const mode = CONFIG.logMode === "append" ? "a" : "w";
+  if (!outPath) {
+    noteCaptureIoFailure("open", "missing output path");
+    return false;
+  }
   try {
-    outState.outFile = new File(outPath, mode);
-  } catch (_) {
+    outState.outFile = new File(outPath, "w");
+    return true;
+  } catch (error) {
     outState.outFile = null;
+    noteCaptureIoFailure("open", error);
+    return false;
   }
 }
 
@@ -826,26 +988,76 @@ function writeLine(obj) {
 
 function _captureWrite(text, flushNow) {
   try {
-    openOutFile();
-    if (!outState.outFile) return false;
+    if (!openOutFile() || !outState.outFile) return false;
     outState.outFile.write(String(text));
-    if (flushNow && CONFIG.flushCaptureWrites) outState.outFile.flush();
+    if (flushNow) outState.outFile.flush();
     return true;
-  } catch (_) {
+  } catch (error) {
+    noteCaptureIoFailure(flushNow ? "write_and_flush" : "write", error);
     return false;
+  }
+}
+
+function captureContractValuesAtPath(row, path) {
+  const parts = String(path).split(".");
+  let values = [row];
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+    const isArray = part.endsWith("[]");
+    const field = isArray ? part.slice(0, -2) : part;
+    const next = [];
+    for (let j = 0; j < values.length; j++) {
+      const parent = values[j];
+      if (!parent || typeof parent !== "object" || Array.isArray(parent)) {
+        failCaptureContract(path + " parent must be an object");
+      }
+      const value = parent[field];
+      if (isArray) {
+        if (!Array.isArray(value)) failCaptureContract(path + " must be an array");
+        for (let k = 0; k < value.length; k++) next.push(value[k]);
+      } else {
+        next.push(value);
+      }
+    }
+    values = next;
+  }
+  return values;
+}
+
+function validateCaptureRowFieldSets(row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    failCaptureContract("capture row must be an object");
+  }
+  const event = row.event == null ? "" : String(row.event);
+  const paths = Object.keys(CAPTURE_FIELD_SETS).filter(function (path) {
+    return path === event || path.startsWith(event + ".");
+  });
+  if (paths.length <= 0) failCaptureContract("unsupported capture row event: " + event);
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i];
+    const expected = CAPTURE_FIELD_SETS[path].slice().sort();
+    const values = captureContractValuesAtPath(row, path);
+    for (let j = 0; j < values.length; j++) {
+      const value = values[j];
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        failCaptureContract(path + " must be an object");
+      }
+      const actual = Object.keys(value)
+        .filter(function (key) { return value[key] !== undefined; })
+        .sort();
+      if (actual.length !== expected.length || actual.some(function (key, index) { return key !== expected[index]; })) {
+        failCaptureContract(
+          path + " fields mismatch: actual=" + actual.join(",") + " expected=" + expected.join(",")
+        );
+      }
+    }
   }
 }
 
 function _captureWriteJsonLine(obj, flushNow) {
   if (!obj) return false;
+  validateCaptureRowFieldSets(obj);
   return _captureWrite(JSON.stringify(obj) + "\n", flushNow);
-}
-
-function _captureForceFlush() {
-  try {
-    if (!outState.outFile) return;
-    outState.outFile.flush();
-  } catch (_) {}
 }
 
 function emitCaptureContractError(errorCode, tickObj) {
@@ -857,7 +1069,7 @@ function emitCaptureContractError(errorCode, tickObj) {
     mode_id: outState.runActive ? outState.currentRunModeId | 0 : tickModeId(tickObj),
     quest_stage_major: outState.runActive ? outState.currentRunQuestMajor | 0 : tickQuestMajor(tickObj),
     quest_stage_minor: outState.runActive ? outState.currentRunQuestMinor | 0 : tickQuestMinor(tickObj),
-    tick_index_global:
+    global_tick_index:
       tickObj && tickObj.tick_index != null ? tickObj.tick_index | 0 : null,
   };
   _captureWriteJsonLine(row, true);
@@ -880,15 +1092,24 @@ function emitStartupContractError(errorCode, extra) {
     extra || {}
   );
   writeLine(row);
+  try {
+    send({ event: "capture_startup_error", error: row.error, details: row });
+  } catch (_) {}
   return false;
 }
 
-function requiredReplayFnNames() {
+function requiredReplayHookNames() {
   const names = REQUIRED_REPLAY_FN_NAMES.slice();
   if (CONFIG.enableRngHooks) {
     names.push("crt_srand");
     names.push("crt_rand");
   }
+  return names;
+}
+
+function requiredReplayFnNames() {
+  const names = requiredReplayHookNames();
+  if (CONFIG.enableRngHooks) names.push("crt_getptd");
   return names;
 }
 
@@ -898,6 +1119,43 @@ function requiredReplayDataNames() {
 
 function replayConfigReadinessErrors() {
   const errors = [];
+  const unlimitedLimits = [
+    ["CRIMSON_FRIDA_MAX_HEAD", CONFIG.maxHeadPerKind],
+    ["CRIMSON_FRIDA_MAX_EVENTS_PER_TICK", CONFIG.maxEventsPerTick],
+    ["CRIMSON_FRIDA_RNG_HEAD", CONFIG.maxRngHeadPerTick],
+    ["CRIMSON_FRIDA_RNG_CALLERS", CONFIG.maxRngCallerKinds],
+    ["CRIMSON_FRIDA_RNG_OUTSIDE_TICK_HEAD", CONFIG.maxRngOutsideTickHead],
+    ["CRIMSON_FRIDA_CREATURE_DELTA_IDS", CONFIG.maxCreatureDeltaIds],
+    ["CRIMSON_FRIDA_CREATURE_SAMPLE_LIMIT", CONFIG.creatureSampleLimit],
+    ["CRIMSON_FRIDA_PROJECTILE_SAMPLE_LIMIT", CONFIG.projectileSampleLimit],
+    ["CRIMSON_FRIDA_SECONDARY_PROJECTILE_SAMPLE_LIMIT", CONFIG.secondaryProjectileSampleLimit],
+    ["CRIMSON_FRIDA_BONUS_SAMPLE_LIMIT", CONFIG.bonusSampleLimit],
+  ];
+  for (let i = 0; i < unlimitedLimits.length; i++) {
+    const key = unlimitedLimits[i][0];
+    const value = unlimitedLimits[i][1];
+    if (value >= 0) {
+      errors.push({
+        key: key,
+        raw: String(value),
+        reason: "must be unlimited (-1) for replay-grade capture",
+      });
+    }
+  }
+  if (CONFIG.focusTick >= 0) {
+    errors.push({
+      key: "CRIMSON_FRIDA_FOCUS_TICK",
+      raw: String(CONFIG.focusTick),
+      reason: "must remain unset because replay-grade capture records every tick",
+    });
+  }
+  if (CONFIG.playerCountOverride > 0) {
+    errors.push({
+      key: "CRIMSON_FRIDA_PLAYER_COUNT",
+      raw: String(CONFIG.playerCountOverride),
+      reason: "must remain unset so capture uses the native player count",
+    });
+  }
   if (!CONFIG.enableInputHooks) {
     errors.push({
       key: "CRIMSON_FRIDA_INPUT_HOOKS",
@@ -919,45 +1177,16 @@ function replayConfigReadinessErrors() {
       reason: "must remain enabled for replay-grade capture",
     });
   }
-  if (CONFIG.maxRngHeadPerTick >= 0) {
-    errors.push({
-      key: "CRIMSON_FRIDA_RNG_HEAD",
-      raw: String(CONFIG.maxRngHeadPerTick),
-      reason: "must be unlimited (-1) for replay-grade rng_stream rows",
-    });
-  }
-  if (CONFIG.creatureSampleLimit >= 0) {
-    errors.push({
-      key: "CRIMSON_FRIDA_CREATURE_SAMPLE_LIMIT",
-      raw: String(CONFIG.creatureSampleLimit),
-      reason: "must be unlimited (-1) for replay-grade entity_samples rows",
-    });
-  }
-  if (CONFIG.projectileSampleLimit >= 0) {
-    errors.push({
-      key: "CRIMSON_FRIDA_PROJECTILE_SAMPLE_LIMIT",
-      raw: String(CONFIG.projectileSampleLimit),
-      reason: "must be unlimited (-1) for replay-grade entity_samples rows",
-    });
-  }
-  if (CONFIG.secondaryProjectileSampleLimit >= 0) {
-    errors.push({
-      key: "CRIMSON_FRIDA_SECONDARY_PROJECTILE_SAMPLE_LIMIT",
-      raw: String(CONFIG.secondaryProjectileSampleLimit),
-      reason: "must be unlimited (-1) for replay-grade entity_samples rows",
-    });
-  }
-  if (CONFIG.bonusSampleLimit >= 0) {
-    errors.push({
-      key: "CRIMSON_FRIDA_BONUS_SAMPLE_LIMIT",
-      raw: String(CONFIG.bonusSampleLimit),
-      reason: "must be unlimited (-1) for replay-grade entity_samples rows",
-    });
-  }
   return errors;
 }
 
 function validateStartupReadiness(ptrs) {
+  if (String(Frida.version) !== REQUIRED_FRIDA_VERSION) {
+    return emitStartupContractError("unsupported_frida_version", {
+      actual: String(Frida.version),
+      expected: REQUIRED_FRIDA_VERSION,
+    });
+  }
   const invalidConfigDetails = CONFIG_PARSE_ERRORS.concat(replayConfigReadinessErrors());
   if (invalidConfigDetails.length > 0) {
     return emitStartupContractError("invalid_config", {
@@ -985,7 +1214,7 @@ function validateStartupReadiness(ptrs) {
 
 function validateInstalledRequiredHooks() {
   const failures = [];
-  const names = requiredReplayFnNames();
+  const names = requiredReplayHookNames();
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
     const status = outState.hookStatusByName[name];
@@ -1008,6 +1237,7 @@ function emitSessionStartRow(meta, outPath) {
     out_path: outPath || CONFIG.outPath,
     platform: String(processObj.platform),
     arch: String(processObj.arch),
+    frida_version: String(processObj.frida_version),
     script_version: String(CAPTURE_FORMAT_VERSION),
     config: meta.config,
     session_fingerprint: meta.session_fingerprint,
@@ -1022,11 +1252,11 @@ function startCaptureFile(meta, outPath) {
   outState.pending_timing_samples = [];
   outState.captureStarted = false;
   outState.captureClosed = false;
+  outState.captureFailure = null;
   const started = _captureWriteJsonLine(
     emitSessionStartRow(meta, targetOutPath),
     true,
   );
-  if (started) _captureForceFlush();
   outState.captureStarted = started;
   outState.captureClosed = !started;
   if (!started && !outState.outWarned) {
@@ -1044,7 +1274,15 @@ function closeActiveRun(reason, tickObj) {
   }
   // Draws between the run's last tick and its close belong to this run, not
   // to the next tick's outside-before bag.
-  const outsideTail = takePendingOutsideRngRolls();
+  const trailingPrelude = replayPreludeFromRows(
+    outState.pendingReplayPrelude,
+    "run_end.trailing_prelude",
+  );
+  const outsideTail = rngOutsideBagFromRows(
+    takePendingOutsideRngRolls(),
+    "run_end.rng_outside_tail",
+    trailingPrelude,
+  );
   const wrote = _captureWriteJsonLine(
     {
       event: "run_end",
@@ -1053,30 +1291,27 @@ function closeActiveRun(reason, tickObj) {
       mode_id: outState.currentRunModeId | 0,
       quest_stage_major: outState.currentRunQuestMajor | 0,
       quest_stage_minor: outState.currentRunQuestMinor | 0,
-      tick_index_global:
-        tickObj && tickObj.tick_index != null
-          ? tickObj.tick_index | 0
-          : outState.lastTickIndexGlobal == null
-            ? null
-            : outState.lastTickIndexGlobal | 0,
+      global_tick_index:
+        outState.lastTickIndexGlobal == null ? -1 : outState.lastTickIndexGlobal | 0,
       ticks_written: outState.currentRunTickCount | 0,
+      trailing_prelude: trailingPrelude,
       rng_outside_tail: {
         calls: outsideTail.calls | 0,
         dropped: outsideTail.dropped | 0,
         caller_counts: outsideTail.caller_counts || {},
         head: (outsideTail.head || []).map(function (row) {
           return {
-            value_15: row.value_15 == null ? null : row.value_15 | 0,
-            state_before_u32: row.state_before_u32 == null ? null : row.state_before_u32 >>> 0,
-            state_after_u32: row.state_after_u32 == null ? null : row.state_after_u32 >>> 0,
-            caller_static: row.caller_static == null ? null : String(row.caller_static),
+            value_15: row.value_15 | 0,
+            state_before_u32: row.state_before_u32 >>> 0,
+            state_after_u32: row.state_after_u32 >>> 0,
+            caller_static: String(row.caller_static),
+            replay_operation_index: row.replay_operation_index | 0,
           };
         }),
       },
     },
     true,
   );
-  if (wrote) _captureForceFlush();
   resetCurrentRunState();
 }
 
@@ -1092,18 +1327,64 @@ function resetCurrentRunState() {
   outState.currentRunElapsedRawStartMs = null;
   outState.currentRunElapsedRawLastMs = null;
   outState.currentRunElapsedNormalizedMs = null;
+  outState.pendingRunCloseReason = null;
+  outState.pendingReplayPrelude = [];
+  outState.replayPreludeOperationStackByTid = {};
   resetEntityUidStates();
+}
+
+function runSettingsFromTick(tickObj) {
+  const tick = requireObject(tickObj, "tick");
+  const before = requireObject(tick.before, "before");
+  const globals = requireObject(before.globals, "before.globals");
+  const retryCount = requireNonNegativeInt(
+    globals.quest_fail_retry_count,
+    "before.globals.quest_fail_retry_count",
+  );
+  const hardcoreRaw = requireInt(globals.config_hardcore, "before.globals.config_hardcore");
+  if (hardcoreRaw !== 0 && hardcoreRaw !== 1) {
+    failCaptureContract("before.globals.config_hardcore must be 0 or 1");
+  }
+  const violenceDisabled = requireInt(
+    globals.config_violence_disabled,
+    "before.globals.config_violence_disabled",
+  );
+  if (violenceDisabled !== 0 && violenceDisabled !== 1) {
+    failCaptureContract("before.globals.config_violence_disabled must be 0 or 1");
+  }
+  const detailPreset = requireInt(globals.config_detail_preset, "before.globals.config_detail_preset");
+  if (detailPreset < 1 || detailPreset > 5) {
+    failCaptureContract("before.globals.config_detail_preset must be in 1..5");
+  }
+  return {
+    // Crimsonland's simulation clock is fixed at 60 Hz. The world boundary is
+    // likewise a code constant, not a mutable data global in this executable.
+    tick_rate: 60,
+    quest_fail_retry_count: retryCount,
+    hardcore: hardcoreRaw !== 0,
+    detail_preset: detailPreset,
+    violence_disabled: violenceDisabled,
+    world_size: 1024.0,
+    status: statusFromSnapshot(before.status, "before.status"),
+  };
 }
 
 function startRunForTick(tickObj, reason) {
   try {
     const startReason = reason || "run_start";
     const modeId = tickModeId(tickObj);
+    if (
+      modeId === GAME_MODE_DEMO ||
+      modeId === GAME_MODE_TYPO ||
+      modeId === GAME_MODE_TUTORIAL ||
+      (modeId !== GAME_MODE_SURVIVAL && modeId !== GAME_MODE_RUSH && modeId !== GAME_MODE_QUESTS)
+    ) {
+      emitCaptureContractError("unsupported_replay_mode:" + String(modeId), tickObj);
+      return false;
+    }
     const questMajor = tickQuestMajor(tickObj);
     const questMinor = tickQuestMinor(tickObj);
     const runKey = runKeyForTick(tickObj);
-    const runSeed = requireRunStartSeedU32(tickObj);
-    if (runSeed == null) return false;
     const playerCount = runPlayerCountFromTick(tickObj);
     outState.currentRunId = (outState.currentRunId | 0) + 1;
     outState.currentRunTickCount = 0;
@@ -1126,14 +1407,15 @@ function startRunForTick(tickObj, reason) {
     outState.pendingRunSetupRng = null;
     const poolResidue = outState.pendingRunPoolResidue;
     outState.pendingRunPoolResidue = null;
-    if (!setupRng) {
-      emitCaptureContractError("missing_run_setup_rng_state", tickObj);
+    if (!setupRng || setupRng.state_after_u32 == null) {
+      emitCaptureContractError("missing_rng_bootstrap_boundary", tickObj);
       return false;
     }
     if (!poolResidue) {
       emitCaptureContractError("missing_run_setup_pool_residue", tickObj);
       return false;
     }
+    outState.runSetupRngActive = false;
     const wrote = _captureWriteJsonLine(
       {
         event: "run_start",
@@ -1142,13 +1424,13 @@ function startRunForTick(tickObj, reason) {
         mode_id: outState.currentRunModeId | 0,
         quest_stage_major: outState.currentRunQuestMajor | 0,
         quest_stage_minor: outState.currentRunQuestMinor | 0,
-        seed: runSeed >>> 0,
-        seed_source: "crt_srand",
-        rng_state_at_run_setup: setupRng.state_before_u32 >>> 0,
-        rng_setup_caller_static: setupRng.caller_static,
+        rng_state_before_bootstrap: setupRng.state_before_u32 >>> 0,
+        rng_state_after_bootstrap: setupRng.state_after_u32 >>> 0,
+        rng_bootstrap_calls: setupRng.calls,
         pool_residue: poolResidue,
         player_count: playerCount,
-        tick_index_global:
+        settings: runSettingsFromTick(tickObj),
+        global_tick_index:
           tickObj && tickObj.tick_index != null ? tickObj.tick_index | 0 : null,
       },
       true,
@@ -1158,7 +1440,6 @@ function startRunForTick(tickObj, reason) {
       return false;
     }
     outState.currentRunStarted = true;
-    _captureForceFlush();
     return true;
   } catch (error) {
     if (isCaptureContractError(error)) {
@@ -1245,7 +1526,7 @@ function requireInt(value, field) {
   if (parsed == null) {
     failCaptureContract(field + " must be an integer");
   }
-  return parsed | 0;
+  return parsed;
 }
 
 function requireNonNegativeInt(value, field) {
@@ -1253,7 +1534,7 @@ function requireNonNegativeInt(value, field) {
   if (parsed < 0) {
     failCaptureContract(field + " must be >= 0");
   }
-  return parsed | 0;
+  return parsed;
 }
 
 function requirePositiveInt(value, field) {
@@ -1261,7 +1542,7 @@ function requirePositiveInt(value, field) {
   if (parsed <= 0) {
     failCaptureContract(field + " must be > 0");
   }
-  return parsed | 0;
+  return parsed;
 }
 
 function requireU32(value, field) {
@@ -1276,15 +1557,16 @@ function requireU32(value, field) {
 
 function intOr(value, fallback) {
   if (value == null) return fallback;
-  if (typeof value === "number" && Number.isFinite(value)) return value | 0;
-  return fallback;
-}
-
-function asReplayF32(value) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return captureNumber(value);
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= -0x80000000 &&
+    value <= 0x7fffffff
+  ) {
+    return value;
   }
-  return 0;
+  return fallback;
 }
 
 function requireReplayBool(value, field) {
@@ -1358,11 +1640,11 @@ function replayInputIntentFromTick(tickObj) {
   const globals = requireObject(after.globals, "after.globals");
   const afterPlayers = requireNonEmptyArray(after.players, "after.players");
   const keyRows = requireArray(tick.input_player_keys, "input_player_keys");
-  const moveModes = requireArray(globals.config_player_mode_flags, "after.globals.config_player_mode_flags");
-  const aimSchemes = requireArray(globals.config_aim_scheme, "after.globals.config_aim_scheme");
+  const moveModes = requireArray(globals.config_movement_schemes, "after.globals.config_movement_schemes");
+  const aimSchemes = requireArray(globals.config_aim_schemes, "after.globals.config_aim_schemes");
   if (moveModes.length !== afterPlayers.length) {
     failCaptureContract(
-      "after.globals.config_player_mode_flags length " +
+      "after.globals.config_movement_schemes length " +
         moveModes.length +
         " does not match after.players length " +
         afterPlayers.length,
@@ -1370,7 +1652,7 @@ function replayInputIntentFromTick(tickObj) {
   }
   if (aimSchemes.length !== afterPlayers.length) {
     failCaptureContract(
-      "after.globals.config_aim_scheme length " +
+      "after.globals.config_aim_schemes length " +
         aimSchemes.length +
         " does not match after.players length " +
         afterPlayers.length,
@@ -1386,8 +1668,8 @@ function replayInputIntentFromTick(tickObj) {
   for (let i = 0; i < afterPlayers.length; i++) {
     const player = requireObject(afterPlayers[i], "after.players[" + i + "]");
     const keyRow = requireObject(keyRows[i], "input_player_keys[" + i + "]");
-    const moveMode = requireInt(moveModes[i], "after.globals.config_player_mode_flags[" + i + "]");
-    const aimScheme = requireInt(aimSchemes[i], "after.globals.config_aim_scheme[" + i + "]");
+    const moveMode = requireInt(moveModes[i], "after.globals.config_movement_schemes[" + i + "]");
+    const aimScheme = requireInt(aimSchemes[i], "after.globals.config_aim_schemes[" + i + "]");
     let moveForwardPressed = null;
     let moveBackwardPressed = null;
     let turnLeftPressed = null;
@@ -1415,7 +1697,7 @@ function replayInputIntentFromTick(tickObj) {
       moveY = _digitalMoveAxis(moveBackwardPressed, moveForwardPressed);
     } else if (moveMode === MOVE_MODE_UNKNOWN) {
       failCaptureContract(
-        "after.globals.config_player_mode_flags[" + i + "] must not be UNKNOWN for replay_input_intent",
+        "after.globals.config_movement_schemes[" + i + "] must not be UNKNOWN for replay_input_intent",
       );
     } else if (
       moveMode === MOVE_MODE_DUAL_ACTION_PAD ||
@@ -1423,14 +1705,14 @@ function replayInputIntentFromTick(tickObj) {
       moveMode === MOVE_MODE_COMPUTER
     ) {
       failCaptureContract(
-        "after.globals.config_player_mode_flags[" +
+        "after.globals.config_movement_schemes[" +
           i +
           "]=" +
           moveMode +
           " is unsupported by replay_input_intent without raw move capture",
       );
     } else {
-      failCaptureContract("after.globals.config_player_mode_flags[" + i + "] has unsupported value " + moveMode);
+      failCaptureContract("after.globals.config_movement_schemes[" + i + "] has unsupported value " + moveMode);
     }
 
     out.push({
@@ -1473,9 +1755,12 @@ function validateAfterPlayers(players, expectedPlayers) {
     requireFiniteScalar(row.move_dx, "after.players[" + i + "].move_dx");
     requireFiniteScalar(row.move_dy, "after.players[" + i + "].move_dy");
     requireFiniteScalar(row.health, "after.players[" + i + "].health");
+    requireFiniteScalar(row.heading, "after.players[" + i + "].heading");
     requireFiniteScalar(row.aim_x, "after.players[" + i + "].aim_x");
     requireFiniteScalar(row.aim_y, "after.players[" + i + "].aim_y");
     requireFiniteScalar(row.aim_heading, "after.players[" + i + "].aim_heading");
+    requireFiniteScalar(row.move_speed, "after.players[" + i + "].move_speed");
+    requireFiniteScalar(row.move_phase, "after.players[" + i + "].move_phase");
     requireInt(row.weapon_id, "after.players[" + i + "].weapon_id");
     requireFiniteScalar(row.clip_size_f32, "after.players[" + i + "].clip_size_f32");
     requireFiniteScalar(row.ammo_f32, "after.players[" + i + "].ammo_f32");
@@ -1493,23 +1778,69 @@ function validateAfterPlayers(players, expectedPlayers) {
   return rows;
 }
 
-function validateAfterStatus(status) {
-  const row = requireObject(status, "after.status");
-  requireInt(row.quest_unlock_index, "after.status.quest_unlock_index");
-  requireInt(row.quest_unlock_index_full, "after.status.quest_unlock_index_full");
-  const weaponUsageCounts = requireArray(row.weapon_usage_counts, "after.status.weapon_usage_counts");
+function statusFromSnapshot(status, field) {
+  const row = requireObject(status, field);
+  const questUnlockIndex = requireInt(row.quest_unlock_index, field + ".quest_unlock_index");
+  const questUnlockIndexFull = requireInt(
+    row.quest_unlock_index_full,
+    field + ".quest_unlock_index_full",
+  );
+  const weaponUsageCounts = requireArray(row.weapon_usage_counts, field + ".weapon_usage_counts");
   if (weaponUsageCounts.length !== STATUS_WEAPON_USAGE_COUNT) {
     failCaptureContract(
-      "after.status.weapon_usage_counts length " +
+      field +
+        ".weapon_usage_counts length " +
         weaponUsageCounts.length +
         " does not match expected " +
         STATUS_WEAPON_USAGE_COUNT
     );
   }
+  const normalizedWeaponUsageCounts = [];
   for (let i = 0; i < weaponUsageCounts.length; i++) {
-    requireNonNegativeInt(weaponUsageCounts[i], "after.status.weapon_usage_counts[" + i + "]");
+    normalizedWeaponUsageCounts.push(
+      requireNonNegativeInt(weaponUsageCounts[i], field + ".weapon_usage_counts[" + i + "]"),
+    );
   }
-  return row;
+  const questPlayCounts = requireArray(row.quest_play_counts, field + ".quest_play_counts");
+  if (questPlayCounts.length !== STATUS_QUEST_PLAY_COUNT) {
+    failCaptureContract(
+      field +
+        ".quest_play_counts length " +
+        questPlayCounts.length +
+        " does not match expected " +
+        STATUS_QUEST_PLAY_COUNT,
+    );
+  }
+  const normalizedQuestPlayCounts = [];
+  for (let i = 0; i < questPlayCounts.length; i++) {
+    normalizedQuestPlayCounts.push(
+      requireNonNegativeInt(questPlayCounts[i], field + ".quest_play_counts[" + i + "]"),
+    );
+  }
+  const reservedSeedWords = requireArray(row.reserved_seed_words, field + ".reserved_seed_words");
+  if (reservedSeedWords.length !== STATUS_RESERVED_SEED_WORDS_BYTE_SIZE) {
+    failCaptureContract(
+      field + ".reserved_seed_words length " + reservedSeedWords.length + " does not match expected " + STATUS_RESERVED_SEED_WORDS_BYTE_SIZE,
+    );
+  }
+  const normalizedReservedSeedWords = [];
+  for (let i = 0; i < reservedSeedWords.length; i++) {
+    const value = requireNonNegativeInt(reservedSeedWords[i], field + ".reserved_seed_words[" + i + "]");
+    if (value > 0xff) failCaptureContract(field + ".reserved_seed_words[" + i + "] must be a byte");
+    normalizedReservedSeedWords.push(value);
+  }
+  return {
+    quest_unlock_index: questUnlockIndex,
+    quest_unlock_index_full: questUnlockIndexFull,
+    weapon_usage_counts: normalizedWeaponUsageCounts,
+    quest_play_counts: normalizedQuestPlayCounts,
+    mode_play_survival: requireNonNegativeInt(row.mode_play_survival, field + ".mode_play_survival"),
+    mode_play_rush: requireNonNegativeInt(row.mode_play_rush, field + ".mode_play_rush"),
+    mode_play_typo: requireNonNegativeInt(row.mode_play_typo, field + ".mode_play_typo"),
+    mode_play_other: requireNonNegativeInt(row.mode_play_other, field + ".mode_play_other"),
+    play_time_ms: requireNonNegativeInt(row.play_time_ms, field + ".play_time_ms"),
+    reserved_seed_words: normalizedReservedSeedWords,
+  };
 }
 
 function validateAfterGlobals(globals) {
@@ -1531,7 +1862,6 @@ function simStateFromTick(tickObj, expectedPlayers) {
   const after = requireObject(tick.after, "after");
   const globals = validateAfterGlobals(after.globals);
   const afterPlayers = validateAfterPlayers(after.players, expectedPlayers);
-  const status = validateAfterStatus(after.status);
   const players = [];
 
   for (let i = 0; i < afterPlayers.length; i++) {
@@ -1542,6 +1872,14 @@ function simStateFromTick(tickObj, expectedPlayers) {
         x: requireFiniteScalar(player.pos_x, "after.players[" + i + "].pos_x"),
         y: requireFiniteScalar(player.pos_y, "after.players[" + i + "].pos_y"),
       },
+      heading: requireFiniteScalar(player.heading, "after.players[" + i + "].heading"),
+      move_speed: requireFiniteScalar(player.move_speed, "after.players[" + i + "].move_speed"),
+      move_phase: requireFiniteScalar(player.move_phase, "after.players[" + i + "].move_phase"),
+      aim: {
+        x: requireFiniteScalar(player.aim_x, "after.players[" + i + "].aim_x"),
+        y: requireFiniteScalar(player.aim_y, "after.players[" + i + "].aim_y"),
+      },
+      aim_heading: requireFiniteScalar(player.aim_heading, "after.players[" + i + "].aim_heading"),
       health: requireFiniteScalar(player.health, "after.players[" + i + "].health"),
       weapon: {
         weapon_id: requireInt(player.weapon_id, "after.players[" + i + "].weapon_id"),
@@ -1578,13 +1916,6 @@ function simStateFromTick(tickObj, expectedPlayers) {
         double_experience_ms: bonusTimerMs(globals.bonus_double_xp_timer),
         freeze_ms: bonusTimerMs(globals.bonus_freeze_timer),
       },
-      status: {
-        quest_unlock_index: requireInt(status.quest_unlock_index, "after.status.quest_unlock_index"),
-        quest_unlock_index_full: requireInt(status.quest_unlock_index_full, "after.status.quest_unlock_index_full"),
-        weapon_usage_counts: requireArray(status.weapon_usage_counts, "after.status.weapon_usage_counts").map(
-          (value, index) => requireNonNegativeInt(value, "after.status.weapon_usage_counts[" + index + "]"),
-        ),
-      },
     },
     players: players,
   };
@@ -1608,6 +1939,9 @@ function entitySamplesFromTick(tickObj) {
     const index = requireNonNegativeInt(row.index, "samples.creatures[" + i + "].index");
     const uidState = nextEntityUid("creature", index);
     const pos = requireObject(row.pos, "samples.creatures[" + i + "].pos");
+    const tint = requireObject(row.tint, "samples.creatures[" + i + "].tint");
+    const target = requireObject(row.target, "samples.creatures[" + i + "].target");
+    const targetOffset = requireObject(row.target_offset, "samples.creatures[" + i + "].target_offset");
     creatures.push({
       uid: uidState.uid,
       generation: uidState.generation,
@@ -1620,11 +1954,29 @@ function entitySamplesFromTick(tickObj) {
         x: requireFiniteScalar(pos.x, "samples.creatures[" + i + "].pos.x"),
         y: requireFiniteScalar(pos.y, "samples.creatures[" + i + "].pos.y"),
       },
+      tint: {
+        r: requireFiniteScalar(tint.r, "samples.creatures[" + i + "].tint.r"),
+        g: requireFiniteScalar(tint.g, "samples.creatures[" + i + "].tint.g"),
+        b: requireFiniteScalar(tint.b, "samples.creatures[" + i + "].tint.b"),
+        a: requireFiniteScalar(tint.a, "samples.creatures[" + i + "].tint.a"),
+      },
       flags: requireInt(row.flags, "samples.creatures[" + i + "].flags"),
       ai_mode: requireInt(row.ai_mode, "samples.creatures[" + i + "].ai_mode"),
       link_index: requireInt(row.link_index, "samples.creatures[" + i + "].link_index"),
+      force_target: requireInt(row.force_target, "samples.creatures[" + i + "].force_target"),
+      target: {
+        x: requireFiniteScalar(target.x, "samples.creatures[" + i + "].target.x"),
+        y: requireFiniteScalar(target.y, "samples.creatures[" + i + "].target.y"),
+      },
+      target_player: requireInt(row.target_player, "samples.creatures[" + i + "].target_player"),
+      target_offset: {
+        x: requireFiniteScalar(targetOffset.x, "samples.creatures[" + i + "].target_offset.x"),
+        y: requireFiniteScalar(targetOffset.y, "samples.creatures[" + i + "].target_offset.y"),
+      },
       heading: requireFiniteScalar(row.heading, "samples.creatures[" + i + "].heading"),
       target_heading: requireFiniteScalar(row.target_heading, "samples.creatures[" + i + "].target_heading"),
+      collision_timer: requireFiniteScalar(row.collision_timer, "samples.creatures[" + i + "].collision_timer"),
+      attack_cooldown: requireFiniteScalar(row.attack_cooldown, "samples.creatures[" + i + "].attack_cooldown"),
       orbit_angle: requireFiniteScalar(row.orbit_angle, "samples.creatures[" + i + "].orbit_angle"),
       orbit_radius: requireFiniteScalar(row.orbit_radius, "samples.creatures[" + i + "].orbit_radius"),
       lifecycle_stage: requireFiniteScalar(row.lifecycle_stage, "samples.creatures[" + i + "].lifecycle_stage"),
@@ -1749,40 +2101,115 @@ function rngStreamFromTick(tickObj) {
     }
     const stateBefore = requireU32(row.state_before_u32, "rng_stream[" + i + "].state_before_u32");
     const stateAfter = requireU32(row.state_after_u32, "rng_stream[" + i + "].state_after_u32");
+    const caller = row.caller_static == null ? null : parseHexU32(row.caller_static);
+    if (row.caller_static != null && caller == null) {
+      failCaptureContract("rng_stream[" + i + "].caller must be a static uint32 address");
+    }
     out.push({
       tick_call_index: tickCallIndex,
       value_15: value15,
       state_before_u32: stateBefore,
       state_after_u32: stateAfter,
-      caller_static: row.caller_static == null ? null : String(row.caller_static),
+      caller: caller,
     });
   }
   return out;
 }
 
-function rngOutsideBagFromRows(bag, field) {
+function rngOutsideBagFromRows(bag, field, replayPrelude) {
   const src = requireObject(bag, field);
+  const replayRows = requireArray(replayPrelude, field + ".replay_prelude");
   const calls = requireInt(src.calls, field + ".calls");
   const dropped = requireInt(src.dropped, field + ".dropped");
   if (calls < 0 || dropped < 0) {
     failCaptureContract(field + " calls/dropped must be >= 0");
   }
+  const head = requireArray(src.head, field + ".head");
+  if (dropped !== 0 || calls !== head.length) {
+    failCaptureContract(
+      field + " must contain every outside RNG row (calls=" + calls + " dropped=" + dropped + " head=" +
+        head.length + ")",
+    );
+  }
   const callerCounts = {};
-  const srcCounts = src.caller_counts && typeof src.caller_counts === "object" ? src.caller_counts : {};
+  const srcCounts = requireObject(src.caller_counts, field + ".caller_counts");
   const countKeys = Object.keys(srcCounts);
   for (let i = 0; i < countKeys.length; i++) {
-    callerCounts[String(countKeys[i])] = srcCounts[countKeys[i]] | 0;
+    const key = String(countKeys[i]);
+    callerCounts[key] = requireNonNegativeInt(srcCounts[key], field + ".caller_counts[" + key + "]");
   }
-  const head = requireArray(src.head, field + ".head");
   const rows = [];
+  const actualCallerCounts = {};
+  const callsByOperation = {};
+  let previousAfter = null;
+  let previousOperationIndex = null;
   for (let i = 0; i < head.length; i++) {
     const row = requireObject(head[i], field + ".head[" + i + "]");
+    const callerStatic = row.caller_static == null ? null : String(row.caller_static);
+    if (callerStatic == null) {
+      failCaptureContract(field + ".head[" + i + "].caller_static must be present");
+    }
+    const callerValue = parseHexU32(callerStatic);
+    if (callerValue == null || callerStatic !== toHex(callerValue, 8)) {
+      failCaptureContract(field + ".head[" + i + "].caller_static must be a canonical static uint32 address");
+    }
+    const operationIndex = requireNonNegativeInt(
+      row.replay_operation_index,
+      field + ".head[" + i + "].replay_operation_index",
+    );
+    if (operationIndex >= replayRows.length) {
+      failCaptureContract(field + ".head[" + i + "].replay_operation_index is out of range");
+    }
+    if (previousOperationIndex != null && operationIndex < previousOperationIndex) {
+      failCaptureContract(field + ".head[" + i + "].replay_operation_index is out of order");
+    }
+    previousOperationIndex = operationIndex;
+    const operation = requireObject(replayRows[operationIndex], field + ".replay_prelude[" + operationIndex + "]");
+    const operationType = String(operation.type || "");
+    if (operationType === "game_frame_rng_advance") {
+      if (callerStatic !== FRAME_DISCARDED_RNG_CALLER_STATIC) {
+        failCaptureContract(field + ".head[" + i + "] frame operation has caller " + callerStatic);
+      }
+    } else if (operationType !== "perk_menu_open" && operationType !== "perk_pick") {
+      failCaptureContract(field + ".head[" + i + "] references unsupported replay operation " + operationType);
+    }
+    const stateBefore = requireU32(row.state_before_u32, field + ".head[" + i + "].state_before_u32");
+    const stateAfter = requireU32(row.state_after_u32, field + ".head[" + i + "].state_after_u32");
+    const value15 = requireInt(row.value_15, field + ".head[" + i + "].value_15");
+    if (previousAfter != null && stateBefore !== previousAfter) {
+      failCaptureContract(field + ".head[" + i + "] does not continue the prior RNG state");
+    }
+    const expectedAfter = (Math.imul(stateBefore, 214013) + 2531011) >>> 0;
+    if (stateAfter !== expectedAfter || value15 !== ((stateAfter >>> 16) & 0x7fff)) {
+      failCaptureContract(field + ".head[" + i + "] is not a valid CRT rand transition");
+    }
+    actualCallerCounts[callerStatic] = (actualCallerCounts[callerStatic] || 0) + 1;
+    callsByOperation[operationIndex] = (callsByOperation[operationIndex] || 0) + 1;
+    previousAfter = stateAfter;
     rows.push({
-      value_15: row.value_15 == null ? null : row.value_15 | 0,
-      state_before_u32: requireU32(row.state_before_u32, field + ".head[" + i + "].state_before_u32"),
-      state_after_u32: requireU32(row.state_after_u32, field + ".head[" + i + "].state_after_u32"),
-      caller_static: row.caller_static == null ? null : String(row.caller_static),
+      value_15: value15,
+      state_before_u32: stateBefore,
+      state_after_u32: stateAfter,
+      caller_static: callerStatic,
+      replay_operation_index: operationIndex,
     });
+  }
+  const declaredCallerKeys = Object.keys(callerCounts).sort();
+  const actualCallerKeys = Object.keys(actualCallerCounts).sort();
+  if (declaredCallerKeys.length !== actualCallerKeys.length) {
+    failCaptureContract(field + ".caller_counts does not match captured rows");
+  }
+  for (let i = 0; i < declaredCallerKeys.length; i++) {
+    const key = declaredCallerKeys[i];
+    if (key !== actualCallerKeys[i] || callerCounts[key] !== actualCallerCounts[key]) {
+      failCaptureContract(field + ".caller_counts does not match captured rows");
+    }
+  }
+  for (let i = 0; i < replayRows.length; i++) {
+    const operation = replayRows[i];
+    if (operation.type === "game_frame_rng_advance" && (callsByOperation[i] || 0) !== (operation.frames | 0)) {
+      failCaptureContract(field + " frame operation " + i + " does not match its captured RNG rows");
+    }
   }
   return {
     calls: calls,
@@ -1854,6 +2281,50 @@ function normalizeRunElapsedMs(rawElapsedMs, dtMsI32) {
   return outState.currentRunElapsedNormalizedMs | 0;
 }
 
+function replayPreludeFromRows(value, fieldPrefix) {
+  const raw = requireArray(value, fieldPrefix);
+  return raw.map(function (value, index) {
+    const field = fieldPrefix + "[" + index + "]";
+    const row = requireObject(value, field);
+    const type = row.type == null ? "" : String(row.type);
+    if (type === "game_frame_rng_advance") {
+      return { type: type, frames: requirePositiveInt(row.frames, field + ".frames") };
+    }
+    const playerIndex = requireNonNegativeInt(row.player_index, field + ".player_index");
+    if (type === "perk_menu_open") {
+      return { type: type, player_index: playerIndex };
+    }
+    if (type === "perk_pick") {
+      const choiceIndex = requireNonNegativeInt(row.choice_index, field + ".choice_index");
+      if (choiceIndex >= PERK_CHOICE_COUNT) {
+        failCaptureContract(field + ".choice_index must be in 0..6");
+      }
+      return { type: type, player_index: playerIndex, choice_index: choiceIndex };
+    }
+    failCaptureContract(field + ".type is unsupported: " + type);
+  });
+}
+
+function replayPreludeFromTick(tickObj) {
+  return replayPreludeFromRows(tickObj && tickObj.replay_prelude, "replay_prelude");
+}
+
+function replayPostludeFromTick(tickObj) {
+  const raw = requireArray(tickObj && tickObj.replay_postlude, "replay_postlude");
+  return raw.map(function (value, index) {
+    const field = "replay_postlude[" + index + "]";
+    const row = requireObject(value, field);
+    const type = row.type == null ? "" : String(row.type);
+    if (type !== "perk_menu_open") {
+      failCaptureContract(field + ".type is unsupported: " + type);
+    }
+    return {
+      type: type,
+      player_index: requireNonNegativeInt(row.player_index, field + ".player_index"),
+    };
+  });
+}
+
 // tick rows are replay-grade rows. Missing required fields are contract errors,
 // not something finalize should coerce after the fact.
 function buildTraceTickRow(tickObj) {
@@ -1871,7 +2342,12 @@ function buildTraceTickRow(tickObj) {
         "rng_calls " + rngCalls + " does not match rng_stream length " + rngStream.length
       );
     }
-    const rngOutsideBefore = rngOutsideBagFromRows(tickObj.rng_outside_before, "rng_outside_before");
+    const replayPrelude = replayPreludeFromTick(tickObj);
+    const rngOutsideBefore = rngOutsideBagFromRows(
+      tickObj.rng_outside_before,
+      "rng_outside_before",
+      replayPrelude,
+    );
     const rngStateEnter = requireU32(tickObj.rng_state_enter_u32, "rng_state_enter_u32");
     const rngStateLeave = requireU32(tickObj.rng_state_leave_u32, "rng_state_leave_u32");
     const timingSamples = timingSamplesFromTick(tickObj);
@@ -1879,8 +2355,6 @@ function buildTraceTickRow(tickObj) {
       failCaptureContract("timing_samples must be non-empty");
     }
     const gpurEnterSample = requireTimingSampleByPhase(timingSamples, "gpur_enter");
-    checkpoint.state_hash = "";
-    checkpoint.command_hash = "";
     const modeId = tickModeId(tickObj);
     if (modeId < 0) {
       failCaptureContract("mode_id must be non-negative");
@@ -1896,11 +2370,51 @@ function buildTraceTickRow(tickObj) {
       failCaptureContract("timing_samples.gpur_enter.frame_dt_f32 must be finite and >= 0");
     }
     const elapsedRawMs = requireInt(checkpoint.elapsed_ms, "checkpoint.elapsed_ms");
-    const elapsedMs = normalizeRunElapsedMs(elapsedRawMs, dtMsI32);
+    const summedReplayClockMs = normalizeRunElapsedMs(elapsedRawMs, dtMsI32);
+    const after = requireObject(tickObj.after, "after");
+    const afterGlobals = requireObject(after.globals, "after.globals");
+    const questSpawnTimelineRaw = requireInt(
+      afterGlobals.quest_spawn_timeline,
+      "after.globals.quest_spawn_timeline",
+    );
+    const elapsedMs = modeId === GAME_MODE_QUESTS ? questSpawnTimelineRaw : summedReplayClockMs;
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
       failCaptureContract("elapsed_ms must be finite and >= 0");
     }
+    const rawCheckpointEvents = requireObject(checkpoint.events, "checkpoint.events");
+    const rawCheckpointPrivate = {
+      elapsed_ms: elapsedRawMs,
+      deaths: requireArray(checkpoint.deaths, "checkpoint.deaths"),
+      events: {
+        hit_count: requireNonNegativeInt(rawCheckpointEvents.hit_count, "checkpoint.events.hit_count"),
+        pickup_count: requireNonNegativeInt(
+          rawCheckpointEvents.pickup_count,
+          "checkpoint.events.pickup_count",
+        ),
+        sfx_count: requireNonNegativeInt(rawCheckpointEvents.sfx_count, "checkpoint.events.sfx_count"),
+        sfx_head: requireArray(rawCheckpointEvents.sfx_head, "checkpoint.events.sfx_head"),
+        hit_head: requireArray(rawCheckpointEvents.hit_head, "checkpoint.events.hit_head"),
+      },
+    };
+    const eventCounts = requireObject(tickObj.event_counts, "event_counts");
+    const rawHitCount = requireNonNegativeInt(eventCounts.projectile_find_hit, "event_counts.projectile_find_hit");
+    const ownerCollisionCount = requireNonNegativeInt(
+      eventCounts.projectile_find_owner_collision,
+      "event_counts.projectile_find_owner_collision",
+    );
+    if (ownerCollisionCount > rawHitCount) {
+      failCaptureContract("projectile owner-collision count exceeds raw hit count");
+    }
+    const pickupCount = requireNonNegativeInt(eventCounts.bonus_apply, "event_counts.bonus_apply");
     checkpoint.elapsed_ms = elapsedMs;
+    checkpoint.deaths = [];
+    checkpoint.events = {
+      hit_count: rawHitCount - ownerCollisionCount,
+      pickup_count: pickupCount,
+      sfx_count: 0,
+      sfx_head: [],
+      hit_head: [],
+    };
     const playerCount = checkpointPlayers.length | 0;
     const replayInputIntent = replayInputIntentFromTick(tickObj);
     const replayInputs = replayInputsFromIntentRows(replayInputIntent, "replay_input_intent");
@@ -1910,23 +2424,70 @@ function buildTraceTickRow(tickObj) {
       );
     }
     const simState = simStateFromTick(tickObj, playerCount);
+    const localTick = outState.currentRunTickCount | 0;
+    checkpoint.tick_index = localTick;
+    for (let i = 0; i < timingSamples.length; i++) {
+      timingSamples[i].tick_index = localTick;
+      timingSamples[i].gameplay_frame = localTick;
+      if (timingSamples[i].phase === "gpur_enter") {
+        timingSamples[i].mode_fn = "gameplay_update_and_render";
+      }
+    }
+    const replayStepInputs = replayInputs.map(function (packed) {
+      return {
+        move_x: packed[0],
+        move_y: packed[1],
+        aim_x: packed[2],
+        aim_y: packed[3],
+        flags: packed[4] | 0,
+      };
+    });
+    const replayPostlude = replayPostludeFromTick(tickObj);
 
     return {
       event: "tick",
       run_id: outState.currentRunId | 0,
-      tick_index_global: tickObj && tickObj.tick_index != null ? tickObj.tick_index | 0 : null,
+      tick_index: localTick,
+      global_tick_index: tickObj && tickObj.tick_index != null ? tickObj.tick_index | 0 : -1,
       elapsed_ms: elapsedMs,
-      dt: dtSeconds,
       dt_ms_i32: dtMsI32,
       mode_id: modeId,
       quest_stage_major: tickQuestMajor(tickObj),
       quest_stage_minor: tickQuestMinor(tickObj),
-      replay_inputs: replayInputs,
       rng_calls: rngCalls,
       rng_outside_before: rngOutsideBefore,
       rng_state_enter_u32: rngStateEnter,
       rng_state_leave_u32: rngStateLeave,
+      evidence: {
+        event_counts: eventCounts,
+        event_overflow: !!tickObj.event_overflow,
+        event_heads: requireObject(tickObj.event_heads, "event_heads"),
+        diagnostics: requireObject(tickObj.diagnostics, "diagnostics"),
+        input_queries: requireObject(tickObj.input_queries, "input_queries"),
+        input_player_keys: requireArray(tickObj.input_player_keys, "input_player_keys"),
+        input_approx: requireArray(tickObj.input_approx, "input_approx"),
+        before: requireObject(tickObj.before, "before"),
+        after: after,
+        samples: requireObject(tickObj.samples, "samples"),
+        frame_dt_ms: tickObj.frame_dt_ms == null ? null : requireFiniteScalar(tickObj.frame_dt_ms, "frame_dt_ms"),
+        frame_dt_ms_i32:
+          tickObj.frame_dt_ms_i32 == null ? null : requireNonNegativeInt(tickObj.frame_dt_ms_i32, "frame_dt_ms_i32"),
+        checkpoint_private: rawCheckpointPrivate,
+        clocks: {
+          time_played_ms_raw: elapsedRawMs,
+          quest_spawn_timeline_raw: questSpawnTimelineRaw,
+          summed_replay_clock_ms: summedReplayClockMs,
+          canonical_elapsed_ms: elapsedMs,
+        },
+      },
       channels: {
+        replay_step: {
+          dt: dtSeconds,
+          inputs: replayStepInputs,
+          prelude: replayPrelude,
+          postlude: replayPostlude,
+          commands: [],
+        },
         checkpoint: checkpoint,
         rng_stream: rngStream,
         timing_samples: timingSamples,
@@ -1965,10 +2526,11 @@ function closeCaptureFile() {
   if (!outState.captureStarted || outState.captureClosed) return;
   try {
     if (outState.outFile) {
-      if (CONFIG.flushCaptureWrites) outState.outFile.flush();
+      outState.outFile.flush();
       outState.outFile.close();
     }
-  } catch (_) {
+  } catch (error) {
+    noteCaptureIoFailure("close", error);
   }
   outState.outFile = null;
   outState.captureClosed = true;
@@ -1984,22 +2546,9 @@ function shutdownCapture(reason) {
       outState.heartbeatTimer = null;
     }
   } catch (_) {}
-  try {
-    finalizeTick();
-  } catch (_) {}
+  finalizeTickOrReport();
   try {
     closeActiveRun("shutdown", null);
-  } catch (_) {}
-  try {
-    const wroteSessionEnd = _captureWriteJsonLine(
-      {
-        event: "session_end",
-        session_id: outState.sessionId,
-        ticks_written: outState.captureTickCount | 0,
-      },
-      true,
-    );
-    if (wroteSessionEnd) _captureForceFlush();
   } catch (_) {}
   try {
     closeCaptureFile();
@@ -2162,6 +2711,12 @@ function readDataI32(name) {
   return safeReadS32(p);
 }
 
+function readDataU8(name) {
+  const p = dataPtrs[name];
+  if (!p) return null;
+  return safeReadU8(p);
+}
+
 function readDataU32(name) {
   const p = dataPtrs[name];
   if (!p) return null;
@@ -2195,22 +2750,38 @@ function readConfigPerPlayerI32(name) {
   return out;
 }
 
-function readStatusSnapshotCompact() {
-  const packed = readDataU32("game_status_blob");
+function readStatusSnapshot() {
+  const base = dataPtrs.game_status_blob;
+  const packed = base ? safeReadU32(base) : null;
   const questUnlock = packed == null ? null : packed & 0xffff;
   const questUnlockFull = packed == null ? null : (packed >>> 16) & 0xffff;
-  const counts = [];
-  const base = dataPtrs.status_weapon_usage_counts;
+  const weaponUsageCounts = [];
+  const questPlayCounts = [];
+  const reservedSeedWords = [];
   if (base) {
     for (let i = 0; i < STATUS_WEAPON_USAGE_COUNT; i++) {
-      const value = safeReadU32(base.add(i * 4));
-      counts.push(value == null ? null : value >>> 0);
+      const value = safeReadU32(base.add(0x04 + i * 4));
+      weaponUsageCounts.push(value == null ? null : value >>> 0);
+    }
+    for (let i = 0; i < STATUS_QUEST_PLAY_COUNT; i++) {
+      const value = safeReadU32(base.add(0xd8 + i * 4));
+      questPlayCounts.push(value == null ? null : value >>> 0);
+    }
+    for (let i = 0; i < STATUS_RESERVED_SEED_WORDS_BYTE_SIZE; i++) {
+      reservedSeedWords.push(safeReadU8(base.add(0x258 + i)));
     }
   }
   return {
     quest_unlock_index: questUnlock,
     quest_unlock_index_full: questUnlockFull,
-    weapon_usage_counts: counts,
+    weapon_usage_counts: weaponUsageCounts,
+    quest_play_counts: questPlayCounts,
+    mode_play_survival: base ? safeReadU32(base.add(0x244)) : null,
+    mode_play_rush: base ? safeReadU32(base.add(0x248)) : null,
+    mode_play_typo: base ? safeReadU32(base.add(0x24c)) : null,
+    mode_play_other: base ? safeReadU32(base.add(0x250)) : null,
+    play_time_ms: base ? safeReadU32(base.add(0x254)) : null,
+    reserved_seed_words: reservedSeedWords,
   };
 }
 
@@ -2348,6 +2919,18 @@ function captureNumber(v) {
   return captureF32Bits(f32ToU32(v));
 }
 
+function pc24AddNumber(lhs, rhs) {
+  return captureNumber(Number(lhs) + Number(rhs));
+}
+
+function pc24SubNumber(lhs, rhs) {
+  return captureNumber(Number(lhs) - Number(rhs));
+}
+
+function pc24MulNumber(lhs, rhs) {
+  return captureNumber(Number(lhs) * Number(rhs));
+}
+
 function normalizeSampleLimit(limit) {
   if (!Number.isFinite(limit)) return -1;
   if (limit < 0) return -1;
@@ -2483,10 +3066,14 @@ function resolvePointers(exeModule, grimModule) {
 }
 
 function readGameplayGlobalsCompact() {
+  const x87ControlWord = readX87ControlWord();
   return {
     config_game_mode: readDataI32("config_game_mode"),
-    config_player_mode_flags: readConfigPerPlayerI32("config_player_mode_flags"),
-    config_aim_scheme: readConfigPerPlayerI32("config_aim_scheme"),
+    config_hardcore: readDataU8("config_hardcore"),
+    config_violence_disabled: readDataU8("config_violence_disabled"),
+    config_detail_preset: readDataI32("config_detail_preset"),
+    config_movement_schemes: readConfigPerPlayerI32("config_movement_schemes"),
+    config_aim_schemes: readConfigPerPlayerI32("config_aim_schemes"),
     game_state_prev: readDataI32("game_state_prev"),
     game_state_id: readDataI32("game_state_id"),
     game_state_pending: readDataI32("game_state_pending"),
@@ -2495,7 +3082,9 @@ function readGameplayGlobalsCompact() {
     // The native global is an i32; emit its numeric value (a float read of
     // the same address yields a denormal bit pattern).
     frame_dt_ms_f32: readDataI32("frame_dt_ms"),
+    time_scale_active: readDataU8("time_scale_active"),
     time_played_ms: readDataI32("time_played_ms"),
+    quest_fail_retry_count: readDataI32("quest_fail_retry_count"),
     creature_active_count: readDataI32("creature_active_count"),
     creature_kill_count: readDataI32("creature_kill_count"),
     perk_pending_count: readDataI32("perk_pending_count"),
@@ -2521,6 +3110,9 @@ function readGameplayGlobalsCompact() {
     bonus_weapon_power_up_timer: readDataF32("bonus_weapon_power_up_timer"),
     bonus_energizer_timer: readDataF32("bonus_energizer_timer"),
     bonus_double_xp_timer: readDataF32("bonus_double_xp_timer"),
+    x87_control_word: x87ControlWord,
+    x87_precision_control: x87ControlWord == null ? null : (x87ControlWord >>> 8) & 3,
+    x87_rounding_control: x87ControlWord == null ? null : (x87ControlWord >>> 10) & 3,
   };
 }
 
@@ -2536,8 +3128,11 @@ function readPlayerCompact(playerIndex) {
     move_dx: captureNumber(readPlayerF32("player_move_dx", playerIndex)),
     move_dy: captureNumber(readPlayerF32("player_move_dy", playerIndex)),
     health: captureNumber(readPlayerF32("player_health", playerIndex)),
+    heading: captureNumber(readPlayerF32("player_heading", playerIndex)),
     aim_x: captureNumber(readPlayerF32("player_aim_x", playerIndex)),
     aim_y: captureNumber(readPlayerF32("player_aim_y", playerIndex)),
+    move_speed: captureNumber(readPlayerF32("player_move_speed", playerIndex)),
+    move_phase: captureNumber(readPlayerF32("player_move_phase", playerIndex)),
     aim_heading: captureNumber(readPlayerF32("player_aim_heading", playerIndex)),
     weapon_id: readPlayerI32("player_weapon_id", playerIndex),
     clip_size_i32: clipU32 == null ? null : clipU32 | 0,
@@ -2746,7 +3341,7 @@ function readCreatureSlotResidue(index) {
   return {
     index: index,
     active: safeReadU8(base),
-    phase_seed: captureNumber(safeReadF32(base.add(0x04))),
+    phase_seed: safeReadS32(base.add(0x04)),
     state_flag: safeReadU8(base.add(0x08)),
     collision_flag: safeReadU8(base.add(0x09)),
     collision_timer: captureNumber(safeReadF32(base.add(0x0c))),
@@ -2771,7 +3366,7 @@ function readCreatureSlotResidue(index) {
       b: captureNumber(safeReadF32(base.add(0x44))),
       a: captureNumber(safeReadF32(base.add(0x48))),
     },
-    force_target: safeReadS32(base.add(0x4c)),
+    force_target: safeReadU8(base.add(0x4c)),
     target: {
       x: captureNumber(safeReadF32(base.add(0x50))),
       y: captureNumber(safeReadF32(base.add(0x54))),
@@ -2818,16 +3413,24 @@ function readCreatureEntry(index) {
     active: activeFlag,
     state_flag: stateFlag,
     collision_flag: safeReadU8(base.add(0x09)),
+    collision_timer: captureNumber(safeReadF32(base.add(0x0c))),
     lifecycle_stage: captureNumber(safeReadF32(base.add(0x10))),
     pos: {
       x: captureNumber(safeReadF32(base.add(0x14))),
       y: captureNumber(safeReadF32(base.add(0x18))),
+    },
+    tint: {
+      r: captureNumber(safeReadF32(base.add(0x3c))),
+      g: captureNumber(safeReadF32(base.add(0x40))),
+      b: captureNumber(safeReadF32(base.add(0x44))),
+      a: captureNumber(safeReadF32(base.add(0x48))),
     },
     vel: {
       x: captureNumber(safeReadF32(base.add(0x1c))),
       y: captureNumber(safeReadF32(base.add(0x20))),
     },
     move_speed: captureNumber(safeReadF32(base.add(0x5c))),
+    attack_cooldown: captureNumber(safeReadF32(base.add(0x60))),
     hp: captureNumber(safeReadF32(base.add(0x24))),
     type_id: safeReadS32(base.add(0x6c)),
     target_player: safeReadS32(base.add(0x70)),
@@ -2836,6 +3439,15 @@ function readCreatureEntry(index) {
     ai_mode: safeReadS32(base.add(0x90)),
     heading: captureNumber(safeReadF32(base.add(0x2c))),
     target_heading: captureNumber(safeReadF32(base.add(0x30))),
+    force_target: safeReadU8(base.add(0x4c)),
+    target: {
+      x: captureNumber(safeReadF32(base.add(0x50))),
+      y: captureNumber(safeReadF32(base.add(0x54))),
+    },
+    target_offset: {
+      x: captureNumber(safeReadF32(base.add(0x7c))),
+      y: captureNumber(safeReadF32(base.add(0x80))),
+    },
     orbit_angle: captureNumber(safeReadF32(base.add(0x84))),
     orbit_radius: captureNumber(safeReadF32(base.add(0x88))),
     ai7_timer_ms:
@@ -2914,7 +3526,7 @@ function _readCreatureMicroState(index) {
   const flags = safeReadS32(base.add(0x8c));
   const linkIndex = safeReadS32(base.add(0x78));
   const targetPlayer = safeReadS32(base.add(0x70));
-  const hitboxSize = safeReadF32(base.add(0x10));
+  const lifecycleStage = safeReadF32(base.add(0x10));
   const hp = safeReadF32(base.add(0x24));
   const posX = safeReadF32(base.add(0x14));
   const posY = safeReadF32(base.add(0x18));
@@ -2922,7 +3534,7 @@ function _readCreatureMicroState(index) {
   const velY = safeReadF32(base.add(0x20));
   const heading = safeReadF32(base.add(0x2c));
   const targetHeading = safeReadF32(base.add(0x30));
-  const forceTarget = safeReadS32(base.add(0x4c));
+  const forceTarget = safeReadU8(base.add(0x4c));
   const targetX = safeReadF32(base.add(0x50));
   const targetY = safeReadF32(base.add(0x54));
   const moveSpeed = safeReadF32(base.add(0x5c));
@@ -2982,7 +3594,7 @@ function _readCreatureMicroState(index) {
     flags: flags,
     link_index: linkIndex,
     target_player: targetPlayer,
-    lifecycle_stage: captureNumber(hitboxSize),
+    lifecycle_stage: captureNumber(lifecycleStage),
     hp: captureNumber(hp),
     force_target: forceTarget,
     ai7_timer_ms: ai7TimerMs,
@@ -3407,11 +4019,23 @@ function shouldCaptureTickForState(stateId) {
   return CONFIG.trackedStates.has(stateId);
 }
 
+function isTerminalRunTransition(beforeState, afterState) {
+  if ((beforeState | 0) !== GAME_STATE_GAMEPLAY) return false;
+  const modeId = outState.currentRunModeId | 0;
+  if (modeId === GAME_MODE_SURVIVAL || modeId === GAME_MODE_RUSH) {
+    return (afterState | 0) === GAME_STATE_GAME_OVER;
+  }
+  if (modeId === GAME_MODE_QUESTS) {
+    return (afterState | 0) === GAME_STATE_QUEST_RESULTS || (afterState | 0) === GAME_STATE_QUEST_FAILED;
+  }
+  return false;
+}
+
 function makeCoreSnapshot() {
   resolvePlayerCount();
   return {
     globals: readGameplayGlobalsCompact(),
-    status: readStatusSnapshotCompact(),
+    status: readStatusSnapshot(),
     player_count: outState.playerCountResolved,
     players: readPlayersCompact(),
     input: readInputTelemetryCompact(),
@@ -3538,9 +4162,13 @@ function makeTickContext() {
   const creatureDigestBefore = CONFIG.enableCreatureLifecycleDigest ? captureCreatureDigest() : null;
   const outsideRngBefore = takePendingOutsideRngRolls();
   const outsidePerkApplyBefore = takePendingOutsidePerkApply();
+  const replayPrelude = Array.isArray(outState.pendingReplayPrelude)
+    ? outState.pendingReplayPrelude.slice()
+    : [];
+  outState.pendingReplayPrelude = [];
   const tickIndex = Math.max(0, outState.gameplayFrame - 1);
   const beforeGlobals = before && before.globals && typeof before.globals === "object" ? before.globals : {};
-  const timingEntryActive = _timeScaleActiveFromBonusTimer(beforeGlobals.bonus_reflex_boost_timer);
+  const timingEntryActive = _timeScaleActiveFromGlobals(beforeGlobals);
   const timingEntryFactor = _timeScaleFactorFromBonusTimer(
     beforeGlobals.bonus_reflex_boost_timer,
     timingEntryActive
@@ -3572,6 +4200,7 @@ function makeTickContext() {
       projectile_spawn: 0,
       projectile_find_query: 0,
       projectile_find_hit: 0,
+      projectile_find_owner_collision: 0,
       secondary_projectile_spawn: 0,
       player_damage: 0,
       creature_damage: 0,
@@ -3581,6 +4210,7 @@ function makeTickContext() {
       creature_lifecycle: 0,
       creature_update_micro: 0,
       perk_apply: 0,
+      perk_generate_choices: 0,
       sfx: 0,
       perk_delta: 0,
       quest_timeline_delta: 0,
@@ -3607,6 +4237,7 @@ function makeTickContext() {
       creature_lifecycle: [],
       creature_update_micro: [],
       perk_apply: [],
+      perk_generate_choices: [],
       sfx: [],
       perk_delta: [],
       quest_timeline_delta: [],
@@ -3642,6 +4273,8 @@ function makeTickContext() {
       mirror_unknown_total_enter: outState.rngMirrorUnknownCalls,
     },
     perk_apply_outside_before: outsidePerkApplyBefore,
+    replay_prelude: replayPrelude,
+    replay_postlude: [],
     timing_entry_active: timingEntryActive,
     timing_entry_factor: timingEntryFactor,
     timing_samples: [],
@@ -3763,10 +4396,9 @@ function emitRawEvent(obj) {
   writeLine(obj);
 }
 
-function _timeScaleActiveFromBonusTimer(timerValue) {
-  const timer = decodeCapturedF32(timerValue);
-  if (timer == null) return null;
-  return timer > 0.0;
+function _timeScaleActiveFromGlobals(globalsObj) {
+  if (!globalsObj || globalsObj.time_scale_active == null) return null;
+  return (globalsObj.time_scale_active | 0) !== 0;
 }
 
 function _timeScaleFactorFromBonusTimer(timerValue, active) {
@@ -3774,7 +4406,12 @@ function _timeScaleFactorFromBonusTimer(timerValue, active) {
   if (!active) return 1.0;
   const timer = decodeCapturedF32(timerValue);
   if (timer == null) return 0.3;
-  if (timer < 1.0) return ((1.0 - timer) * 0.7) + 0.3;
+  if (timer < 1.0) {
+    return pc24AddNumber(
+      pc24MulNumber(pc24SubNumber(1.0, timer), captureNumber(0.7)),
+      captureNumber(0.3)
+    );
+  }
   return 0.3;
 }
 
@@ -3787,9 +4424,7 @@ function _buildTimingSampleRow(tick, phase, writeKind, payload) {
     globalsObj && globalsObj.bonus_reflex_boost_timer != null
       ? decodeCapturedF32(globalsObj.bonus_reflex_boost_timer)
       : null;
-  const activeCurrent = _timeScaleActiveFromBonusTimer(
-    globalsObj ? globalsObj.bonus_reflex_boost_timer : null
-  );
+  const activeCurrent = _timeScaleActiveFromGlobals(globalsObj);
   const entryActive =
     payload && payload.time_scale_active_entry != null
       ? !!payload.time_scale_active_entry
@@ -3878,79 +4513,9 @@ function recordTimingSample(phase, writeKind, payload) {
   }
 }
 
-const EVENT_HEAD_ORDER = [
-  "state_transition",
-  "mode_tick",
-  "input_primary_edge",
-  "input_primary_down",
-  "input_any_key",
-  "player_fire",
-  "weapon_assign",
-  "bonus_apply",
-  "bonus_spawn",
-  "secondary_projectile_spawn",
-  "projectile_spawn",
-  "projectile_find_query",
-  "projectile_find_hit",
-  "creature_damage",
-  "player_damage",
-  "creature_death",
-  "creature_spawn",
-  "creature_spawn_low",
-  "creature_update_micro",
-  "perk_apply",
-  "sfx",
-  "perk_delta",
-  "quest_timeline_delta",
-  "creature_lifecycle",
-];
-
 function asObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value;
-}
-
-function toPerkApplyEntry(value) {
-  const row = asObject(value);
-  const backtrace = Array.isArray(row.backtrace)
-    ? row.backtrace.map((item) => String(item))
-    : null;
-  return {
-    perk_id: row.perk_id == null ? null : row.perk_id,
-    pending_before: row.pending_before == null ? null : row.pending_before,
-    pending_after: row.pending_after == null ? null : row.pending_after,
-    caller: row.caller == null ? null : row.caller,
-    caller_static: row.caller_static == null ? null : row.caller_static,
-    backtrace: backtrace,
-  };
-}
-
-function buildCaptureEventHeads(eventHeadsByKind) {
-  const out = [];
-  const byKind = asObject(eventHeadsByKind);
-  for (let i = 0; i < EVENT_HEAD_ORDER.length; i++) {
-    const kind = EVENT_HEAD_ORDER[i];
-    const entries = Array.isArray(byKind[kind]) ? byKind[kind] : [];
-    for (let j = 0; j < entries.length; j++) {
-      const payload = asObject(entries[j]);
-      if (kind === "perk_apply") {
-        out.push(
-          Object.assign(
-            {
-              type: "perk_apply",
-            },
-            toPerkApplyEntry(payload)
-          )
-        );
-      } else {
-        out.push({
-          type: kind,
-          data: payload,
-        });
-      }
-    }
-  }
-  return out;
 }
 
 function pushInputContext(threadId, ctx) {
@@ -4073,6 +4638,56 @@ function takePendingOutsidePerkApply() {
   };
 }
 
+function appendReplayPreludeOp(tickObj, op) {
+  const target = tickObj
+    ? (Array.isArray(tickObj.replay_prelude) ? tickObj.replay_prelude : (tickObj.replay_prelude = []))
+    : (Array.isArray(outState.pendingReplayPrelude)
+      ? outState.pendingReplayPrelude
+      : (outState.pendingReplayPrelude = []));
+  if (op && op.type === "game_frame_rng_advance") {
+    const frames = requirePositiveInt(op.frames, "replay_prelude.game_frame_rng_advance.frames");
+    const last = target.length > 0 ? target[target.length - 1] : null;
+    if (last && last.type === "game_frame_rng_advance") {
+      last.frames = (last.frames | 0) + frames;
+      return target.length - 1;
+    }
+  }
+  target.push(op);
+  return target.length - 1;
+}
+
+function appendReplayPostludeOp(tickObj, op) {
+  if (!tickObj) failCaptureContract("replay_postlude requires a current tick");
+  const target = Array.isArray(tickObj.replay_postlude)
+    ? tickObj.replay_postlude
+    : (tickObj.replay_postlude = []);
+  target.push(op);
+}
+
+function beginReplayPreludeRngSuppression(threadId, operationIndex) {
+  const key = String(threadId);
+  const stack = Array.isArray(outState.replayPreludeOperationStackByTid[key])
+    ? outState.replayPreludeOperationStackByTid[key]
+    : [];
+  stack.push(requireNonNegativeInt(operationIndex, "replay_operation_index"));
+  outState.replayPreludeOperationStackByTid[key] = stack;
+}
+
+function endReplayPreludeRngSuppression(threadId) {
+  const key = String(threadId);
+  const stack = outState.replayPreludeOperationStackByTid[key];
+  if (!Array.isArray(stack) || stack.length <= 0) {
+    failCaptureContract("replay operation stack underflow");
+  }
+  stack.pop();
+  if (stack.length <= 0) delete outState.replayPreludeOperationStackByTid[key];
+}
+
+function currentReplayPreludeOperationIndex(threadId) {
+  const stack = outState.replayPreludeOperationStackByTid[String(threadId)];
+  return Array.isArray(stack) && stack.length > 0 ? stack[stack.length - 1] | 0 : null;
+}
+
 function emitRngRollEvent(rollRow) {
   if (!rollRow || !CONFIG.enableRngRollLog) return;
   const cap = CONFIG.maxRngRollLogEvents;
@@ -4105,7 +4720,7 @@ function emitRngRollEvent(rollRow) {
   });
 }
 
-function registerRngRoll(value, callerStaticHex, callerLabel, stateBeforeRealU32) {
+function registerRngRoll(value, callerStaticHex, callerLabel, stateBeforeRealU32, threadId) {
   let valueI32 = null;
   if (Number.isFinite(value)) {
     valueI32 = value | 0;
@@ -4124,10 +4739,14 @@ function registerRngRoll(value, callerStaticHex, callerLabel, stateBeforeRealU32
   const tickCallIndex = tick ? tick.rng.calls + 1 : null;
   const mirrorBeforeU32 =
     CONFIG.enableRngStateMirror && outState.rngMirrorStateU32 != null ? outState.rngMirrorStateU32 >>> 0 : null;
-  // The real memory state is authoritative; the software mirror only models
-  // hooked draws, so mirror-vs-real divergence is evidence of unhooked draws.
-  const stateBeforeU32 = stateBeforeRealU32 != null ? stateBeforeRealU32 >>> 0 : mirrorBeforeU32;
-  const stateAfterU32 = stateBeforeU32 == null ? null : stepCrtRandState(stateBeforeU32);
+  if (stateBeforeRealU32 == null) {
+    emitCaptureContractError("missing_real_rng_state_before_draw", tick);
+    return null;
+  }
+  // Real CRT memory is the canonical chain. The software mirror remains
+  // diagnostics only and can never supply capture state.
+  const stateBeforeU32 = stateBeforeRealU32 >>> 0;
+  const stateAfterU32 = stepCrtRandState(stateBeforeU32);
   const expectedValue15 =
     mirrorBeforeU32 == null ? null : (stepCrtRandState(mirrorBeforeU32) >>> 16) & 0x7fff;
   let mirrorMatch = null;
@@ -4143,11 +4762,7 @@ function registerRngRoll(value, callerStaticHex, callerLabel, stateBeforeRealU32
     // The mirror resyncs to the real chain when available so mirror_match
     // flags each unhooked-draw gap once instead of permanently after the
     // first gap.
-    if (stateAfterU32 != null) {
-      outState.rngMirrorStateU32 = stateAfterU32 >>> 0;
-    } else if (mirrorBeforeU32 != null) {
-      outState.rngMirrorStateU32 = stepCrtRandState(mirrorBeforeU32) >>> 0;
-    }
+    outState.rngMirrorStateU32 = stateAfterU32 >>> 0;
   }
 
   const rollRow = {
@@ -4177,16 +4792,65 @@ function registerRngRoll(value, callerStaticHex, callerLabel, stateBeforeRealU32
     // run_start wins so restarts and quest retries re-latch naturally.
     outState.pendingRunSetupRng = {
       state_before_u32: rollRow.state_before_u32 >>> 0,
-      caller_static: String(rollRow.caller_static),
-      seq: rollRow.seq >>> 0,
+      state_after_u32: null,
+      calls: 0,
     };
+    // The replay seed is latched before this setup sequence, so terrain/setup
+    // draws are reproduced by normal run initialization and must not become
+    // frame-advance operations on the first gameplay tick.
+    outState.runSetupRngActive = true;
+    outState.pendingReplayPrelude = [];
     // The pool is stable between creature_reset_all and the run's first tick;
     // snapshot the residue the run will inherit alongside the rng latch.
     outState.pendingRunPoolResidue = readCreaturePoolResidue();
   }
 
+  if (
+    !tick &&
+    outState.runSetupRngActive &&
+    rollRow.caller_static === FRAME_DISCARDED_RNG_CALLER_STATIC
+  ) {
+    // The state-transition frame consumes one shared-CRT draw after run setup
+    // and before the first gameplay update. It belongs in that update's replay
+    // prelude; normal initialization reproduces the preceding setup window.
+    if (outState.pendingRunSetupRng) {
+      outState.pendingRunSetupRng.state_after_u32 = rollRow.state_before_u32 >>> 0;
+    }
+    outState.runSetupRngActive = false;
+  }
+
   if (!tick) {
+    if (outState.runSetupRngActive) {
+      // Replay initialization owns terrain/setup draws from the captured
+      // pre-bootstrap state. They are neither skipped frames nor replay
+      // prelude input, so keep them out of the outside-before bag.
+      if (outState.pendingRunSetupRng) {
+        outState.pendingRunSetupRng.calls += 1;
+      }
+      emitRngRollEvent(rollRow);
+      return rollRow;
+    }
     outState.rngCallsOutsideTick += 1;
+    let replayOperationIndex = currentReplayPreludeOperationIndex(threadId);
+    if (replayOperationIndex == null) {
+      if (rollRow.caller_static !== FRAME_DISCARDED_RNG_CALLER_STATIC) {
+        emitCaptureContractError(
+          "unclassified_outside_rng_caller:" + String(rollRow.caller_static || "unknown"),
+          null,
+        );
+        emitRngRollEvent(rollRow);
+        return null;
+      } else {
+        replayOperationIndex = appendReplayPreludeOp(null, {
+          type: "game_frame_rng_advance",
+          frames: 1,
+        });
+      }
+    }
+    rollRow.replay_operation_index = requireNonNegativeInt(
+      replayOperationIndex,
+      "outside_rng.replay_operation_index",
+    );
     queueOutsideRngRoll(rollRow);
     emitRngRollEvent(rollRow);
     return rollRow;
@@ -4225,12 +4889,9 @@ function readPerkChoicesCompact() {
   const base = dataPtrs.perk_choice_ids;
   const out = [];
   if (!base) return out;
-  const seen = {};
   for (let i = 0; i < PERK_CHOICE_COUNT; i++) {
     const perkId = safeReadS32(base.add(i * 4));
-    if (perkId == null || perkId <= 0 || seen[perkId]) continue;
-    seen[perkId] = true;
-    out.push(perkId | 0);
+    out.push(perkId == null ? null : perkId | 0);
   }
   return out;
 }
@@ -4256,26 +4917,10 @@ function readPlayerPerkNonzeroCountsCompact() {
   return out;
 }
 
-function playerBonusTimersMsFromCompactPlayers(players) {
-  const out = [];
-  for (let i = 0; i < players.length; i++) {
-    const p = players[i] || {};
-    const bonusTimers = p.bonus_timers && typeof p.bonus_timers === "object" ? p.bonus_timers : {};
-    out.push({
-      speed_bonus: Math.max(0, bonusTimerMs(bonusTimers.speed_bonus)),
-      shield: Math.max(0, bonusTimerMs(bonusTimers.shield)),
-      fire_bullets: Math.max(0, bonusTimerMs(bonusTimers.fire_bullets)),
-    });
-  }
-  return out;
-}
-
 function checkpointPlayersFromCompact(players) {
-  const playerBonusTimersMs = playerBonusTimersMsFromCompactPlayers(players);
   const out = [];
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
-    const bonusTimers = playerBonusTimersMs[i] || {};
     out.push({
       pos: { x: p.pos_x == null ? 0 : p.pos_x, y: p.pos_y == null ? 0 : p.pos_y },
       health: p.health == null ? 0 : p.health,
@@ -4283,11 +4928,6 @@ function checkpointPlayersFromCompact(players) {
       ammo: p.ammo_f32 == null ? 0 : p.ammo_f32,
       experience: p.experience == null ? 0 : p.experience,
       level: p.level == null ? 0 : p.level,
-      bonus_timers: {
-        speed_bonus: bonusTimers.speed_bonus == null ? 0 : bonusTimers.speed_bonus,
-        shield: bonusTimers.shield == null ? 0 : bonusTimers.shield,
-        fire_bullets: bonusTimers.fire_bullets == null ? 0 : bonusTimers.fire_bullets,
-      },
     });
   }
   return out;
@@ -4306,7 +4946,10 @@ function checkpointDeathsFromEventHeads(eventHeadsByKind) {
     out.push({
       creature_index: creatureIndex,
       type_id: typeId,
-      reward_value: intOr(payload.reward_value, 0),
+      reward_value:
+        before.reward_value == null
+          ? 0
+          : requireFiniteScalar(before.reward_value, "event_heads.creature_death[" + i + "].before.reward_value"),
       xp_awarded: intOr(payload.xp_awarded, 0),
       owner_id: intOr(payload.owner_id, -1),
     });
@@ -4340,8 +4983,8 @@ function buildInputApprox(afterPlayers, tick) {
       aim_x: p.aim_x,
       aim_y: p.aim_y,
       aim_heading: p.aim_heading,
-      move_mode: readDataI32Stride("config_player_mode_flags", i, 4),
-      aim_scheme: readDataI32Stride("config_aim_scheme", i, 4),
+      move_mode: readDataI32Stride("config_movement_schemes", i, 4),
+      aim_scheme: readDataI32Stride("config_aim_schemes", i, 4),
       fired_events: fired,
       moving: !!moving,
       reload_active: p.reload_active_i32 != null ? p.reload_active_i32 !== 0 : null,
@@ -4424,14 +5067,13 @@ function finalizeTick() {
   const perkPendingCount = globals.perk_pending_count == null ? -1 : globals.perk_pending_count;
   const perkChoicesDirty = readDataI32("perk_choices_dirty");
   const perkPendingForCheckpoint = perkPendingCount > 0 ? perkPendingCount : 0;
-  const perkChoices =
-    perkPendingForCheckpoint > 0 ? readPerkChoicesCompact() : [];
+  const perkChoices = readPerkChoicesCompact();
+  if (perkChoices.length !== PERK_CHOICE_COUNT || perkChoices.some((value) => value == null)) {
+    failCaptureContract("perk choice snapshot must contain exactly 7 readable slots");
+  }
   const perkSnapshot = {
     pending_count: perkPendingForCheckpoint,
-    choices_dirty:
-      perkPendingForCheckpoint > 0
-        ? (perkChoicesDirty != null ? perkChoicesDirty !== 0 : false)
-        : true,
+    choices_dirty: perkChoicesDirty != null ? perkChoicesDirty !== 0 : false,
     choices: perkChoices,
     player_nonzero_counts: readPlayerPerkNonzeroCountsCompact(),
   };
@@ -4444,18 +5086,12 @@ function finalizeTick() {
     CONFIG.maxRngCallerKinds < 0
       ? rngCallersSorted
       : rngCallersSorted.slice(0, CONFIG.maxRngCallerKinds);
-  const inputTrueCount =
-    (tick.input_queries.primary_edge.true_calls || 0) +
-    (tick.input_queries.primary_down.true_calls || 0) +
-    (tick.input_queries.any_key.true_calls || 0);
-
   const eventSummary = {
     hit_count: tick.event_counts.projectile_find_hit || 0,
     pickup_count: tick.event_counts.bonus_apply || 0,
     sfx_count: tick.event_counts.sfx || 0,
     sfx_head: tick.sfx_ids.slice(0, 4),
-    rng_call_count: tick.rng.calls,
-    input_true_count: inputTrueCount,
+    hit_head: [],
   };
   const playerFireDiagnostics = {
     event_count_player_fire: tick.event_counts.player_fire || 0,
@@ -4545,14 +5181,10 @@ function finalizeTick() {
       : globals.creature_active_count == null
         ? -1
         : globals.creature_active_count;
-  // Real memory state at gpur leave is authoritative for the checkpoint; the
-  // hooked-draws mirror is only the fallback when the ptd read is unavailable.
-  const rngStateForCheckpoint =
-    outState.lastGpurLeaveRngStateReal != null
-      ? outState.lastGpurLeaveRngStateReal >>> 0
-      : CONFIG.enableRngStateMirror && outState.rngMirrorStateU32 != null
-        ? outState.rngMirrorStateU32 >>> 0
-        : null;
+  if (outState.lastGpurLeaveRngStateReal == null) {
+    failCaptureContract("missing real CRT RNG state at gameplay_update_and_render leave");
+  }
+  const rngStateForCheckpoint = outState.lastGpurLeaveRngStateReal >>> 0;
   const diagnostics = {
     sampling_phase: "post_gameplay_update_and_render",
     timing: timing,
@@ -4572,30 +5204,19 @@ function finalizeTick() {
 
   const checkpoint = {
     tick_index: tick.tick_index,
-    state_hash: "",
-    command_hash: "",
-    rng_state: rngStateForCheckpoint == null ? -1 : rngStateForCheckpoint,
+    rng_state: rngStateForCheckpoint,
     elapsed_ms: globals.time_played_ms == null ? -1 : globals.time_played_ms,
     score_xp: scoreXp,
     kills: killCount,
     creature_count: creatureCountForCheckpoint,
     perk_pending: perkPendingForCheckpoint,
     players: checkpointPlayers,
-    status: {
-      quest_unlock_index:
-        status.quest_unlock_index == null ? -1 : status.quest_unlock_index,
-      quest_unlock_index_full:
-        status.quest_unlock_index_full == null ? -1 : status.quest_unlock_index_full,
-      weapon_usage_counts: Array.isArray(status.weapon_usage_counts)
-        ? status.weapon_usage_counts
-            .slice(0, STATUS_WEAPON_USAGE_COUNT)
-            .map((value) => (value == null ? 0 : value >>> 0))
-        : [],
-    },
     bonus_timers: bonusTimers,
     deaths: checkpointDeathsFromEventHeads(tick.event_heads),
     perk: perkSnapshot,
     events: eventSummary,
+    tutorial: null,
+    typo: null,
   };
 
   const frameDtMs =
@@ -4607,7 +5228,7 @@ function finalizeTick() {
           ? null
           : captureNumber(decodeCapturedF32(globals.frame_dt) * 1000);
   const frameDtMsI32 = globals.frame_dt_ms_i32 == null ? null : globals.frame_dt_ms_i32;
-  const out = {
+  const out = Object.assign({}, tick, {
     tick_index: tick.tick_index,
     gameplay_frame: tick.gameplay_frame,
     focus_tick: focused,
@@ -4625,7 +5246,6 @@ function finalizeTick() {
     checkpoint: checkpoint,
     event_counts: tick.event_counts,
     event_overflow: tick.overflow,
-    event_heads: buildCaptureEventHeads(tick.event_heads),
     timing_samples: timingSamplesFromTick({
       tick_index: tick.tick_index,
       gameplay_frame: tick.gameplay_frame,
@@ -4660,7 +5280,7 @@ function finalizeTick() {
       secondary_projectiles: readActiveSecondaryProjectileSample(CONFIG.secondaryProjectileSampleLimit),
       bonuses: readActiveBonusSample(CONFIG.bonusSampleLimit),
     },
-  };
+  });
 
   writeCaptureTick(out);
   writeLine({
@@ -4674,6 +5294,24 @@ function finalizeTick() {
   if (afterElapsedMs != null) outState.lastTickElapsedMs = afterElapsedMs;
   outState.lastTickGameplayFrame = tick.gameplay_frame;
   outState.currentTick = null;
+  const pendingRunCloseReason = outState.pendingRunCloseReason;
+  outState.pendingRunCloseReason = null;
+  if (pendingRunCloseReason && outState.runActive) {
+    closeActiveRun(pendingRunCloseReason, out);
+  }
+}
+
+function finalizeTickOrReport() {
+  const tick = outState.currentTick;
+  if (!tick) return true;
+  try {
+    finalizeTick();
+    return true;
+  } catch (error) {
+    outState.currentTick = null;
+    emitCaptureContractError("finalize_tick_failed:" + String(error), tick);
+    return false;
+  }
 }
 
 function attachHook(name, ptrVal, handlers) {
@@ -4731,7 +5369,7 @@ function installHooks() {
     },
     onLeave() {
       outState.lastGpurLeaveRngStateReal = readCrtRandStateU32(this.threadId);
-      finalizeTick();
+      finalizeTickOrReport();
     },
   });
 
@@ -4765,6 +5403,16 @@ function installHooks() {
         "gs:" + payload.before.id + "->" + payload.target_state
       );
       emitRawEvent(Object.assign({ event: "game_state_set" }, payload));
+      if (
+        outState.runActive &&
+        isTerminalRunTransition(payload.before.id, payload.after.id)
+      ) {
+        if (outState.currentTick) {
+          outState.pendingRunCloseReason = "run_end";
+        } else {
+          closeActiveRun("run_end", null);
+        }
+      }
     },
   });
 
@@ -5094,7 +5742,6 @@ function installHooks() {
         const ctx = srandContextByTid[this.threadId];
         delete srandContextByTid[this.threadId];
         if (!ctx) return;
-        outState.lastSrandSeed = ctx.seed_u32 >>> 0;
         outState.rngSeedEpoch += 1;
         if (CONFIG.enableRngStateMirror) {
           outState.rngMirrorStateU32 = ctx.seed_u32 >>> 0;
@@ -5132,7 +5779,8 @@ function installHooks() {
           value,
           ctx ? ctx.caller_static : null,
           ctx ? ctx.caller : null,
-          ctx ? ctx.state_before_real : null
+          ctx ? ctx.state_before_real : null,
+          this.threadId
         );
         emitRawEvent({
           event: "crt_rand",
@@ -5440,6 +6088,7 @@ function installHooks() {
       const projectile = readProjectileEntryByPosPtr(queryPosPtr);
       const shockChainProjectileId = readDataI32("shock_chain_projectile_id");
       const shockChainLinksLeft = readDataI32("shock_chain_links_left");
+      const x87ControlWord = readX87ControlWord();
       this._ctx = {
         pos: {
           x: captureNumber(safeReadF32(queryPosPtr)),
@@ -5453,6 +6102,9 @@ function installHooks() {
         projectile_hit_radius: projectile && projectile.hit_radius != null ? projectile.hit_radius : null,
         shock_chain_projectile_id: shockChainProjectileId == null ? null : shockChainProjectileId,
         shock_chain_links_left: shockChainLinksLeft == null ? null : shockChainLinksLeft,
+        x87_control_word: x87ControlWord,
+        x87_precision_control: x87ControlWord == null ? null : (x87ControlWord >>> 8) & 3,
+        x87_rounding_control: x87ControlWord == null ? null : (x87ControlWord >>> 10) & 3,
         caller: CONFIG.includeCaller ? formatCaller(this.returnAddress) : null,
         caller_static: callerStatic == null ? null : toHex(callerStatic, 8),
         backtrace: maybeBacktrace(this.context),
@@ -5484,6 +6136,9 @@ function installHooks() {
         player_find_skipped: playerFindSkipped,
         shock_chain_projectile_id: ctx.shock_chain_projectile_id,
         shock_chain_links_left: ctx.shock_chain_links_left,
+        x87_control_word: ctx.x87_control_word,
+        x87_precision_control: ctx.x87_precision_control,
+        x87_rounding_control: ctx.x87_rounding_control,
         caller: ctx.caller,
         caller_static: ctx.caller_static,
         backtrace: ctx.backtrace,
@@ -5495,6 +6150,8 @@ function installHooks() {
       if (tick && creatureIndex < 0) tick.projectile_find_query_miss = (tick.projectile_find_query_miss || 0) + 1;
       if (tick && ownerCollision) {
         tick.projectile_find_query_owner_collision = (tick.projectile_find_query_owner_collision || 0) + 1;
+        tick.event_counts.projectile_find_owner_collision =
+          (tick.event_counts.projectile_find_owner_collision || 0) + 1;
       }
       addTickEvent(
         "projectile_find_query",
@@ -5957,11 +6614,88 @@ function installHooks() {
     },
   });
 
+  attachHook("perks_generate_choices", fnPtrs.perks_generate_choices, {
+    onEnter() {
+      const tick = outState.currentTick;
+      const choicesBefore = readPerkChoicesCompact();
+      if (tick) {
+        // Native choice generation runs late inside gameplay_update_and_render,
+        // after the mode/simulation update. Preserve that phase explicitly;
+        // its RNG draws remain part of this tick's canonical rng_stream.
+        appendReplayPostludeOp(tick, { type: "perk_menu_open", player_index: 0 });
+      } else {
+        // Between native ticks, replay applies the equivalent operation before
+        // the next simulation tick. Suppress its outside draws from also being
+        // encoded as unrelated frame-advance operations.
+        const operationIndex = appendReplayPreludeOp(null, {
+          type: "perk_menu_open",
+          player_index: 0,
+        });
+        beginReplayPreludeRngSuppression(this.threadId, operationIndex);
+      }
+      this._perkGenerateCtx = {
+        choices_before: choicesBefore,
+        dirty_before: readDataI32("perk_choices_dirty"),
+        rng_seq_before: outState.rngCallSeq >>> 0,
+        outside_tick: !tick,
+        outside_rng_suppressed: !tick,
+        tick_index: tick ? tick.tick_index : Math.max(0, outState.gameplayFrame - 1),
+      };
+    },
+    onLeave() {
+      const ctx = this._perkGenerateCtx;
+      this._perkGenerateCtx = null;
+      if (!ctx) return;
+      if (ctx.outside_rng_suppressed) endReplayPreludeRngSuppression(this.threadId);
+      const payload = {
+        choices_before: ctx.choices_before,
+        choices_after: readPerkChoicesCompact(),
+        dirty_before: ctx.dirty_before,
+        dirty_after: readDataI32("perk_choices_dirty"),
+        rng_seq_before: ctx.rng_seq_before,
+        rng_seq_after: outState.rngCallSeq >>> 0,
+        outside_tick: ctx.outside_tick,
+        tick_index: ctx.tick_index,
+      };
+      if (outState.currentTick) {
+        addTickEvent("perk_generate_choices", payload, "pgc:" + String(payload.rng_seq_after));
+      }
+      emitRawEvent(Object.assign({ event: "perks_generate_choices" }, payload));
+    },
+  });
+
   attachHook("perk_apply", fnPtrs.perk_apply, {
     onEnter(args) {
       const callerStatic = runtimeToStatic(this.returnAddress);
+      const perkId = args[0] ? args[0].toInt32() : null;
+      const choices = readPerkChoicesCompact();
+      const choiceIndex = readDataI32("perk_selection_index");
+      const isSelectionPick = callerStatic === PERK_SELECTION_APPLY_RETURN_STATIC;
+      const validSelectionPick =
+        isSelectionPick &&
+        choiceIndex != null &&
+        choiceIndex >= 0 &&
+        choiceIndex < PERK_CHOICE_COUNT &&
+        perkId != null &&
+        choices[choiceIndex] === perkId;
+      let operationIndex = null;
+      if (validSelectionPick) {
+        operationIndex = appendReplayPreludeOp(outState.currentTick, {
+          type: "perk_pick",
+          player_index: 0,
+          choice_index: choiceIndex | 0,
+        });
+      }
+      if (isSelectionPick && operationIndex != null && !outState.currentTick) {
+        beginReplayPreludeRngSuppression(this.threadId, operationIndex);
+      }
       this._perkApplyCtx = {
-        perk_id: args[0] ? args[0].toInt32() : null,
+        perk_id: perkId,
+        choice_index: choiceIndex == null ? -1 : choiceIndex | 0,
+        choices: choices,
+        is_selection_pick: isSelectionPick,
+        outside_rng_suppressed: isSelectionPick && operationIndex != null && !outState.currentTick,
+        selection_contract_error: isSelectionPick && !validSelectionPick,
         pending_before: readDataI32("perk_pending_count"),
         caller: CONFIG.includeCaller ? formatCaller(this.returnAddress) : null,
         caller_static: callerStatic == null ? null : toHex(callerStatic, 8),
@@ -5972,8 +6706,18 @@ function installHooks() {
       const ctx = this._perkApplyCtx;
       this._perkApplyCtx = null;
       if (!ctx) return;
+      if (ctx.is_selection_pick && ctx.outside_rng_suppressed) {
+        endReplayPreludeRngSuppression(this.threadId);
+      }
+      if (ctx.selection_contract_error) {
+        emitCaptureContractError("perk_selection_index_or_choice_mismatch", outState.currentTick);
+        return;
+      }
       const payload = {
         perk_id: ctx.perk_id,
+        choice_index: ctx.choice_index,
+        choices: ctx.choices,
+        is_selection_pick: ctx.is_selection_pick,
         pending_before: ctx.pending_before,
         pending_after: readDataI32("perk_pending_count"),
         caller: ctx.caller,
@@ -6035,7 +6779,10 @@ function installHooks() {
             backtrace: maybeBacktrace(this.context),
           };
           const tick = outState.currentTick;
-          if (tick && tick.sfx_ids.length < CONFIG.maxHeadPerKind) {
+          if (
+            tick &&
+            (CONFIG.maxHeadPerKind < 0 || tick.sfx_ids.length < CONFIG.maxHeadPerKind)
+          ) {
             tick.sfx_ids.push(String(idVal == null ? "null" : idVal));
           }
           addTickEvent(
@@ -6131,6 +6878,7 @@ function main() {
   }
 
   resolvePointers(exeModule, grimModule);
+  initializeX87ControlWordReader();
   updateCurrentStateFromMemory();
   if (CONFIG.enableCreatureLifecycleDigest) {
     outState.lastCreatureDigest = captureCreatureDigest();
@@ -6148,9 +6896,9 @@ function main() {
 
   const captureConfig = {
     out_path: CONFIG.outPath,
+    out_path_source: CONFIG.outPathSource,
     capture_profile: "exhaustive_default",
     config_env_overrides: collectConfigEnvOverrides(),
-    log_mode: CONFIG.logMode,
     console_all_events: CONFIG.consoleAllEvents,
     console_events: Array.from(CONFIG.consoleEvents.values()),
     include_caller: CONFIG.includeCaller,
@@ -6161,7 +6909,6 @@ function main() {
     focus_tick: CONFIG.focusTick,
     focus_radius: CONFIG.focusRadius,
     heartbeat_ms: CONFIG.heartbeatMs,
-    flush_capture_writes: CONFIG.flushCaptureWrites,
     max_head_per_kind: CONFIG.maxHeadPerKind,
     max_events_per_tick: CONFIG.maxEventsPerTick,
     max_rng_head_per_tick: CONFIG.maxRngHeadPerTick,
@@ -6258,6 +7005,7 @@ function main() {
         run_id: outState.currentRunId | 0,
         ticks_written: outState.captureTickCount | 0,
         out_path: outState.currentOutPath || CONFIG.outPath,
+        capture_failure: outState.captureFailure,
         last_hook: outState.lastHookActivity,
         last_exception: outState.lastException,
       };

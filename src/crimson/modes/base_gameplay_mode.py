@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import msgspec
 
@@ -162,7 +162,7 @@ class _ModeFrameState(msgspec.Struct, frozen=True):
 
 LanStepAction = Literal["continue", "stop_before_finalize", "stop_after_finalize"]
 
-LanSession: TypeAlias = DeterministicSession
+type LanSession = DeterministicSession
 
 
 class _LanFramePopRuntime(msgspec.Struct):
@@ -740,7 +740,7 @@ class BaseGameplayMode:
             player=self.player,
             violence_disabled=self.config.display.violence_disabled,
             preserve_bugs=bool(self.state.preserve_bugs),
-            fx_detail=self.config.display.fx_detail_enabled(level=0, default=False),
+            shadows_enabled=self.config.display.shadows_enabled,
             resources=self.render_resources.resources,
             mouse=self._ui_mouse_pos(),
         )
@@ -938,7 +938,7 @@ class BaseGameplayMode:
         )
 
         data = dump_replay(replay)
-        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        stamp = dt.datetime.now(tz=dt.UTC).astimezone().strftime("%Y%m%d_%H%M%S")
         replay_dir = self._base_dir / "replays"
         replay_dir.mkdir(parents=True, exist_ok=True)
         base_name = self._replay_output_basename(stamp=stamp, replay=replay)
@@ -1693,15 +1693,14 @@ class BaseGameplayMode:
         ):
             return
 
-        if role == "join":
-            if self._consume_lan_tick_frames(
-                runtime=runtime,
-                lockstep_runtime=lockstep_runtime,
-                session=session,
-                role=role,
-                dt_tick=float(dt_tick),
-            ):
-                return
+        if role == "join" and self._consume_lan_tick_frames(
+            runtime=runtime,
+            lockstep_runtime=lockstep_runtime,
+            session=session,
+            role=role,
+            dt_tick=float(dt_tick),
+        ):
+            return
 
         ticks_to_capture = self._advance_lan_capture_ticks(float(dt))
         self._queue_lan_local_inputs(

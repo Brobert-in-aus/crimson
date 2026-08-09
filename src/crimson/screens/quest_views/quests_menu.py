@@ -71,7 +71,7 @@ from .shared import (
 class QuestsMenuView:
     """Quest selection menu.
 
-    Layout and gating are based on `sub_447d40` (crimsonland.exe).
+    Layout and gating are based on `quest_select_menu_update` (crimsonland.exe).
 
     The classic game treats this as a distinct UI state (transition target `0x0b`),
     entered from the Play Game panel.
@@ -159,10 +159,9 @@ class QuestsMenuView:
         status = self.state.status
 
         # The original forcibly clears hardcore in the demo build.
-        if self.state.demo_enabled:
-            if config.gameplay.hardcore:
-                config.gameplay.hardcore = False
-                self._dirty = True
+        if self.state.demo_enabled and config.gameplay.hardcore:
+            config.gameplay.hardcore = False
+            self._dirty = True
 
         if debug_enabled() and rl.is_key_pressed(rl.KeyboardKey.KEY_F5):
             unlock = 49
@@ -268,7 +267,7 @@ class QuestsMenuView:
             end_ms=PANEL_TIMELINE_END_MS,
             width=MENU_PANEL_WIDTH,
         )
-        # `sub_447d40` base sums:
+        # `quest_select_menu_update` base sums:
         #   x_sum = <ui_element_x> + <ui_element_offset_x>  (x=-5)
         #   y_sum = <ui_element_y> + <ui_element_offset_y>  (y=185 + widescreen shift via ui_menu_layout_init)
         x_sum = QUEST_MENU_BASE_X + slide_x + QUEST_MENU_PANEL_OFFSET_X
@@ -344,7 +343,7 @@ class QuestsMenuView:
         return None
 
     def _rows_y0(self, layout: _QuestMenuLayout) -> float:
-        # `sub_447d40` adds +10 to the list Y after rendering the Hardcore checkbox.
+        # `quest_select_menu_update` adds +10 to the list Y after rendering the Hardcore checkbox.
         status = self.state.status
         y0 = layout.list_pos.y
         if int(status.quest_unlock_index) >= QUEST_HARDCORE_UNLOCK_INDEX:
@@ -395,7 +394,7 @@ class QuestsMenuView:
 
     @staticmethod
     def _quest_row_colors(*, hardcore: bool) -> tuple[rl.Color, rl.Color]:
-        # `sub_447d40` uses different RGB when hardcore is toggled.
+        # `quest_select_menu_update` uses different RGB when hardcore is toggled.
         if hardcore:
             # (0.980392, 0.274509, 0.235294, alpha)
             r, g, b = 250, 70, 60
@@ -405,13 +404,13 @@ class QuestsMenuView:
         return (rl.Color(r, g, b, 153), rl.Color(r, g, b, 255))
 
     def _quest_counts(self, *, stage: int, row: int) -> tuple[int, int] | None:
-        # In `sub_447d40`, counts are indexed by (row + stage*10) and split across two
+        # In `quest_select_menu_update`, counts are indexed by (row + stage*10) and split across two
         # arrays at offsets 0xDC (games) and 0x17C (completed) within game.cfg.
         #
         # Stage 5 does not fit cleanly in the saved blob:
         # - The "games" index range would overlap stage-1 completion counters.
         # - The "completed" index range reads into trailing fields (mode counters,
-        #   game_sequence_id, and unknown tail bytes), and the last row would run past
+        #   play_time_ms, and unknown tail bytes), and the last row would run past
         #   the decoded payload.
         #
         # We emulate this layout so the debug `F1` overlay matches the classic build.
@@ -442,9 +441,9 @@ class QuestsMenuView:
             elif tail_slot == 3:
                 completed = int(status.mode_play_other)
             elif tail_slot == 4:
-                completed = int(status.game_sequence_id)
+                completed = int(status.play_time_ms)
             elif 5 <= tail_slot <= 8:
-                tail = status.unknown_tail
+                tail = status.reserved_seed_words
                 off = (tail_slot - 5) * 4
                 if len(tail) < off + 4:
                     completed = 0
@@ -603,8 +602,8 @@ class QuestsMenuView:
             _ = slide_x
             rotation_deg = math.degrees(angle_rad)
         sign = require_runtime_resources(self.state).texture(TextureId.UI_SIGN_CRIMSON)
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        if fx_detail:
+        shadows_enabled = self.state.config.display.shadows_enabled
+        if shadows_enabled:
             MenuView._draw_ui_quad_shadow(
                 texture=sign,
                 src=rl.Rectangle(0.0, 0.0, float(sign.width), float(sign.height)),
@@ -629,7 +628,7 @@ class QuestsMenuView:
             end_ms=PANEL_TIMELINE_END_MS,
             width=MENU_PANEL_WIDTH,
         )
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
+        shadows_enabled = self.state.config.display.shadows_enabled
         draw_classic_menu_panel(
             require_runtime_resources(self.state).texture(TextureId.UI_MENU_PANEL),
             dst=rl.Rectangle(
@@ -638,7 +637,7 @@ class QuestsMenuView:
                 float(MENU_PANEL_WIDTH),
                 float(QUEST_PANEL_HEIGHT),
             ),
-            shadow=fx_detail,
+            shadow=shadows_enabled,
         )
 
     def _begin_close_transition(self, action: str) -> None:

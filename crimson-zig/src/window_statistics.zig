@@ -737,7 +737,7 @@ fn drawHub(state: *const HubState, runtime_assets: ?*const window_assets.Runtime
         drawPanelShellNoTitle(state.panel.timeline_ms, assets, stats_panel_rect);
         drawAtlasTitle(assets, panel_rect, 290.0, 52.0, window_menu.label_row_statistics);
         var playtime_buf: [64]u8 = undefined;
-        window_ui.drawSmallText(assets, formatPlaytimeText(&playtime_buf, status.game_sequence_id, preserve_bugs), panel_rect.x + 204.0, panel_rect.y + 334.0, muted_text);
+        window_ui.drawSmallText(assets, formatPlaytimeText(&playtime_buf, status.play_time_ms, preserve_bugs), panel_rect.x + 204.0, panel_rect.y + 334.0, muted_text);
         if (state.easter_text_x) |x| {
             window_ui.drawSmallText(assets, stats_easter_text, x, stats_easter_text_y, rl.Color.init(51, 255, 153, 128));
         }
@@ -800,7 +800,7 @@ fn drawPerks(
         const left_rect = animatedLeftPanelRect(left_panel_rect, timeline_ms);
         const right_rect = animatedRightPanelRect(right_panel_rect, timeline_ms);
         drawSplitPanelShell(assets, timeline_ms);
-        drawPerksPanels(state, assets, status, config.gore_disabled, config.hardcore_flag != 0, preserve_bugs, left_rect, right_rect, config.screen_width);
+        drawPerksPanels(state, assets, status, config.violence_disabled, config.hardcore_flag != 0, preserve_bugs, left_rect, right_rect, config.screen_width);
         return;
     }
     rl.clearBackground(panel_color);
@@ -965,7 +965,7 @@ fn drawHighScoreRightPanel(
     }
 
     const options_rect = highScoreRightOptionsRect(right_rect, config.screen_width);
-    const check_tex = if (config.score_load_gate != 0) assets.texture(.ui_check_on) else assets.texture(.ui_check_off);
+    const check_tex = if (config.show_online_scores != 0) assets.texture(.ui_check_on) else assets.texture(.ui_check_off);
     window_ui.drawTextureFit(check_tex, rl.Rectangle.init(options_rect.x + 44.0, options_rect.y + 44.0, @floatFromInt(check_tex.width), @floatFromInt(check_tex.height)), rl.Color.white);
     window_ui.drawSmallText(assets, "Show internet scores", options_rect.x + 66.0, options_rect.y + 45.0, text_color);
     window_ui.drawSmallText(assets, "Number of players", options_rect.x + 46.0, options_rect.y + 64.0, text_color);
@@ -977,6 +977,7 @@ fn drawHighScoreRightPanel(
     const mode_labels = highScoreModeLabels(&mode_labels_buf, status);
     var saved_names: [formats.crimson_cfg.saved_name_slot_count][]const u8 = undefined;
     for (0..saved_names.len) |idx| saved_names[idx] = formats.crimson_cfg.savedNameLabel(&config, idx);
+    const saved_name_count = formats.crimson_cfg.savedNameCount(&config);
     const dropdowns = [_]struct {
         kind: DropdownKind,
         rect: rl.Rectangle,
@@ -1004,7 +1005,7 @@ fn drawHighScoreRightPanel(
         .{
             .kind = .score_list,
             .rect = scoreListWidgetRect(options_rect),
-            .items = saved_names[0..],
+            .items = saved_names[0..saved_name_count],
             .selected = formats.crimson_cfg.selectedSavedNameSlot(&config),
         },
     };
@@ -1876,7 +1877,7 @@ fn updateHighScoreWidgets(
 
     const internet_rect = rl.Rectangle.init(right_rect.x + 44.0, right_rect.y + 44.0, 180.0, 16.0);
     if (click and state.dropdown_open == .none and rectContains(internet_rect, mouse)) {
-        config.score_load_gate = if (config.score_load_gate == 0) 1 else 0;
+        config.show_online_scores = if (config.show_online_scores == 0) 1 else 0;
         loadHighScores(state, allocator, base_dir, config.*, status);
         return .{ .config_dirty = true, .play_button_click = true };
     }
@@ -1913,7 +1914,8 @@ fn updateHighScoreWidgets(
 
     var saved_names: [formats.crimson_cfg.saved_name_slot_count][]const u8 = undefined;
     for (0..saved_names.len) |idx| saved_names[idx] = formats.crimson_cfg.savedNameLabel(config, idx);
-    const score_list_update = updateDropdownSelection(&state.dropdown_open, .score_list, scoreListWidgetRect(right_rect), saved_names[0..], click, mouse);
+    const saved_name_count = formats.crimson_cfg.savedNameCount(config);
+    const score_list_update = updateDropdownSelection(&state.dropdown_open, .score_list, scoreListWidgetRect(right_rect), saved_names[0..saved_name_count], click, mouse);
     if (score_list_update.selected) |selected| {
         formats.crimson_cfg.setSelectedSavedNameSlot(config, selected);
         return .{ .config_dirty = true, .play_button_click = true };
@@ -2202,7 +2204,6 @@ fn buildWeaponList(
 ) usize {
     const available = runtime_bonuses.buildWeaponAvailabilityForStatus(
         highScoreModeFromConfig(config, status),
-        false,
         status.quest_unlock_index,
         status.quest_unlock_index_full,
     );

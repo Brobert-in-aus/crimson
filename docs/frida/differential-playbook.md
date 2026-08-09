@@ -22,7 +22,7 @@ Frida host capture now finalizes directly to `.cdt` traces plus matching `.crd` 
 If only raw JSONL exists, finalize it offline (no game process needed):
 
 ```bash
-uv run --with frida python scripts/frida/gameplay_diff_capture_host.py \
+uv run --with frida==17.15.4 python scripts/frida/gameplay_diff_capture_host.py \
   --finalize-only \
   --raw-path artifacts/frida/share/gameplay_diff_capture.jsonl \
   --output-dir analysis/frida/traces
@@ -101,19 +101,22 @@ uv run crimson dbg focus \
   --tick <focus_tick>
 ```
 
-## 5) Use refactored decompiled hotspot sources first
+## 5) Consult the live address-keyed analysis
 
-Static/native references for differential probes should now prefer the refactored
-hotspot packs under `analysis/ghidra/derived/hotspots/`:
+Resolve the native function first:
 
-- Start from `analysis/ghidra/derived/hotspots/<target>/README.md` for target
-  scope, extracted function list, and direct callgraph.
-- Use `analysis/ghidra/derived/hotspots/<target>/functions/*.c` as the immutable
-  extracted baseline for citations.
-- Use `analysis/ghidra/derived/hotspots/<target>/work/*.work.c` for local
-  renames and annotations while preserving address/branch labels.
-- Fall back to `analysis/ghidra/raw/crimsonland.exe_decompiled.c` only when a
-  needed function is not yet covered by a hotspot pack.
+```bash
+just analysis-function <name-or-address>
+```
+
+Consult Binary Ninja first with the printed `bn decompile` command, then use the
+same address in IDA and Ghidra. Do not cite generated decompile line numbers;
+record the canonical function name, function address, and any instruction
+address relevant to the probe.
+
+Recovered hotspot notes are preserved in
+`analysis/annotations/functions.json`. Ghidra-specific presentation names are
+preserved in `analysis/overlays/ghidra_local_renames.json`.
 
 ## 6) Common mismatch classes
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from crimson.creatures.runtime import CREATURE_LIFECYCLE_ALIVE, CreaturePool
 from crimson.creatures.spawn import CreatureFlags
 from crimson.gameplay import GameplayState
-from crimson.math_parity import f32
+from crimson.math_parity import f32, x87_pc24_add, x87_pc24_sub
 from crimson.perks import PerkId
 from crimson.perks.runtime.apply import perk_apply
 from crimson.sim.state_types import PlayerState
@@ -21,6 +21,18 @@ def test_plaguebearer_apply_sets_active_flag_for_all_players() -> None:
 
     assert owner.plaguebearer_active
     assert other.plaguebearer_active
+
+
+def test_plaguebearer_preserve_bugs_sets_only_player_zero_active() -> None:
+    state = GameplayState()
+    state.preserve_bugs = True
+    owner = PlayerState(index=0, pos=Vec2())
+    other = PlayerState(index=1, pos=Vec2())
+
+    perk_apply(state, [owner, other], PerkId.PLAGUEBEARER)
+
+    assert owner.plaguebearer_active
+    assert not other.plaguebearer_active
 
 
 def test_plaguebearer_infects_weak_creatures_near_player() -> None:
@@ -58,7 +70,10 @@ def test_plaguebearer_infection_tick_deals_damage_on_timer_wrap() -> None:
 
     pool.update(dt, options=make_creature_update_options(state=state, players=[player]))
 
-    expected_timer = 0.1 - float(f32(float(dt))) + 0.5
+    expected_timer = x87_pc24_add(
+        x87_pc24_sub(f32(0.1), float(dt)),
+        f32(0.5),
+    )
     assert_float_close(creature.collision_timer, expected_timer)
     assert_float_close(creature.hp, 85.0)
 
@@ -88,6 +103,24 @@ def test_plaguebearer_spreads_between_nearby_creatures() -> None:
     pool.update(0.016, options=make_creature_update_options(state=state, players=[player]))
 
     assert other.plague_infected
+
+
+def test_plaguebearer_spread_rejects_distance_rounded_to_native_radius() -> None:
+    pool = CreaturePool(size=2)
+    target = pool.entries[0]
+    target.active = True
+    target.pos = Vec2(14.757906913757324, -42.51122283935547)
+    target.hp = 100.0
+
+    origin = pool.entries[1]
+    origin.active = True
+    origin.plague_infected = True
+    origin.pos = Vec2()
+    origin.hp = 100.0
+
+    pool._plaguebearer_spread_infection(1)
+
+    assert not target.plague_infected
 
 
 def test_plaguebearer_infection_kill_increments_global_count() -> None:
@@ -135,4 +168,35 @@ def test_plaguebearer_infection_kill_does_not_apply_immediate_dead_decay() -> No
     assert len(result.deaths) == 1
     # Native plague timer kills call creature_handle_death, then continue the
     # live branch without an immediate `_tick_dead` pass.
-    assert creature.lifecycle_stage == CREATURE_LIFECYCLE_ALIVE - float(f32(float(dt)))
+    assert creature.lifecycle_stage == x87_pc24_sub(CREATURE_LIFECYCLE_ALIVE, f32(float(dt)))
+
+
+def test_plaguebearer_kill_finishes_contact_and_small_creature_tail() -> None:
+    dt = f32(0.063)
+    state = GameplayState()
+    state.bonus_spawn_guard = True
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), health=100.0)
+
+    pool = CreaturePool()
+    creature = pool.entries[0]
+    creature.active = True
+    creature.plague_infected = True
+    creature.collision_timer = 0.01
+    creature.pos = Vec2(100.0, 100.0)
+    creature.hp = 10.0
+    creature.max_hp = 10.0
+    creature.size = 20.0
+    creature.move_speed = 0.0
+    creature.contact_damage = 7.0
+    creature.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+
+    result = pool.update(dt, options=make_creature_update_options(state=state, players=[player]))
+
+    assert len(result.deaths) == 1
+    assert_float_close(player.health, 93.0)
+    assert creature.hp == 0.0
+    expected_lifecycle = x87_pc24_sub(
+        x87_pc24_sub(CREATURE_LIFECYCLE_ALIVE, dt),
+        dt,
+    )
+    assert_float_close(creature.lifecycle_stage, expected_lifecycle)

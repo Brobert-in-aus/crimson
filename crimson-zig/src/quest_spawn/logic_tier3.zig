@@ -24,14 +24,13 @@ fn build301TheBlighting(
     _ = rng;
     const edges = common.squareEdgeMidpoints(ctx.width, 64.0);
     const edges_wide = common.squareEdgeMidpoints(ctx.width, 128.0);
-    const corners = common.insetCornerPoints(ctx.width, ctx.height, 128.0);
 
     try common.appendSpawn(
         out_entries,
         len,
         edges_wide.right,
         0.0,
-        common.SpawnId.alien_const_red_fast_2b,
+        common.SpawnId.alien_deadly_fast_2b,
         1500,
         2,
     );
@@ -40,43 +39,43 @@ fn build301TheBlighting(
         len,
         edges_wide.left,
         0.0,
-        common.SpawnId.alien_const_red_fast_2b,
+        common.SpawnId.alien_deadly_fast_2b,
         1500,
         2,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.top_right,
+        .{ .x = 896.0, .y = 128.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         2000,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.top_left,
+        .{ .x = 128.0, .y = 128.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         2000,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.bottom_left,
+        .{ .x = 128.0, .y = 896.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         2000,
         1,
     );
     try common.appendSpawn(
         out_entries,
         len,
-        corners.bottom_right,
+        .{ .x = 896.0, .y = 896.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_1d_fast_07,
+        common.SpawnId.den_alien_basic_07,
         2000,
         1,
     );
@@ -90,7 +89,7 @@ fn build301TheBlighting(
                 len,
                 edges_wide.left,
                 0.0,
-                common.SpawnId.alien_const_red_fast_2b,
+                common.SpawnId.alien_deadly_fast_2b,
                 trigger,
                 4,
             );
@@ -99,9 +98,9 @@ fn build301TheBlighting(
             try common.appendSpawn(
                 out_entries,
                 len,
-                edges_wide.right,
+                .{ .x = 1152.0, .y = edges_wide.right.y },
                 0.0,
-                common.SpawnId.alien_const_red_fast_2b,
+                common.SpawnId.alien_deadly_fast_2b,
                 trigger,
                 4,
             );
@@ -226,7 +225,7 @@ fn build303TheKilling(
                             .y = @as(f32, @floatFromInt(y)),
                         },
                         0.0,
-                        common.SpawnId.alien_spawner_child_1d_fast_07,
+                        common.SpawnId.den_alien_basic_07,
                         trigger + offset,
                         3,
                     );
@@ -250,7 +249,7 @@ fn build304HiddenEvil(
         len,
         edges.bottom,
         0.0,
-        common.SpawnId.alien_const_purple_ghost_21,
+        common.SpawnId.alien_hidden_1_21,
         500,
         50,
     );
@@ -259,7 +258,7 @@ fn build304HiddenEvil(
         len,
         edges.bottom,
         0.0,
-        common.SpawnId.alien_const_green_ghost_22,
+        common.SpawnId.alien_hidden_2_22,
         15000,
         30,
     );
@@ -268,7 +267,7 @@ fn build304HiddenEvil(
         len,
         edges.bottom,
         0.0,
-        common.SpawnId.alien_const_green_ghost_small_23,
+        common.SpawnId.alien_hidden_3_23,
         25000,
         20,
     );
@@ -277,7 +276,7 @@ fn build304HiddenEvil(
         len,
         edges.bottom,
         0.0,
-        common.SpawnId.alien_const_green_ghost_small_23,
+        common.SpawnId.alien_hidden_3_23,
         30000,
         30,
     );
@@ -286,7 +285,7 @@ fn build304HiddenEvil(
         len,
         edges.bottom,
         0.0,
-        common.SpawnId.alien_const_green_ghost_22,
+        common.SpawnId.alien_hidden_2_22,
         35000,
         30,
     );
@@ -317,7 +316,7 @@ fn build305SurroundedByReptiles(
             len,
             left_pos,
             0.0,
-            common.SpawnId.alien_spawner_child_31_slow_0d,
+            common.SpawnId.den_lizard_weak_slower_0d,
             trigger,
             1,
         );
@@ -326,7 +325,7 @@ fn build305SurroundedByReptiles(
             len,
             right_pos,
             0.0,
-            common.SpawnId.alien_spawner_child_31_slow_0d,
+            common.SpawnId.den_lizard_weak_slower_0d,
             trigger,
             1,
         );
@@ -343,7 +342,7 @@ fn build305SurroundedByReptiles(
             len,
             top_pos,
             0.0,
-            common.SpawnId.alien_spawner_child_31_slow_0d,
+            common.SpawnId.den_lizard_weak_slower_0d,
             trigger,
             1,
         );
@@ -352,7 +351,7 @@ fn build305SurroundedByReptiles(
             len,
             bottom_pos,
             0.0,
-            common.SpawnId.alien_spawner_child_31_slow_0d,
+            common.SpawnId.den_lizard_weak_slower_0d,
             trigger,
             1,
         );
@@ -396,7 +395,7 @@ fn build306TheLizquidation(
                 len,
                 .{ .x = ctx.width + 128.0, .y = edges.right.y },
                 0.0,
-                common.SpawnId.alien_const_red_fast_2b,
+                common.SpawnId.alien_deadly_fast_2b,
                 1500,
                 2,
             );
@@ -438,7 +437,7 @@ fn build307SpidersInc(
         len,
         edges.top,
         0.0,
-        common.SpawnId.spider_sp1_const_blue_40,
+        common.SpawnId.spider_small_blue_40,
         500,
         4,
     );
@@ -505,7 +504,7 @@ fn build308LizardRaze(
         len,
         .{ .x = 128.0, .y = 256.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_31_fast_0c,
+        common.SpawnId.den_lizard_weak_0c,
         10000,
         1,
     );
@@ -514,7 +513,7 @@ fn build308LizardRaze(
         len,
         .{ .x = 128.0, .y = 384.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_31_fast_0c,
+        common.SpawnId.den_lizard_weak_0c,
         10000,
         1,
     );
@@ -523,7 +522,7 @@ fn build308LizardRaze(
         len,
         .{ .x = 128.0, .y = 512.0 },
         0.0,
-        common.SpawnId.alien_spawner_child_31_fast_0c,
+        common.SpawnId.den_lizard_weak_0c,
         10000,
         1,
     );
@@ -549,7 +548,7 @@ fn build309DejaVu(
             252.0,
             42.0,
             .zero,
-            common.SpawnId.alien_spawner_child_31_slow_0d,
+            common.SpawnId.den_lizard_weak_slower_0d,
             trigger,
             1,
         );

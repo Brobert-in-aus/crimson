@@ -21,13 +21,14 @@ def test_survival_high_score_record_uses_player0_stats_in_multiplayer(mocker, ma
     player0, player1 = mode.sim_world.players[:2]
     player0.experience = 1234
     player1.experience = 9999
+    mode.state.highscore_score_xp = 1234
 
     mode.state.shots_fired[0] = 10
     mode.state.shots_hit[0] = 7
     mode.state.shots_fired[1] = 999
     mode.state.shots_hit[1] = 888
 
-    mode.state.weapon_shots_fired[0][1] = 5
+    mode.state.weapon_usage_time[1] = 5
     mode.state.weapon_shots_fired[1][2] = 999
 
     mode._enter_game_over()

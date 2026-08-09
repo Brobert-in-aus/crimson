@@ -5,10 +5,11 @@ const creatures_mod = @import("creatures.zig");
 const perks = @import("perks.zig");
 const player_runtime = @import("player.zig");
 const state_mod = @import("state.zig");
+const survival_progression = @import("survival_progression.zig");
 
 const narrowF32 = native_math.roundF32;
 const PerkId = perks.PerkId;
-const GameInput = player_runtime.GameInput;
+pub const GameInput = player_runtime.GameInput;
 const GameInputFlags = player_runtime.GameInputFlags;
 const native_half_pi: f32 = native_math.native_half_pi;
 const native_pi: f32 = native_math.native_pi;
@@ -26,9 +27,9 @@ const relative_move_turn_align_scale: f32 = 7.957746982574463;
 const movement_control_relative: i32 = 1;
 const movement_control_static: i32 = 2;
 const movement_control_dual_action_pad: i32 = 3;
+const movement_control_mouse_point_click: i32 = 4;
 const movement_control_computer: i32 = 5;
 const aim_scheme_mouse: i32 = 0;
-const aim_scheme_computer: i32 = 5;
 
 pub fn updatePlayerFromGameInput(
     player: *state_mod.PlayerState,
@@ -37,22 +38,38 @@ pub fn updatePlayerFromGameInput(
     creatures: ?*const creatures_mod.CreaturePool,
     dt: f32,
 ) void {
+    updatePlayerFromGameInputWithPlayers(player, input, state, null, creatures, dt);
+}
+
+pub fn updatePlayerFromGameInputWithPlayers(
+    player: *state_mod.PlayerState,
+    input: GameInput,
+    state: *const state_mod.GameplayState,
+    all_players: ?[]const state_mod.PlayerState,
+    creatures: ?*const creatures_mod.CreaturePool,
+    dt: f32,
+) void {
+    const perk_player: *const state_mod.PlayerState = if (state.preserve_bugs and all_players != null and all_players.?.len > 0)
+        &all_players.?[0]
+    else
+        player;
     const prev_pos = player.pos;
     var movement_dt = dt;
     if (state.time_scale_active and movement_dt > 0.0) {
-        const reflex_f32 = narrowF32(state.bonuses.reflex_boost);
-        var time_scale_factor = narrowF32(0.3);
-        if (reflex_f32 < 1.0) {
-            time_scale_factor = narrowF32((1.0 - reflex_f32) * 0.7 + 0.3);
-        }
+        const time_scale_factor = survival_progression.reflexBoostTimeScaleFactor(
+            state.bonuses.reflex_boost,
+            true,
+        );
         if (time_scale_factor > 0.0) {
-            movement_dt = narrowF32((0.6 / time_scale_factor) * movement_dt);
+            movement_dt = native_math.pc24Mul(
+                native_math.pc24Div(@as(f32, 0.6), time_scale_factor),
+                movement_dt,
+            );
         }
     }
 
     const flags = input.flags;
     const move_mode = resolveMoveModeForUpdate(flags);
-    const aim_scheme = resolveAimSchemeForUpdate(flags);
 
     var raw_move: state_mod.Vec2 = .{
         .x = narrowF32(input.move_x),
@@ -69,9 +86,7 @@ pub fn updatePlayerFromGameInput(
     var speed: f32 = 0.0;
     var phase_sign: f32 = 1.0;
     var move_delta_override: ?state_mod.Vec2 = null;
-    const player_controlled_movement =
-        move_mode != movement_control_computer and
-        aim_scheme != aim_scheme_computer;
+    const player_controlled_movement = !state.demo_mode_active and move_mode != movement_control_computer;
 
     if (player_controlled_movement) {
         if (move_mode == movement_control_relative) {
@@ -99,11 +114,11 @@ pub fn updatePlayerFromGameInput(
             }
 
             if (moving_forward) {
-                playerAccelerateMoveSpeed(player, movement_dt);
+                playerAccelerateMoveSpeed(player, perk_player, movement_dt);
                 playerApplyMoveSpeedCaps(player);
                 move_delta_override = playerMoveDeltaFromHeading(player, movement_dt, 25.0);
             } else if (moving_backward) {
-                playerAccelerateMoveSpeed(player, movement_dt);
+                playerAccelerateMoveSpeed(player, perk_player, movement_dt);
                 phase_sign = -1.0;
                 move_delta_override = playerMoveDeltaFromHeading(player, movement_dt, -25.0);
             } else {
@@ -159,29 +174,28 @@ pub fn updatePlayerFromGameInput(
                     movement_dt,
                 );
                 player.aim_heading = narrowF32(player.aim_heading + heading_result.turn_delta);
-                playerAccelerateMoveSpeed(player, movement_dt);
+                playerAccelerateMoveSpeed(player, perk_player, movement_dt);
                 playerApplyMoveSpeedCaps(player);
                 move_ext = directionFromHeadingNativeExt(player.heading);
-                const turn_align_wide =
-                    (@as(f64, @floatCast(native_pi)) - @as(f64, @floatCast(heading_result.diff))) *
-                    @as(f64, @floatCast(speed_multiplier)) *
-                    @as(f64, @floatCast(relative_move_turn_align_scale));
-                const speed_scale_wide = @as(f64, @floatCast(player.move_speed)) * turn_align_wide;
-                const move_dx = headingMulWideNarrow(move_ext.x, speed_scale_wide);
-                const move_dy = headingMulWideNarrow(move_ext.y, speed_scale_wide);
-                move_delta_override = movementDeltaFromVelocityNative(movement_dt, move_dx, move_dy);
+                const velocity = playerTurnAlignedVelocityNative(
+                    move_ext,
+                    player.move_speed,
+                    heading_result.diff,
+                    speed_multiplier,
+                );
+                move_delta_override = movementDeltaFromVelocityNative(movement_dt, velocity.x, velocity.y);
             }
         } else {
-            const moving_input = raw_mag > 0.2;
+            const move_input_threshold: f32 = if (move_mode == movement_control_mouse_point_click) 0.0 else 0.2;
+            const moving_input = raw_mag > move_input_threshold;
             var turn_alignment_scale: f32 = 1.0;
             if (moving_input) {
-                const inv = if (raw_mag > 1e-9) 1.0 / raw_mag else 0.0;
-                raw_move = raw_move.mul(inv);
+                raw_move = normalizeVec2SafeNative(raw_move);
                 const target_heading = normalizeHeading(raw_move.toHeading());
                 const angle_diff = playerHeadingApproachTarget(player, target_heading, movement_dt);
                 move_ext = directionFromHeadingNativeExt(player.heading);
                 turn_alignment_scale = @max(0.0, (native_pi - angle_diff) / native_pi);
-                playerAccelerateMoveSpeed(player, movement_dt);
+                playerAccelerateMoveSpeed(player, perk_player, movement_dt);
             } else {
                 playerDecelerateMoveSpeed(player, movement_dt);
                 move_ext = directionFromHeadingNativeExt(player.heading);
@@ -195,17 +209,16 @@ pub fn updatePlayerFromGameInput(
             }
         }
     } else {
-        const move_input_threshold: f32 = 0.2;
+        const move_input_threshold: f32 = if (state.demo_mode_active) 0.0 else 0.2;
         const moving_input = raw_mag > move_input_threshold;
         var turn_alignment_scale: f32 = 1.0;
         if (moving_input) {
-            const inv = if (raw_mag > 1e-9) 1.0 / raw_mag else 0.0;
-            raw_move = raw_move.mul(inv);
+            raw_move = normalizeVec2SafeNative(raw_move);
             const target_heading = normalizeHeading(raw_move.toHeading());
             const angle_diff = playerHeadingApproachTarget(player, target_heading, movement_dt);
             move_ext = directionFromHeadingNativeExt(player.heading);
             turn_alignment_scale = @max(0.0, (native_pi - angle_diff) / native_pi);
-            playerAccelerateMoveSpeed(player, movement_dt);
+            playerAccelerateMoveSpeed(player, perk_player, movement_dt);
         } else {
             playerDecelerateMoveSpeed(player, movement_dt);
             move_ext = directionFromHeadingNativeExt(player.heading);
@@ -226,10 +239,10 @@ pub fn updatePlayerFromGameInput(
             .x = headingMulNarrow(move_ext.x, narrowF32(speed * movement_dt)),
             .y = headingMulNarrow(move_ext.y, narrowF32(speed * movement_dt)),
         };
-    playerApplyMoveWithSpawnAvoidance(player, delta, creatures);
+    playerApplyMoveWithSpawnAvoidance(player, perk_player, delta, creatures);
 
     const move_delta = state_mod.Vec2.sub(player.pos, prev_pos);
-    const reload_stationary = @abs(move_delta.x) <= 1e-9 and @abs(move_delta.y) <= 1e-9;
+    const reload_stationary = move_delta.x == 0.0 and move_delta.y == 0.0;
     player.reload_stationary_latch = reload_stationary;
     if (!reload_stationary) {
         // Native clears these post-perk-tick timers after movement when position changed.
@@ -242,10 +255,8 @@ pub fn updatePlayerFromGameInput(
         .x = narrowF32(input.aim_x),
         .y = narrowF32(input.aim_y),
     };
-    var aim_dir = state_mod.Vec2.sub(player.aim, player.pos);
-    const aim_len_sq = aim_dir.lengthSq();
-    if (aim_len_sq > 0.0) {
-        aim_dir = aim_dir.mul(1.0 / std.math.sqrt(aim_len_sq));
+    const aim_dir = normalizeVec2SafeNative(state_mod.Vec2.sub(player.aim, player.pos));
+    if (aim_dir.lengthSq() > 0.0) {
         player.aim_dir = aim_dir;
         player.aim_heading = aimHeadingFromAimPointNative(player.pos, player.aim);
     }
@@ -328,12 +339,51 @@ fn headingMulWideNarrow(component: f64, scale_wide: f64) f32 {
     return narrowF32(component * scale_wide);
 }
 
+fn playerTurnAlignedVelocityNative(
+    direction: HeadingDirectionExt,
+    move_speed: f32,
+    angle_diff: f32,
+    speed_multiplier: f32,
+) state_mod.Vec2 {
+    const alignment = native_math.pc24Sub(native_pi, angle_diff);
+    return .{
+        .x = native_math.pc24Mul(
+            native_math.pc24Mul(
+                native_math.pc24Mul(
+                    native_math.pc24Mul(direction.x, move_speed),
+                    alignment,
+                ),
+                speed_multiplier,
+            ),
+            relative_move_turn_align_scale,
+        ),
+        .y = native_math.pc24Mul(
+            native_math.pc24Mul(
+                native_math.pc24Mul(
+                    native_math.pc24Mul(direction.y, move_speed),
+                    alignment,
+                ),
+                speed_multiplier,
+            ),
+            relative_move_turn_align_scale,
+        ),
+    };
+}
+
 fn movementDeltaFromVelocityNative(movement_dt: f32, move_dx: f32, move_dy: f32) state_mod.Vec2 {
     // Decompile stores `local_10/local_c = frame_dt * move_d{xy}` after x87 math.
     const dt_wide = @as(f64, @floatCast(movement_dt));
     return .{
         .x = narrowF32(dt_wide * @as(f64, @floatCast(move_dx))),
         .y = narrowF32(dt_wide * @as(f64, @floatCast(move_dy))),
+    };
+}
+
+fn normalizeVec2SafeNative(value: state_mod.Vec2) state_mod.Vec2 {
+    const normalized = native_math.normalizeVec2Safe(value.x, value.y);
+    return .{
+        .x = normalized[0],
+        .y = normalized[1],
     };
 }
 
@@ -351,12 +401,13 @@ fn distanceF32Xy(
 
 fn playerApplyMoveWithSpawnAvoidance(
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
     delta: state_mod.Vec2,
     creatures: ?*const creatures_mod.CreaturePool,
 ) void {
     var dx = delta.x;
     var dy = delta.y;
-    if (perks.perkActive(player, PerkId.alternate_weapon)) {
+    if (perks.perkActive(perk_player, PerkId.alternate_weapon)) {
         dx = narrowF32(dx * 0.8);
         dy = narrowF32(dy * 0.8);
     }
@@ -405,8 +456,9 @@ fn playerApplyMoveWithSpawnAvoidance(
 }
 
 fn directionFromHeadingNativeExt(heading: f32) HeadingDirectionExt {
-    // Keep `heading - half_pi` wide before trig to mirror x87-style precision.
-    const radians = @as(f64, @floatCast(heading)) - @as(f64, @floatCast(native_half_pi));
+    // Gameplay runs x87 arithmetic in 24-bit precision, so the subtraction
+    // rounds before fsin/fcos consume it.
+    const radians = @as(f64, @floatCast(native_math.pc24Sub(heading, native_half_pi)));
     return .{
         .x = std.math.cos(radians),
         .y = std.math.sin(radians),
@@ -416,18 +468,17 @@ fn directionFromHeadingNativeExt(heading: f32) HeadingDirectionExt {
 fn aimHeadingFromAimPointNative(player_pos: state_mod.Vec2, aim_pos: state_mod.Vec2) f32 {
     // player_update (0x004136b0) computes:
     // aim_heading = (float)(fpatan(pos_y - aim_y, pos_x - aim_x) - 1.5707964).
-    // Keep atan2 wide and narrow once on store to match x87-style rounding.
-    const dy = @as(f64, @floatCast(player_pos.y)) - @as(f64, @floatCast(aim_pos.y));
-    const dx = @as(f64, @floatCast(player_pos.x)) - @as(f64, @floatCast(aim_pos.x));
-    const half_pi = @as(f64, @floatCast(native_half_pi));
-    return narrowF32(std.math.atan2(dy, dx) - half_pi);
+    const dy = narrowF32(player_pos.y - aim_pos.y);
+    const dx = narrowF32(player_pos.x - aim_pos.x);
+    return narrowF32(native_math.fpatan(dy, dx) - @as(f64, native_half_pi));
 }
 
 fn playerAccelerateMoveSpeed(
     player: *state_mod.PlayerState,
+    perk_player: *const state_mod.PlayerState,
     dt: f32,
 ) void {
-    if (perks.perkActive(player, PerkId.long_distance_runner)) {
+    if (perks.perkActive(perk_player, PerkId.long_distance_runner)) {
         if (player.move_speed < 2.0) {
             player.move_speed = narrowF32(player.move_speed + dt * 4.0);
         }
@@ -532,16 +583,22 @@ pub fn playerFrameDtAfterRoundtrip(
         return dt;
     }
 
-    var time_scale_factor = narrowF32(0.3);
-    if (reflex_boost_timer < 1.0) {
-        time_scale_factor = narrowF32((1.0 - reflex_boost_timer) * 0.7 + 0.3);
-    }
+    const time_scale_factor = survival_progression.reflexBoostTimeScaleFactor(
+        reflex_boost_timer,
+        true,
+    );
     if (time_scale_factor <= 0.0) {
         return dt;
     }
 
-    const movement_dt = narrowF32((0.6 / time_scale_factor) * dt);
-    return narrowF32(time_scale_factor * movement_dt * 1.6666666);
+    const movement_dt = native_math.pc24Mul(
+        native_math.pc24Div(@as(f32, 0.6), time_scale_factor),
+        dt,
+    );
+    return native_math.pc24Mul(
+        native_math.pc24Mul(time_scale_factor, movement_dt),
+        @as(f32, 1.6666666),
+    );
 }
 
 test "long distance runner ramps speed above base cap and coasts on release" {
@@ -672,4 +729,32 @@ test "aim heading from aim point matches native fpatan rounding path" {
     const aim_pos: state_mod.Vec2 = .{ .x = 333.0390625, .y = 391.1640625 };
     const heading = aimHeadingFromAimPointNative(player_pos, aim_pos);
     try std.testing.expectEqual(@as(u32, 0xbf7a1659), @as(u32, @bitCast(heading)));
+}
+
+test "safe normalization preserves native near-unit vector" {
+    const normalized = normalizeVec2SafeNative(.{ .x = 1.0, .y = 0.0001 });
+
+    try std.testing.expectEqual(@as(f32, 1.0), normalized.x);
+    try std.testing.expectEqual(@as(u32, 0x38d1b717), @as(u32, @bitCast(normalized.y)));
+}
+
+test "safe normalization zeros native subnormal length" {
+    try std.testing.expectEqual(@as(state_mod.Vec2, .{}), normalizeVec2SafeNative(.{ .x = 1e-20, .y = 0.0 }));
+}
+
+test "static movement narrows x87 direction and alignment operations" {
+    const direction = directionFromHeadingNativeExt(3.9270143508911133);
+    const velocity = playerTurnAlignedVelocityNative(
+        direction,
+        2.0,
+        3.0040740966796875e-05,
+        2.0,
+    );
+
+    try std.testing.expectEqual(@as(f32, -70.7116470336914), velocity.x);
+    try std.testing.expectEqual(@as(f32, 70.7083511352539), velocity.y);
+    try std.testing.expectEqual(
+        @as(f32, 299.4222106933594),
+        narrowF32(@as(f64, 302.53350830078125) + @as(f64, @floatCast(native_math.pc24Mul(0.04400000348687172, velocity.x)))),
+    );
 }

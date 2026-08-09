@@ -3,6 +3,7 @@ from __future__ import annotations
 from crimson.creatures.runtime import CreatureState
 from crimson.effects import FxQueue
 from crimson.gameplay import GameplayState
+from crimson.math_parity import f32
 from crimson.perks import PerkId
 from crimson.perks.runtime.effects import perks_update_effects
 from crimson.rng_caller_static import RngCallerStatic
@@ -55,8 +56,7 @@ def test_perks_update_effects_pyrokinetic_spawns_particle_burst_when_timer_wraps
     particles = [entry for entry in state.particles.entries if entry.active]
     assert len(particles) == 5
     intensities = [entry.intensity for entry in particles]
-    for actual, expected in zip(intensities, (0.8, 0.6, 0.4, 0.3, 0.2)):
-        assert_float_close(actual, expected)
+    assert intensities == [f32(value) for value in (0.8, 0.6, 0.4, 0.3, 0.2)]
     assert [record.caller for record in rng.records_since()] == [
         *_PYROKINETIC_BURST_CALLERS,
         *_FX_QUEUE_CALLERS,
@@ -108,6 +108,45 @@ def test_perks_update_effects_pyrokinetic_uses_f32_timer_threshold_before_wrappi
         *_PYROKINETIC_BURST_CALLERS,
         *_FX_QUEUE_CALLERS,
     ]
+
+
+def test_perks_update_effects_pyrokinetic_keeps_native_36hz_proc_frame() -> None:
+    rng = ScriptedCrand(0, fallback=ScriptedCrand.Fallback.REPEAT_LAST)
+    state = GameplayState(rng=rng)
+    player = PlayerState(index=0, pos=Vec2(), health=100.0)
+    player.perk_counts[int(PerkId.PYROKINETIC)] = 1
+    player.aim = Vec2(100.0, 200.0)
+
+    creature = CreatureState()
+    creature.active = True
+    creature.pos = Vec2(100.0, 200.0)
+    creature.hp = 100.0
+    creature.collision_timer = 0.25
+    fx_queue = FxQueue(capacity=8, max_count=8)
+
+    for _ in range(9):
+        perks_update_effects(
+            state,
+            [player],
+            1.0 / 36.0,
+            creatures=[creature],
+            fx_queue=fx_queue,
+        )
+
+    assert creature.collision_timer == 1.1175870895385742e-08
+    assert fx_queue.count == 0
+    assert all(not entry.active for entry in state.particles.entries)
+
+    perks_update_effects(
+        state,
+        [player],
+        1.0 / 36.0,
+        creatures=[creature],
+        fx_queue=fx_queue,
+    )
+
+    assert creature.collision_timer == 0.5
+    assert fx_queue.count == 1
 
 
 def test_perks_update_effects_pyrokinetic_defaults_to_first_alive_player_aim() -> None:

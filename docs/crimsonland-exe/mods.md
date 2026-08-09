@@ -35,7 +35,7 @@ and expects two exports: `CMOD_GetInfo` and `CMOD_GetMod`.
 
 - Builds a path `mods\%s` and calls `LoadLibraryA`.
 - Resolves `CMOD_GetInfo` via `GetProcAddress`.
-- Calls it and copies the returned struct into `DAT_00481c88` (0x12 dwords).
+- Calls it and copies the returned struct into `mod_info_block` (0x12 dwords).
 - Logs either the info or an error string to the console.
 
 ### Mod info layout (CMOD_GetInfo)
@@ -71,7 +71,7 @@ interface + a 0x400-byte parms block).
 | Offset | Field | Meaning | Evidence |
 | --- | --- | --- | --- |
 | `0x00` | `vtable` | Function table (3 slots used) | Exe calls `(*vtable)[0]`, `(*vtable)[1]`, `(*vtable)[2](frame_dt_ms)`. |
-| `0x04` | `cl` | Mod API context pointer | Exe writes `&DAT_00481a80` at `+4` after `CMOD_GetMod`. |
+| `0x04` | `cl` | Mod API context pointer | Exe writes `&mod_api_context` at `+4` after `CMOD_GetMod`. |
 | `0x08` | `parms.drawMouseCursor` | Draw the standard cursor | Mods set this to `1`; exe checks `(char)plugin_interface_ptr[2]` to decide whether to draw the cursor. |
 | `0x09` | `parms.onPause` | Pause hint from the engine | `cl_crimsonroks` gates updates on `parms.onPause`; exe sets `*(plugin_interface_ptr + 9) = 1` when pausing. |
 | `0x24` | `parms.request_exit` | Exit/request flag byte | Exe sets byte `+0x24` when leaving or pausing the plugin flow (part of the reserved parms block). |
@@ -87,21 +87,23 @@ drives whether the exe keeps the mod active.
 | `1` | `Shutdown()` | Both mods call internal cleanup helpers and `delete this`. |
 | `2` | `Frame(frame_dt_ms)` | Returns `0` to exit (exe closes the plugin). Used to poll keys and issue `"game_pause"`. |
 
-### Mod API context (DAT_00481a80)
+### Mod API context (mod_api_context)
 
 The context pointer passed at `+0x04` is treated as a vtable-based API from
 within the mod DLLs. The layout matches `clAPI_t` in `cl_mod_sdk_v1/ClMod.h`
 (API v3), and the vtable pointer is set to `0x0046f3e4` during init.
+The same CRT global initializer sets the still-unknown context tail field at
+offset `+0x68` to `1`; its semantics are not yet proven.
 
 | Vtable offset | SDK name | Wrapper (crimsonland.exe) | Notes |
 | --- | --- | --- | --- |
-| `0x00` | `CORE_Printf` | `mod_api_core_printf` (`0x0040e000`) | Uses `OutputDebugStringA`. |
+| `0x00` | `CORE_Printf` | `mod_api_core_printf` (`0x0040dfc0`) | Formats into the shared mod buffer, calls `mod_api_debug_printf` (`0x0040e000`), then queues the line in the console. |
 | `0x04` | `CORE_GetVar` | `mod_api_core_get_var` (`0x0040e040`) | Returns a 3-pointer `var_t` view (`id`, `stringValue`, `floatValue`). |
 | `0x08` | `CORE_DelVar` | `mod_api_core_del_var` (`0x0040e080`) | Unregisters a cvar. |
 | `0x0c` | `CORE_Execute` | `mod_api_core_execute` (`0x0040e0a0`) | Executes a console line. |
 | `0x10` | `CORE_AddCommand` | `mod_api_core_add_command` (`0x0040e0c0`) | Registers a console command. |
 | `0x14` | `CORE_DelCommand` | `mod_api_core_del_command` (`0x0040e0e0`) | Unregisters a command. |
-| `0x18` | `CORE_GetExtension` | `mod_api_core_get_extension` (`0x0040e100`) | Handles `"grimgfx"`, `"grimsfx"`, `"IDirect3D8"`. |
+| `0x18` | `CORE_GetExtension` | `mod_api_core_get_extension` (`0x0040e100`) | Case-sensitive: `"GrimGFX"` returns the Grim interface, `"GrimSFX"` returns null, and `"IDirect3D8"` returns config slot `0x51`'s pointer word. |
 | `0x1c` | `GFX_Clear` | `mod_api_gfx_clear` (`0x0040e1f0`) | Bridges to `grim_clear_color`. |
 | `0x20` | `GFX_GetStringWidth` | `mod_api_gfx_get_string_width` (`0x0040e220`) | Bridges to `grim_measure_text_width`. |
 | `0x24` | `GFX_Printf` | `mod_api_gfx_printf` (`0x0040e240`) | Preformats into a global buffer, then draws text. |
@@ -122,8 +124,8 @@ within the mod DLLs. The layout matches `clAPI_t` in `cl_mod_sdk_v1/ClMod.h`
 | `0x60` | `SFX_PlaySample` | `mod_api_sfx_play_sample` (`0x0040e570`) | `pan` is scaled by `512.0`. |
 | `0x64` | `SFX_LoadTune` | `mod_api_sfx_load_tune` (`0x0040e5b0`) | Loads `mods\\%s` via `music_load_track`. |
 | `0x68` | `SFX_FreeTune` | `mod_api_sfx_free_tune` (`0x0040e5e0`) | Releases a track handle. |
-| `0x6c` | `SFX_PlayTune` | `mod_api_sfx_play_tune` (`0x0040e5f0`) | Wrapper name suggests SFX; likely “exclusive” tune play. |
-| `0x70` | `SFX_StopTune` | `mod_api_sfx_stop_tune` (`0x0040e600`) | Wrapper name suggests SFX; likely tune stop/mute. |
+| `0x6c` | `SFX_PlayTune` | `mod_api_sfx_play_tune` (`0x0040e5f0`) | Calls `sfx_play_exclusive(tuneId)` directly. |
+| `0x70` | `SFX_StopTune` | `mod_api_sfx_stop_tune` (`0x0040e600`) | Calls `sfx_mute_all(tuneId)` directly. |
 | `0x74` | `INP_KeyDown` | `mod_api_inp_key_down` (`0x0040e660`) | Uses `grim_is_key_active` (key `1` forced false). |
 | `0x78` | `INP_GetAnalog` | `mod_api_inp_get_analog` (`0x0040e620`) | Special-cases `DIKA_MOUSEXSTAT`/`DIKA_MOUSEYSTAT` (355/356). |
 | `0x7c` | `INP_GetPressedChar` | `mod_api_inp_get_pressed_char` (`0x0040e610`) | Bridges to `grim_get_key_char`. |
@@ -137,4 +139,3 @@ to decide whether to emit implicit `grim_begin_batch`/`grim_end_batch`.
 ## Open questions
 
 - Remaining semantics of the reserved `parms` bytes beyond `drawMouseCursor`, `onPause`, and the observed `request_exit` flag.
-- Better naming for the tune wrappers (`SFX_PlayTune` / `SFX_StopTune`) if they differ from the core SFX system behavior.

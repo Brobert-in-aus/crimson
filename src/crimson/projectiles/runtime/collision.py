@@ -1,30 +1,26 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from grim.geom import Vec2
 
-from ...collision_math import native_find_size_margin
+from ...collision_math import native_find_size_margin, within_native_find_radius
 from ...creatures.damage_runtime import CreatureDamageRuntime
 from ...creatures.lifecycle import creature_lifecycle_is_alive
+from ...math_parity import f32, x87_pc24_hypot, x87_pc24_sub
 from ...owner_ref import OwnerRef
 
 if TYPE_CHECKING:
     from ...creatures.runtime import CreatureState
 
-# Keep strict native boundary semantics for collision acceptance.
-_NATIVE_FIND_RADIUS_MARGIN_EPS = 0.0
-
-
 def _hit_radius_for(creature: CreatureState) -> float:
-    """Approximate `creature_find_in_radius`/`creatures_apply_radius_damage` sizing.
+    """Return the native size term used by the radius predicates.
 
     The native code compares `distance - radius < creature.size * 0.14285715 + 3.0`.
     """
 
-    return max(0.0, native_find_size_margin(float(creature.size)))
+    return native_find_size_margin(float(creature.size))
 
 
 def _within_native_find_radius(*, origin: Vec2, target: Vec2, radius: float, target_size: float) -> bool:
@@ -34,33 +30,24 @@ def _within_native_find_radius(*, origin: Vec2, target: Vec2, radius: float, tar
       sqrt(dx*dx + dy*dy) - radius < size * 0.14285715 + 3.0
     """
 
-    dx = float(target.x) - float(origin.x)
-    dy = float(target.y) - float(origin.y)
-    radius_f = float(radius)
-    size_margin = native_find_size_margin(float(target_size))
-    max_axis_delta = float(radius_f) + float(size_margin) + _NATIVE_FIND_RADIUS_MARGIN_EPS
-    # Fast reject for the common case where either axis already exceeds the
-    # maximal accepted Euclidean radius.
-    if abs(float(dx)) > float(max_axis_delta) or abs(float(dy)) > float(max_axis_delta):
-        return False
-    margin = math.sqrt(dx * dx + dy * dy) - float(radius_f) - float(size_margin)
-    # Native compares against zero; keep strict threshold to avoid rewrite-only
-    # near-edge hits that can cascade into RNG/XP timing drift.
-    return float(margin) < _NATIVE_FIND_RADIUS_MARGIN_EPS
+    return within_native_find_radius(
+        origin=origin,
+        target=target,
+        radius=radius,
+        target_size=target_size,
+    )
 
 
-def _creature_find_nearest_for_secondary(
+def creature_find_nearest_alive(
     *,
     creatures: Sequence[CreatureState],
     origin: Vec2,
     preserve_bugs: bool = False,
 ) -> int:
-    """Port of `creature_find_nearest(origin, -1, 0.0)` for homing secondary targets."""
+    """Port of `creature_find_nearest(origin, -1, 0.0)`."""
 
     best_idx = 0 if preserve_bugs else -1
-    # Native seeds best with 1e6 and compares plain distances, so the search is
-    # effectively unbounded on a 1024 map; square it for the squared compare.
-    best_dist_sq = 1e12
+    best_distance = f32(1_000_000.0)
     max_index = min(len(creatures), 0x180)
     for idx in range(max_index):
         creature = creatures[idx]
@@ -68,9 +55,42 @@ def _creature_find_nearest_for_secondary(
             continue
         if not creature_lifecycle_is_alive(creature.lifecycle_stage):
             continue
-        dist_sq = Vec2.distance_sq(origin, creature.pos)
-        if dist_sq < best_dist_sq:
-            best_dist_sq = dist_sq
+        dx = x87_pc24_sub(f32(origin.x), f32(creature.pos.x))
+        dy = x87_pc24_sub(f32(origin.y), f32(creature.pos.y))
+        distance = x87_pc24_hypot(dx, dy)
+        if distance < best_distance:
+            best_distance = distance
+            best_idx = idx
+    return best_idx
+
+
+def creature_find_nearest_active(
+    *,
+    creatures: Sequence[CreatureState],
+    origin: Vec2,
+    exclude_id: int,
+    min_dist: float,
+    preserve_bugs: bool = False,
+) -> int:
+    """Port of ``creature_find_nearest(origin, exclude_id, min_dist)``.
+
+    This native branch accepts every active creature, regardless of lifecycle,
+    and compares the stored PC=24 square-root distance against both bounds.
+    """
+
+    best_idx = 0 if preserve_bugs else -1
+    best_distance = f32(1_000_000.0)
+    minimum_distance = f32(min_dist)
+    max_index = min(len(creatures), 0x180)
+    for idx in range(max_index):
+        creature = creatures[idx]
+        if not creature.active or idx == int(exclude_id):
+            continue
+        dx = x87_pc24_sub(f32(origin.x), f32(creature.pos.x))
+        dy = x87_pc24_sub(f32(origin.y), f32(creature.pos.y))
+        distance = x87_pc24_hypot(dx, dy)
+        if distance > minimum_distance and distance < best_distance:
+            best_distance = distance
             best_idx = idx
     return best_idx
 
@@ -101,8 +121,9 @@ def _apply_damage_to_creature(
 
 __all__ = [
     "_apply_damage_to_creature",
-    "_creature_find_nearest_for_secondary",
     "_hit_radius_for",
     "_within_native_find_radius",
+    "creature_find_nearest_active",
+    "creature_find_nearest_alive",
     "native_find_size_margin",
 ]

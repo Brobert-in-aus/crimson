@@ -1,0 +1,62 @@
+# `quest_build_8_legged_terror`
+
+Native target: `crimsonland.exe` at `0x00436120` (213 bytes).
+
+Live Binary Ninja evidence recovers the opening SpiderBoss at
+`(terrain_texture_width - 256, terrain_texture_width / 2)`, template `0x3a`,
+1000 ms, count 1. It is followed by four-corner waves at `-25` and `1049`,
+using template `0x3d`. Triggers run from 6000 while below 36800 in steps of
+2200. The top-left and bottom-left entries use the player count; the other two
+use count 1. The builder therefore emits 57 entries.
+
+Keeping the cursor and emitted count together in a builder initialized at the
+first entry prevents VC6 from folding the final count and recovers both the
+opening schedule and native loop increments. The recovered source matches all
+213 bytes and all 68 instructions, including the full prefix and all four
+audited references. The opening advances the builder cursor and count before
+publishing its independent metadata; no ordering dependency is introduced.
+
+Binary Ninja now gives the four-corner loop cursor a two-entry presentation
+view. Two consecutive pairs expose all four waves as named
+`quest_spawn_entry_t` fields while retaining the native 0x60-byte cursor step;
+the compiler-facing builder now uses that same canonical record and its flat
+position members. The migration is byte-neutral at 68/68 instructions and
+the retained 95.59%.
+
+## Recorded opening-entry search
+
+`opening-cursor-lifetime-mutations.json` exhaustively tested ten cursor and
+opening-record schedules. The retained `builder-before-metadata` form gained
+6.264706 weighted bytes (spec
+`3fa4526a8f2707fac31753629331eca0a0c2e807a890096cb017387f8e21a361`).
+A complete 34-variant helper/metadata single-pair sweep found no further
+improvement (spec
+`617fd6d5ad2e0702b36e153fe64ab488d15b84d0d1e5499ad7201e09db464a22`);
+five declaration-order replays were byte-neutral (spec
+`928a6766984f77baed2f4f53a4ef494ee773fddb7e15ba7e2ccec32b3d49dbc5`).
+VC6.0, 6.5, 6.5 Processor Pack, and 6.6 tie; VC7 is worse. The complete
+results are recorded in `experiments.jsonl`.
+
+`opening-position-boundary-mutations.json` adds six aggregate-position,
+inlined position-helper, and named-width shapes around the remaining opening
+entry. Every variant regresses; the least loses 30.1 fuzzy-weighted bytes and
+the exact prefix drops from 14 to 2 instructions. The plan SHA-256 is
+`80a74b7b2a0256678a861be1255d4189944ede56b46f0a0dd7cdc9696fb4c2cb`.
+A fresh flag matrix leaves `/GB`, `/G5`, `/G7`, `/Ox`, and `/Ob1` tied and
+confirms `/G6` is worse.
+
+`far-edge-publication-mutations.json` then tests four natural placements of
+the opening far-edge value and its publication relative to the metadata
+stores. All four compile byte-identically at 95.59%, 68/68 instructions, and
+`4/0/0` references. No artificial ordering dependency is retained. The spec
+SHA-256 is
+`f7d3b25583d2a12fb0431fbca775618bb2f919f5eede9f595f83bbf1d1b781af`.
+
+## 2026-08-08 exact recovery
+
+Initializing the builder with `(entries, 0)` and publishing the opening entry
+through that same cursor/count pair resolves the former one-time scheduling
+residual. The candidate improves from 203.60/213 weighted bytes (95.59%) and a
+14-instruction prefix to exact 213/213 bytes and a 68-instruction prefix.
+References remain 4/0/0. The exact source SHA-256 is
+`75be5146e1b57a9b2e74f2c8e098f966051480899f2278fe65c55180198619e3`.

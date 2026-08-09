@@ -32,26 +32,29 @@ pub fn mostUsedWeaponIdForPlayer(
     player_index: usize,
     fallback_weapon_id: WeaponId,
 ) WeaponId {
-    if (player_index >= state.weapon_shots_fired.len) {
-        return fallback_weapon_id;
+    _ = player_index;
+    var best: usize = 1;
+    for (state.weapon_usage_time[2..], 2..) |time, weapon_id| {
+        const signed_time: i32 = @bitCast(time);
+        const signed_best: i32 = @bitCast(state.weapon_usage_time[best]);
+        if (signed_time > signed_best) best = weapon_id;
     }
 
-    const counts = state.weapon_shots_fired[player_index];
-    if (counts.len == 0) return fallback_weapon_id;
+    if (best >= state_mod.weapon_count_size) return fallback_weapon_id;
+    return @enumFromInt(@as(i32, @intCast(best)));
+}
 
-    const start: usize = if (counts.len > 1) 1 else 0;
-    var best = start;
-    var best_count = counts[start];
-
-    for (counts[start + 1 ..], start + 1..) |count, idx| {
-        if (count > best_count) {
-            best = idx;
-            best_count = count;
-        }
-    }
-
-    if (best_count > 0) return @enumFromInt(best);
-    return fallback_weapon_id;
+pub fn gameplayAccumulateWeaponUsageTime(
+    state: *GameplayState,
+    players: []const PlayerState,
+    frame_dt_ms: i32,
+) void {
+    if (players.len == 0) return;
+    const weapon_id_raw = @intFromEnum(players[0].weapon.weapon_id);
+    if (weapon_id_raw < 0) return;
+    const weapon_id: usize = @intCast(weapon_id_raw);
+    if (weapon_id >= state.weapon_usage_time.len) return;
+    state.weapon_usage_time[weapon_id] +%= @bitCast(frame_dt_ms);
 }
 
 pub fn timeScaleReflexBoostBonus(
@@ -63,15 +66,24 @@ pub fn timeScaleReflexBoostBonus(
     if (!(dt_f32 > 0.0)) return dt_f32;
     if (!time_scale_active) return dt_f32;
 
+    const time_scale_factor = reflexBoostTimeScaleFactor(reflex_boost_timer, true);
+    return native_math.pc24Mul(dt_f32, time_scale_factor);
+}
+
+pub fn reflexBoostTimeScaleFactor(
+    reflex_boost_timer: f32,
+    time_scale_active: bool,
+) f32 {
+    if (!time_scale_active) return 1.0;
+
     const reflex_f32 = narrowF32(reflex_boost_timer);
-    var time_scale_factor = narrowF32(0.3);
-    if (reflex_f32 < 1.0) {
-        time_scale_factor = narrowF32(
-            (@as(f64, 1.0) - @as(f64, @floatCast(reflex_f32))) * 0.7 + 0.3,
-        );
-    }
-    return narrowF32(
-        @as(f64, @floatCast(dt_f32)) * @as(f64, @floatCast(time_scale_factor)),
+    if (reflex_f32 >= 1.0) return narrowF32(0.3);
+    return native_math.pc24Add(
+        native_math.pc24Mul(
+            native_math.pc24Sub(@as(f32, 1.0), reflex_f32),
+            @as(f32, 0.7),
+        ),
+        @as(f32, 0.3),
     );
 }
 
@@ -154,12 +166,18 @@ pub fn survivalUpdateWeaponHandouts(
         const pos2 = state.survival_recent_death_pos[2];
 
         const centroid_scale = narrowF32(0.33333334);
-        const centroid_x = narrowF32(narrowF32(pos0.x + pos1.x + pos2.x) * centroid_scale);
-        const centroid_y = narrowF32(narrowF32(pos0.y + pos1.y + pos2.y) * centroid_scale);
+        const centroid_x = native_math.pc24Mul(
+            native_math.pc24Add(native_math.pc24Add(pos0.x, pos1.x), pos2.x),
+            centroid_scale,
+        );
+        const centroid_y = native_math.pc24Mul(
+            native_math.pc24Add(native_math.pc24Add(pos0.y, pos1.y), pos2.y),
+            centroid_scale,
+        );
 
-        const dx = player.pos.x - centroid_x;
-        const dy = player.pos.y - centroid_y;
-        const distance = std.math.sqrt(dx * dx + dy * dy);
+        const dx = native_math.pc24Sub(player.pos.x, centroid_x);
+        const dy = native_math.pc24Sub(player.pos.y, centroid_y);
+        const distance = native_math.pc24Hypot(dx, dy);
         if (distance < 16.0 and player.health < 15.0) {
             weaponAssignPlayerWithState(player, WeaponId.blade_gun, state);
             state.survival_reward_weapon_guard_id = WeaponId.blade_gun;
@@ -170,22 +188,67 @@ pub fn survivalUpdateWeaponHandouts(
 }
 
 pub fn survivalEnforceRewardWeaponGuard(
-    state: GameplayState,
+    state: *GameplayState,
     players: []PlayerState,
 ) void {
     const guard_id = state.survival_reward_weapon_guard_id;
     for (players) |*player| {
         if (player.weapon.weapon_id == WeaponId.blade_gun and guard_id != WeaponId.blade_gun) {
-            weaponAssignPlayer(player, WeaponId.pistol);
+            weaponAssignPlayerWithState(player, WeaponId.pistol, state);
         }
         if (player.weapon.weapon_id == WeaponId.shrinkifier_5k and guard_id != WeaponId.shrinkifier_5k) {
-            weaponAssignPlayer(player, WeaponId.pistol);
+            weaponAssignPlayerWithState(player, WeaponId.pistol, state);
         }
     }
 }
 
+pub fn gameplayEnforceWeaponGuards(
+    state: *GameplayState,
+    players: []PlayerState,
+) void {
+    // Native gameplay_render_world checks exactly the two fixed player slots.
+    // Corrected mode extends the same entitlement policy to generalized co-op.
+    const guarded_players = if (state.preserve_bugs) players[0..@min(players.len, 2)] else players;
+    if (state.status_quest_unlock_index_full < 0x28) {
+        for (guarded_players) |*player| {
+            if (player.weapon.weapon_id == WeaponId.splitter_gun) {
+                weaponAssignPlayerWithState(player, WeaponId.pistol, state);
+            }
+        }
+    }
+
+    survivalEnforceRewardWeaponGuard(state, guarded_players);
+}
+
 fn expectFloatClose(expected: f32, actual: f32) !void {
     try std.testing.expectApproxEqAbs(expected, actual, 1e-6);
+}
+
+test "most used weapon uses native time ties and signed comparisons" {
+    var state = GameplayState.init(1);
+    try std.testing.expectEqual(WeaponId.pistol, mostUsedWeaponIdForPlayer(state, 0, .mean_minigun));
+
+    state.weapon_usage_time[@intFromEnum(WeaponId.pistol)] = 100;
+    state.weapon_usage_time[@intFromEnum(WeaponId.assault_rifle)] = 100;
+    try std.testing.expectEqual(WeaponId.pistol, mostUsedWeaponIdForPlayer(state, 1, .mean_minigun));
+
+    state.weapon_usage_time[@intFromEnum(WeaponId.pistol)] = std.math.maxInt(u32);
+    state.weapon_usage_time[@intFromEnum(WeaponId.assault_rifle)] = 0;
+    try std.testing.expectEqual(WeaponId.assault_rifle, mostUsedWeaponIdForPlayer(state, 0, .pistol));
+}
+
+test "weapon usage time accumulates fixed player zero with u32 wrapping" {
+    var state = GameplayState.init(1);
+    const players = [_]PlayerState{
+        .{ .index = 0, .pos = .{}, .weapon = .{ .weapon_id = .assault_rifle } },
+        .{ .index = 1, .pos = .{}, .weapon = .{ .weapon_id = .pistol } },
+    };
+    state.weapon_usage_time[@intFromEnum(WeaponId.assault_rifle)] = std.math.maxInt(u32) - 4;
+
+    gameplayAccumulateWeaponUsageTime(&state, players[0..], 16);
+
+    try std.testing.expectEqual(@as(u32, 11), state.weapon_usage_time[@intFromEnum(WeaponId.assault_rifle)]);
+    try std.testing.expectEqual(@as(u32, 0), state.weapon_usage_time[@intFromEnum(WeaponId.pistol)]);
 }
 
 test "survival level up advances one threshold per tick" {
@@ -320,14 +383,69 @@ test "survival reward guard reverts temporary weapons" {
     weaponAssignPlayer(&players[1], WeaponId.blade_gun);
     state.survival_reward_weapon_guard_id = WeaponId.shrinkifier_5k;
 
-    survivalEnforceRewardWeaponGuard(state, players[0..]);
+    survivalEnforceRewardWeaponGuard(&state, players[0..]);
 
     try std.testing.expectEqual(WeaponId.shrinkifier_5k, players[0].weapon.weapon_id);
     try std.testing.expectEqual(WeaponId.pistol, players[1].weapon.weapon_id);
+    try std.testing.expectEqual(@as(u32, 1), state.status_weapon_usage_counts.get(WeaponId.pistol));
+}
+
+test "gameplay weapon guard revokes locked splitter from native player slots" {
+    var state = GameplayState.init(1);
+    state.preserve_bugs = true;
+    var players = [_]PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+        .{ .index = 2, .pos = .{} },
+    };
+    for (&players) |*player| {
+        weaponAssignPlayer(player, WeaponId.splitter_gun);
+    }
+
+    gameplayEnforceWeaponGuards(&state, players[0..]);
+
+    try std.testing.expectEqual(WeaponId.pistol, players[0].weapon.weapon_id);
+    try std.testing.expectEqual(WeaponId.pistol, players[1].weapon.weapon_id);
+    try std.testing.expectEqual(WeaponId.splitter_gun, players[2].weapon.weapon_id);
+    try std.testing.expectEqual(@as(u32, 2), state.status_weapon_usage_counts.get(WeaponId.pistol));
+}
+
+test "gameplay weapon guard extends splitter policy in corrected mode" {
+    var state = GameplayState.init(1);
+    var players = [_]PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+        .{ .index = 2, .pos = .{} },
+    };
+    for (&players) |*player| {
+        weaponAssignPlayer(player, WeaponId.splitter_gun);
+    }
+
+    gameplayEnforceWeaponGuards(&state, players[0..]);
+
+    for (players) |player| {
+        try std.testing.expectEqual(WeaponId.pistol, player.weapon.weapon_id);
+    }
+}
+
+test "gameplay weapon guard keeps unlocked splitter" {
+    var state = GameplayState.init(1);
+    state.status_quest_unlock_index_full = 0x28;
+    var player: PlayerState = .{ .index = 0, .pos = .{} };
+    weaponAssignPlayer(&player, WeaponId.splitter_gun);
+    var players = [_]PlayerState{player};
+
+    gameplayEnforceWeaponGuards(&state, players[0..]);
+
+    try std.testing.expectEqual(WeaponId.splitter_gun, players[0].weapon.weapon_id);
 }
 
 test "time scale reflex boost bonus mirrors f32 latch" {
     try expectFloatClose(0.01666666753590107, timeScaleReflexBoostBonus(0.0, false, 1.0 / 60.0));
     try expectFloatClose(0.01666666753590107, timeScaleReflexBoostBonus(0.0, true, 1.0 / 60.0));
     try expectFloatClose(0.010833333246409893, timeScaleReflexBoostBonus(0.5, true, 1.0 / 60.0));
+    try std.testing.expectEqual(
+        @as(u32, 0x3ec9246d),
+        @as(u32, @bitCast(reflexBoostTimeScaleFactor(0.8673485517501831, true))),
+    );
 }

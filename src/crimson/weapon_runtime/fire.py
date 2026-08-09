@@ -10,7 +10,15 @@ from grim.color import RGBA
 from grim.geom import Vec2
 from grim.rand import CrandLike
 
-from ..math_parity import NATIVE_HALF_PI, NATIVE_TAU, f32, heading_from_delta_f32
+from ..math_parity import (
+    NATIVE_PI,
+    f32,
+    native_fire_muzzle_pos,
+    native_shot_angle_from_jitter_draws,
+    x87_pc24_add,
+    x87_pc24_mul,
+    x87_pc24_sub,
+)
 from ..perks import PerkId
 from ..perks.helpers import perk_active
 from ..player_damage import PlayerDeathRuntime
@@ -137,31 +145,14 @@ def _native_shot_angle_with_jitter(
 ) -> float:
     # Native gameplay fire owns two exact `player_update` draw sites for the
     # disc-spread direction and magnitude before the later projectile work.
-    # Float sequence per the decompile: half the f32 aim distance is spilled,
-    # the spread/magnitude product chain stays in extended precision, the
-    # jittered aim x is spilled while y feeds atan2 unspilled, and the heading
-    # is `(float)(atan2(pos - jitter) - 1.5707964)`.
-    aim_dx = float(f32(float(aim.x) - float(player_pos.x)))
-    aim_dy = float(f32(float(aim.y) - float(player_pos.y)))
-    dist_sq = float(f32(float(f32(float(aim_dx) * float(aim_dx))) + float(f32(float(aim_dy) * float(aim_dy)))))
-    half_len = float(f32(float(f32(math.sqrt(float(dist_sq)))) * 0.5))
-
-    dir_draw = float(rng.rand_tagged(RngCallerStatic.PLAYER_UPDATE_SHOT_JITTER_DIR) & 0x1FF)
-    mag_draw = float(rng.rand_tagged(RngCallerStatic.PLAYER_UPDATE_SHOT_JITTER_MAG) & 0x1FF)
-    offset_term = half_len * float(spread_heat) * mag_draw * 0.001953125
-    dir_angle = float(f32(dir_draw * float(f32(float(NATIVE_TAU) / 512.0))))
-
-    aim_jitter_x = float(f32(math.cos(dir_angle) * offset_term + float(aim.x)))
-    aim_jitter_y = math.sin(dir_angle) * offset_term + float(aim.y)
-
-    return float(
-        f32(
-            math.atan2(
-                float(player_pos.y) - aim_jitter_y,
-                float(player_pos.x) - aim_jitter_x,
-            )
-            - float(NATIVE_HALF_PI),
-        ),
+    dir_draw = rng.rand_tagged(RngCallerStatic.PLAYER_UPDATE_SHOT_JITTER_DIR)
+    mag_draw = rng.rand_tagged(RngCallerStatic.PLAYER_UPDATE_SHOT_JITTER_MAG)
+    return native_shot_angle_from_jitter_draws(
+        aim=aim,
+        player_pos=player_pos,
+        spread_heat=spread_heat,
+        dir_draw=dir_draw,
+        mag_draw=mag_draw,
     )
 
 
@@ -208,6 +199,7 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
     players = ctx.players
     force_pre_swap_fire_gate = bool(ctx.force_pre_swap_fire_gate)
     player_death_runtime = ctx.player_death_runtime
+    perk_player = players[0] if state.preserve_bugs and players else player
 
     weapon_id = player.weapon.weapon_id
     weapon = weapon_entry(weapon_id)
@@ -219,10 +211,27 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
 
     ammo_cost = 1.0
     is_fire_bullets = float(player.fire_bullets_timer) > 0.0
-    if (not force_pre_swap_fire_gate) and player.weapon.reload_timer > 0.0:
+    perk_fire_ready = (not force_pre_swap_fire_gate) and player.weapon.reload_timer > 0.0
+    use_regression_bullets = False
+    use_ammunition_within = False
+    if perk_fire_ready:
         if player.experience <= 0:
             return WeaponFireResult(fired=False)
-        if perk_active(player, PerkId.REGRESSION_BULLETS):
+
+        use_regression_bullets = perk_active(perk_player, PerkId.REGRESSION_BULLETS)
+        use_ammunition_within = (not use_regression_bullets) and perk_active(
+            perk_player,
+            PerkId.AMMUNITION_WITHIN,
+        )
+        if not (use_regression_bullets or use_ammunition_within):
+            return WeaponFireResult(fired=False)
+
+    # Native writes this after the ready/input gates, but before charging the
+    # reload-bypass perk and dispatching the shot.
+    state.survival_reward_fire_seen = True
+
+    if perk_fire_ready:
+        if use_regression_bullets:
             ammo_class = int(weapon.ammo_class) if weapon.ammo_class is not None else 0
 
             reload_time = float(weapon.reload_time)
@@ -230,7 +239,7 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
             player.experience = int(float(player.experience) - reload_time * factor)
             if player.experience < 0:
                 player.experience = 0
-        elif perk_active(player, PerkId.AMMUNITION_WITHIN):
+        elif use_ammunition_within:
             ammo_class = int(weapon.ammo_class) if weapon.ammo_class is not None else 0
 
             from ..player_damage import player_take_damage
@@ -244,9 +253,6 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
                 players=players,
                 death_runtime=player_death_runtime,
             )
-        else:
-            return WeaponFireResult(fired=False)
-
     pellet_count = int(weapon.pellet_count)
     fire_bullets_weapon = weapon_entry_for_projectile_type_id(ProjectileTemplateId.FIRE_BULLETS)
 
@@ -258,19 +264,20 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
         shot_cooldown = float(f32(float(fire_bullets_weapon.shot_cooldown)))
 
     spread_heat_base = fire_bullets_spread_heat if is_fire_bullets else weapon_spread_heat
-    spread_inc = spread_heat_base * 1.3
+    spread_inc = x87_pc24_mul(spread_heat_base, f32(1.3))
 
-    if perk_active(player, PerkId.FASTSHOT):
+    if perk_active(perk_player, PerkId.FASTSHOT):
         shot_cooldown = float(f32(float(shot_cooldown) * 0.88))
-    if perk_active(player, PerkId.SHARPSHOOTER):
+    if perk_active(perk_player, PerkId.SHARPSHOOTER):
         shot_cooldown = float(f32(float(shot_cooldown) * 1.05))
     player.weapon.shot_cooldown = max(0.0, float(f32(float(shot_cooldown))))
 
     aim = input_state.aim
-    aim_delta = aim - player.pos
-    aim_heading = float(heading_from_delta_f32(dx=float(aim_delta.x), dy=float(aim_delta.y)))
+    # `player_update` computes and stores aim_heading before entering the fire
+    # branch; later muzzle and presentation math reload that exact float field.
+    aim_heading = float(f32(player.aim_heading))
 
-    muzzle = player.pos + Vec2.from_heading(aim_heading).rotated(-0.150915) * 16.0
+    muzzle = native_fire_muzzle_pos(player.pos, aim_heading)
     weapon_flags = int(weapon.flags or 0)
     if weapon_flags & 0x1:
         # Native gameplay fire uses four exact `player_update` RNG sites for
@@ -389,7 +396,7 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
                     pos=muzzle,
                     angle=shot_angle,
                     type_id=type_id,
-                    owner=owner,
+                    owner=projectile_owner,
                     target_hint=target_hint,
                     creatures=spawn_creatures,
                     preserve_bugs=bool(state.preserve_bugs),
@@ -415,19 +422,19 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
         case MultiPlasmaFanMode():
             # Multi-Plasma: 5-shot fixed spread using type 0x09 and 0x0B.
             shot_count = 5
-            spread_small = math.pi / 10
-            spread_large = math.pi / 6
+            spread_small = f32(0.31415927)
+            spread_large = f32(0.5235988)
             patterns: tuple[tuple[float, ProjectileTemplateId], ...] = (
-                (-spread_small, ProjectileTemplateId.PLASMA_RIFLE),
-                (-spread_large, ProjectileTemplateId.PLASMA_MINIGUN),
-                (0.0, ProjectileTemplateId.PLASMA_RIFLE),
-                (spread_large, ProjectileTemplateId.PLASMA_MINIGUN),
-                (spread_small, ProjectileTemplateId.PLASMA_RIFLE),
+                (x87_pc24_sub(shot_angle, spread_small), ProjectileTemplateId.PLASMA_RIFLE),
+                (x87_pc24_sub(shot_angle, spread_large), ProjectileTemplateId.PLASMA_MINIGUN),
+                (shot_angle, ProjectileTemplateId.PLASMA_RIFLE),
+                (x87_pc24_add(shot_angle, spread_large), ProjectileTemplateId.PLASMA_MINIGUN),
+                (x87_pc24_add(shot_angle, spread_small), ProjectileTemplateId.PLASMA_RIFLE),
             )
-            for angle_offset, type_id in patterns:
+            for angle, type_id in patterns:
                 state.projectiles.spawn(
                     pos=muzzle,
-                    angle=shot_angle + angle_offset,
+                    angle=angle,
                     type_id=type_id,
                     owner=projectile_owner,
                     travel_budget=travel_budget_for_type_id(type_id),
@@ -440,11 +447,15 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
             # (reachable via Regression Bullets / Ammunition Within).
             clip_ammo = float(player.weapon.ammo)
             rocket_count = math.ceil(clip_ammo) if clip_ammo > 0.0 else 0
-            if bool(state.preserve_bugs):
-                # Native bug: step scales by ammo (`ammo * pi/3`), which aliases to identical headings
-                # for some clip sizes (e.g. 6 rockets), causing visible clumping.
-                step = clip_ammo * (math.pi / 3.0)
-                angle = (shot_angle - math.pi) - step * clip_ammo * 0.5
+            preserve_swarmer_bug = bool(state.preserve_bugs)
+            if preserve_swarmer_bug:
+                # Native bug: step scales by ammo (`ammo * pi/3`), which aliases
+                # to near-identical headings for common clip sizes.
+                step = x87_pc24_mul(clip_ammo, f32(1.0471976))
+                angle = x87_pc24_sub(
+                    x87_pc24_sub(shot_angle, NATIVE_PI),
+                    x87_pc24_mul(x87_pc24_mul(step, clip_ammo), 0.5),
+                )
             else:
                 spread = math.pi * (2.0 / 3.0)
                 step = 0.0 if rocket_count <= 1 else spread / float(rocket_count - 1)
@@ -455,13 +466,13 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
                         pos=muzzle,
                         angle=angle,
                         type_id=SecondaryProjectileTypeId.HOMING_ROCKET,
-                        owner=owner,
+                        owner=projectile_owner,
                         target_hint=aim,
                         creatures=creatures,
                         preserve_bugs=bool(state.preserve_bugs),
                     ),
                 )
-                angle += step
+                angle = x87_pc24_add(angle, step) if preserve_swarmer_bug else angle + step
             # Native subtracts the full clip value, zeroing the ammo even when
             # the clip was fractional or negative.
             ammo_cost = clip_ammo
@@ -482,8 +493,8 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
             fire_bullets_active=bool(is_fire_bullets),
         )
 
-    if not perk_active(player, PerkId.SHARPSHOOTER):
-        player.spread_heat = min(0.48, max(0.0, player.spread_heat + spread_inc))
+    if not perk_active(perk_player, PerkId.SHARPSHOOTER):
+        player.spread_heat = min(f32(0.48), max(0.0, x87_pc24_add(player.spread_heat, spread_inc)))
 
     muzzle_inc = weapon_spread_heat
     if is_fire_bullets and pellet_count == 1:
@@ -503,5 +514,5 @@ def fire_weapon(ctx: WeaponFireCtx) -> WeaponFireResult:
         # reload restart eligibility after ammo drains below zero.
         reload_start_gate_open = True
     if player.weapon.ammo <= 0.0 and reload_start_gate_open:
-        player_start_reload(player, state)
+        player_start_reload(player, state, players=ctx.players)
     return WeaponFireResult(fired=True, shot_count=int(shot_count), ammo_cost=float(ammo_cost))

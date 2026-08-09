@@ -4,15 +4,13 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from ..creatures.damage_runtime import CreatureDamageRuntime
-from ..math_parity import f32
+from ..math_parity import f32, x87_pc24_sub
 from ..perks.helpers import perk_active
 from ..sim.state_types import BonusPickupEvent, GameplayState, PlayerState
 from .apply import bonus_apply
 from .hud import bonus_hud_update
 from .ids import BonusId
 from .pool import BONUS_PICKUP_LINGER, BONUS_TELEKINETIC_PICKUP_MS, bonus_find_aim_hover_entry
-
-_REFLEX_TIMER_SUBTRACT_BIAS = 4e-9
 
 if TYPE_CHECKING:
     from ..creatures.runtime import CreatureState
@@ -54,7 +52,10 @@ def bonus_telekinetic_update(
 
         if player.bonus_aim_hover_timer_ms <= BONUS_TELEKINETIC_PICKUP_MS:
             continue
-        if not perk_active(player, PerkId.TELEKINETIC):
+        # Native calls the singleton perk_count_get here, so player zero owns
+        # the perk gate even though the iterated player receives the pickup.
+        perk_player = players[0] if state.preserve_bugs and players else player
+        if not perk_active(perk_player, PerkId.TELEKINETIC):
             continue
         if entry.picked or entry.bonus_id == BonusId.UNUSED:
             continue
@@ -159,9 +160,9 @@ def bonus_update_pre_pickup_timers(state: GameplayState, dt: float) -> None:
     if float(state.bonuses.energizer) > 0.0:
         state.bonuses.energizer = float(f32(float(state.bonuses.energizer) - float(dt)))
     if float(state.bonuses.reflex_boost) > 0.0:
-        reflex_before = float(state.bonuses.reflex_boost)
-        subtract = float(dt)
-        if 0.0 < reflex_before < 1.0:
-            # Native x87 timer math trends slightly lower than straight f32 subtraction in this window.
-            subtract += float(_REFLEX_TIMER_SUBTRACT_BIAS)
-        state.bonuses.reflex_boost = float(f32(float(reflex_before) - float(subtract)))
+        state.bonuses.reflex_boost = float(
+            x87_pc24_sub(
+                state.bonuses.reflex_boost,
+                dt,
+            ),
+        )

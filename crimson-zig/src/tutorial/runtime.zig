@@ -98,18 +98,22 @@ pub fn postStep(
         state.sfx_queue.append(.ui_levelup);
     }
 
-    for (result.actions.spawn_bonuses[0..result.actions.spawn_bonus_count]) |call| {
-        if (bonuses.spawnAt(.{ .x = call.pos.x, .y = call.pos.y }, call.bonus_id, call.amount, state, world_size)) |spawned| {
-            effects.spawnBurst(
-                state,
-                spawned.pos,
-                12,
-                detail_preset,
-                0.4,
-                null,
-                .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 },
-            );
-        }
+    for (result.actions.spawn_bonuses[0..result.actions.spawn_bonus_count], 0..) |call, index| {
+        const spawned = bonuses.seedTutorialEntry(
+            index,
+            .{ .x = call.pos.x, .y = call.pos.y },
+            call.bonus_id,
+            call.amount,
+        );
+        effects.spawnBurst(
+            state,
+            spawned.pos,
+            12,
+            detail_preset,
+            0.4,
+            null,
+            .{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 },
+        );
     }
 
     for (result.actions.spawn_templates[0..result.actions.spawn_template_count]) |call| {
@@ -120,7 +124,7 @@ pub fn postStep(
 
         try creatures.spawnTemplateCallWithRuntimeContext(call, &state.rng, state, world_size);
         if (!result.actions.stage5_bonus_carrier_drop_active) continue;
-        if (call.template_id != @intFromEnum(spawn_mod.SpawnId.alien_const_weapon_bonus_27)) continue;
+        if (call.template_id != @intFromEnum(spawn_mod.SpawnId.alien_bonus_carrier_27)) continue;
 
         for (&creatures.entries, 0..) |*entry, idx| {
             if (active_before[idx] or !entry.active) continue;

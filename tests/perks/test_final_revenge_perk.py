@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from crimson.creatures.runtime import CREATURE_LIFECYCLE_ALIVE, CreaturePool
 from crimson.effects import FxQueue, FxQueueRotated
 from crimson.game_modes import GameMode
@@ -93,6 +95,89 @@ def test_final_revenge_triggers_from_player_update_damage_same_step() -> None:
     assert events.sfx.count(SfxId.SHOCKWAVE) == 1
 
 
+def test_final_revenge_runs_before_later_creature_slots_update() -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), health=0.5)
+    player.perk_counts[int(PerkId.FINAL_REVENGE)] = 1
+    world.players.append(player)
+
+    attacker = world.creatures.entries[0]
+    attacker.active = True
+    attacker.pos = Vec2(100.0, 100.0)
+    attacker.hp = 10000.0
+    attacker.max_hp = 10000.0
+    attacker.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    attacker.size = 48.0
+    attacker.move_speed = 0.0
+    attacker.contact_damage = 1.0
+
+    later = world.creatures.entries[1]
+    later.active = True
+    later.pos = Vec2(100.0, 100.0)
+    later.hp = 100.0
+    later.max_hp = 100.0
+    later.lifecycle_stage = CREATURE_LIFECYCLE_ALIVE
+    later.size = 48.0
+    later.move_speed = 0.0
+    later.attack_cooldown = 1.0
+
+    world.step(
+        0.2,
+        inputs=[PlayerInput()],
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert player.health < 0.0
+    assert later.hp < 0.0
+    # The inline blast kills slot 1 before creature_update_all reaches it, so
+    # its live-path attack-cooldown decrement does not run this frame.
+    assert later.attack_cooldown == 1.0
+
+
+def test_final_revenge_does_not_trigger_from_direct_death_clock_drain() -> None:
+    world_size = 1024.0
+    world = WorldState.build(
+        world_size=world_size,
+        demo_mode_active=True,
+        hardcore=False,
+        quest_fail_retry_count=0,
+    )
+
+    player = PlayerState(index=0, pos=Vec2(100.0, 100.0), health=0.1)
+    player.perk_counts[int(PerkId.DEATH_CLOCK)] = 1
+    player.perk_counts[int(PerkId.FINAL_REVENGE)] = 1
+    world.players.append(player)
+
+    events = world.step(
+        0.05,
+        inputs=[PlayerInput()],
+        world_size=world_size,
+        damage_scale_by_type={},
+        detail_preset=5,
+        fx_queue=FxQueue(),
+        fx_queue_rotated=FxQueueRotated(),
+        game_mode=GameMode.SURVIVAL,
+        perk_progression_enabled=False,
+    )
+
+    assert player.health < 0.0
+    assert SfxId.EXPLOSION_LARGE not in events.sfx
+    assert SfxId.SHOCKWAVE not in events.sfx
+
+
 def test_final_revenge_aoe_includes_active_non_positive_hp_entries(mocker) -> None:
     state = GameplayState()
     player = PlayerState(index=0, pos=Vec2(100.0, 100.0))
@@ -138,3 +223,78 @@ def test_final_revenge_aoe_includes_active_non_positive_hp_entries(mocker) -> No
     )
 
     assert touched == [0, 1]
+
+
+def test_final_revenge_damage_uses_native_pc24_arithmetic(mocker) -> None:
+    state = GameplayState()
+    state.bonus_spawn_guard = True
+    player = PlayerState(index=0, pos=Vec2())
+    player.perk_counts[int(PerkId.FINAL_REVENGE)] = 1
+
+    pool = CreaturePool(size=1)
+    creature = pool.entries[0]
+    creature.active = True
+    creature.pos = Vec2(155.231201171875, 295.6527099609375)
+
+    damage_amounts: list[float] = []
+
+    def _record_apply(_creature, **kwargs):
+        damage_amounts.append(float(kwargs["damage_amount"]))
+        return False
+
+    mocker.patch(
+        "crimson.creatures.damage.creature_apply_damage_with_lethal_followup",
+        side_effect=_record_apply,
+    )
+
+    apply_final_revenge_on_player_death(
+        state=state,
+        creatures=pool,
+        players=[player],
+        player=player,
+        dt=0.1,
+        world_size=1024.0,
+        detail_preset=0,
+        fx_queue=None,
+        deaths=[],
+    )
+
+    assert damage_amounts == [890.364990234375]
+    assert not state.bonus_spawn_guard
+
+
+@pytest.mark.parametrize(
+    ("preserve_bugs", "player1_has_perk", "target_has_perk", "expected_trigger"),
+    [
+        (True, True, False, True),
+        (True, False, True, False),
+        (False, False, True, True),
+    ],
+    ids=["native-player1-source", "native-ignores-target-perk", "corrected-target-source"],
+)
+def test_final_revenge_perk_source(
+    preserve_bugs: bool,
+    player1_has_perk: bool,
+    target_has_perk: bool,
+    expected_trigger: bool,
+) -> None:
+    state = GameplayState(preserve_bugs=preserve_bugs)
+    player1 = PlayerState(index=0, pos=Vec2())
+    target = PlayerState(index=1, pos=Vec2())
+    player1.perk_counts[int(PerkId.FINAL_REVENGE)] = int(player1_has_perk)
+    target.perk_counts[int(PerkId.FINAL_REVENGE)] = int(target_has_perk)
+
+    apply_final_revenge_on_player_death(
+        state=state,
+        creatures=CreaturePool(size=0),
+        players=[player1, target],
+        player=target,
+        dt=0.1,
+        world_size=1024.0,
+        detail_preset=0,
+        fx_queue=None,
+        deaths=[],
+    )
+
+    expected_sfx = [SfxId.EXPLOSION_LARGE, SfxId.SHOCKWAVE] if expected_trigger else []
+    assert state.sfx_queue == expected_sfx

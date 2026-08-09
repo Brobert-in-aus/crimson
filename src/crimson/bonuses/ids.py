@@ -43,7 +43,7 @@ BONUS_TABLE = [
         description=None,
         icon_id=None,
         native_amount=None,
-        notes="`DAT_004853dc` is set to `0`, disabling this entry.",
+        notes="`bonus_meta_enabled` is set to `0`, disabling this entry.",
     ),
     BonusMeta(
         bonus_id=BonusId.POINTS,
@@ -83,7 +83,7 @@ BONUS_TABLE = [
         name="Nuke",
         description="An amazing explosion of ATOMIC power.",
         icon_id=1,
-        native_amount=0,
+        native_amount=1,
         notes="`bonus_apply` performs the large explosion + shake sequence.",
     ),
     BonusMeta(
@@ -91,7 +91,7 @@ BONUS_TABLE = [
         name="Double Experience",
         description="Every experience point you get is doubled when this bonus is active.",
         icon_id=4,
-        native_amount=0,
+        native_amount=1,
         apply_seconds=6.0,
         notes="`bonus_apply` updates `bonus_double_xp_timer` (fixed +6 seconds, scaled by Bonus Economist).",
     ),
@@ -100,7 +100,7 @@ BONUS_TABLE = [
         name="Shock Chain",
         description="Chain of shocks shock the crowd.",
         icon_id=3,
-        native_amount=0,
+        native_amount=1,
         notes="`bonus_apply` spawns chained lightning via `projectile_spawn` type `0x15`; `shock_chain_links_left` / `shock_chain_projectile_id` track the active chain.",
     ),
     BonusMeta(
@@ -108,7 +108,7 @@ BONUS_TABLE = [
         name="Fireblast",
         description="Fireballs all over the place.",
         icon_id=2,
-        native_amount=0,
+        native_amount=1,
         notes="`bonus_apply` spawns a radial projectile burst (type `9`).",
     ),
     BonusMeta(
@@ -125,7 +125,7 @@ BONUS_TABLE = [
         description="Force field protects you for a while.",
         icon_id=6,
         native_amount=7,
-        notes="`bonus_apply` updates `player_shield_timer` (`DAT_00490bc8`).",
+        notes="`bonus_apply` updates `player_shield_timer`.",
     ),
     BonusMeta(
         bonus_id=BonusId.FREEZE,
@@ -149,7 +149,7 @@ BONUS_TABLE = [
         description="Your movement speed increases for a while.",
         icon_id=9,
         native_amount=8,
-        notes="`bonus_apply` updates `player_speed_bonus_timer` (`DAT_00490bc4`).",
+        notes="`bonus_apply` updates `player_speed_bonus_timer`.",
     ),
     BonusMeta(
         bonus_id=BonusId.FIRE_BULLETS,
@@ -159,7 +159,7 @@ BONUS_TABLE = [
         # Native stored amount is 4; the pickup adds a fixed 5 seconds (scaled by Bonus Economist).
         native_amount=4,
         apply_seconds=5.0,
-        notes="`bonus_apply` updates `player_fire_bullets_timer` (`DAT_00490bcc`) (fixed +5 seconds, scaled by Bonus Economist). While active, `projectile_spawn` overrides player-owned projectiles to type `0x2d` (pellet count from `weapon_projectile_pellet_count[weapon_id]`).",
+        notes="`bonus_apply` updates `player_fire_bullets_timer` (fixed +5 seconds, scaled by Bonus Economist). While active, `projectile_spawn` overrides player-owned projectiles to type `0x2d` (pellet count from `weapon_projectile_pellet_count[weapon_id]`).",
     ),
 ]
 

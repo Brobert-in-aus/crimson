@@ -4,46 +4,95 @@ This is the Crimsonland version of the Snail Mail matching-islands workflow:
 write a small C/C++ scratch for one native function, compile it with the
 original-era MSVC toolchain, then diff normalized x86 assembly against the
 function bytes in `game_bins/crimsonland/1.9.93-gog/crimsonland.exe` or
-`game_bins/crimsonland/1.9.93-gog/grim.dll`.
+`grim.dll`.
 
-## Tracked Images
+## Matching Scope
 
-Track both shipped PE images in the same dashboard:
+The default `port` scope is defined in `analysis/matching_scope.json`. It
+contains game-owned `crimsonland.exe` logic before `0x00452ef0` and the
+Grim2D engine implementation in `grim.dll` before `0x1000a8d0`. It excludes:
 
-- `crimsonland.exe`: main game executable
-- `grim.dll`: Grim2D engine DLL
+- D3DX, CRT, codec, import-thunk, and other bundled library code linked after
+  the owned ranges in either image
+- individually audited functions marked `third-party` when a library object is
+  interleaved inside an owned range, or `platform-replaced` when the port's host
+  backend replaces the whole function
 
-Every scratch has an `IMAGE`; it defaults to `crimsonland.exe`. Set
-`IMAGE=grim.dll` for Grim2D functions so the harness reads the matching
-manifest, metadata, and binary image.
+Both images' Binary Ninja databases, IDA and Ghidra exports, maps,
+annotations, and owned scratches are matching inputs. Pass `--scope all` only
+for an explicit consultation outside the port scope. Dispositioned functions
+and their existing scratches remain available there as analysis evidence, but
+are omitted from default scores, validation, triage, and worker shards.
+The IJG 6a decompressor entry cluster at `0x10009a50..0x1000a107` is the first
+`third-party` island: it sits between Grim-owned exports and input code despite
+being a separately linked plain-C JAZ decoder copy. The confirmed `d3dx8.lib`
+contains namespaced, byte-distinct entry bodies elsewhere in Grim.
+
+The address-keyed scope deliberately takes precedence over IDA's `library`
+flag, which can change between analysis versions and has produced false
+positives inside game code.
+
+Function dispositions are deliberately narrower than subsystem exclusions.
+Grim rendering, batching, texture behavior, timing policy, higher-level input
+semantics, configuration access, and shared game state remain in `port`.
+For example, `grim_config_defaults_init` initializes game-owned player,
+key-binding, audio, display, and gameplay defaults and therefore stays a
+matching target even though the adjacent Win32 configuration dialogs are
+`platform-replaced`. Add `third-party` only with concrete library provenance;
+add `platform-replaced` only when call sites and state effects show that a host
+engine backend can replace the whole function.
 
 ## Toolchain
 
-Current PE evidence points to a VC6-family final link for both
-`crimsonland.exe` and `grim.dll`:
+Current PE evidence points to a VC6-family final link for
+`crimsonland.exe`:
 
 - PE optional-header linker version is `6.0`.
-- Rich headers include `Linker600` and dominant `Utc12_C` / `Utc12_CPP` object
-  counts.
-- `grim.dll` imports `MSVCRT.dll`, consistent with a VC6 `/MD` build.
-- both images have 2011-02-01 PE timestamps, so this looks like an old-code
+- its Rich header contains 137 product-10/build-9782 C records and 34
+  product-11/build-9782 C++ records, consistent with the VC6 SP6 code
+  generator.
+- controlled Processor Pack compiles instead stamp C and C++ objects as
+  product 48 and 49 with build 9044. A stock VC6 link preserves those distinct
+  records, and neither occurs in `crimsonland.exe`.
+- the image has a 2011-02-01 PE timestamp, so this looks like an old-code
   toolchain used for a later packaged/relinked binary.
 
-The Rich headers also contain some VC7-era import-library/static-object records,
-so treat that as mixed-library ancestry rather than the primary compiler.
+The Rich headers also contain import-library and static-object records, so do
+not treat every C/C++ product record as game-code compiler provenance. In
+particular, the pinned VC6 SP6 `msvcrt.lib` contains product 10/11 build-8047
+members. A structural Grim relink through that archive reproduces the
+reference's exact product-4/build-8047 count of 2 and
+product-11/build-8047 count of 2. Grim's aggregate 8047 records therefore do
+not prove that any engine translation unit used an 8047 frontend.
 
 ```sh
 MSVC_VER=msvc6.5
-CFLAGS="/O2 /G6 /W3 /GR-"
+CFLAGS="/O2 /GB /W3 /GR-"
 NOTE=branch-x87
 ```
 
-The current ranking is `msvc6.5`, then `msvc6.5pp`, then `msvc6.6`, with
-`msvc7.0` kept as a comparison profile. Both `msvc6.5` and `msvc6.5pp` produce
-100% matches for the checked-in smoke scratches plus representative
-x87/control-flow scratches in both images; the scratches do not distinguish
-those two profiles yet. Keep per-scratch overrides in `scratch.conf` while we
-calibrate broader coverage.
+The VC6 family and the blended `/GB` CPU schedule are supported by the current
+corpus. Switching the whole scratch set from `/G6` to `/GB` preserves every
+existing exact match and makes `player_start_reload`, `perk_select_random`, and
+`weapon_pick_random_available` exact as well. The reload function is a medium
+263-byte, 67-instruction calibration target with calls, stack arguments, x87
+operations, branches, and 28 audited references. `/GB` also improves most
+larger in-progress scratches.
+
+Do not infer object provenance from whichever compiler gives the best score for
+one scratch. Alternate compilers change block placement and scheduling in ways
+that can compensate for an imperfect source reconstruction. For example, the
+earlier Processor Pack match for `perk_select_random` disappeared after spelling
+its two rejection-path increments explicitly; the recovered shape is exact with
+both `msvc6.5` and `msvc6.6`. A better `msvc6.5pp` score therefore identifies a
+source-shape residual, not evidence of a hidden backend split. Keep alternate
+profiles in `probe`, `mutate`, or `profiles` experiments rather than as the
+canonical compiler for `crimsonland.exe` scratches.
+
+Use `msvc6.5 /O2 /GB` as the global search profile and confirm provenance from
+PE, COFF, archive, or other build metadata. `bonus_label_for_entry` is a useful
+profile calibration point: it is exact with `msvc6.5` and `msvc6.6`, but not
+`msvc6.5pp` or `msvc7.0`, and it rejects `/O1`, `/Od`, and `/Oy-`.
 
 `tools/match/cl.sh` looks for the compiler in this order:
 
@@ -53,7 +102,63 @@ calibrate broader coverage.
 3. a sibling Snail Mail checkout at `../snail-mail/tools/match/compilers/$MSVC_VER/`
 
 decomp.me's `msvcwin9x` release has usable `msvc6.5`, `msvc6.5pp`, and
-`msvc7.0` archives. The current dashboard is generated with `msvc6.5`.
+`msvc7.0` archives. The default dashboard profile is `msvc6.5 /O2 /GB`;
+alternate archives remain available for controlled shape experiments.
+Some archives, including the local `msvc7.0` profile, do not carry a complete
+Platform SDK. The repository's `third_party/headers/` fallbacks therefore
+provide the Win32 declarations used by the corpus and preserve both C vtable
+declarations and C++ COM inheritance. The focused matcher test compiles that
+surface, including inherited Direct3D calls, with the sparse profile.
+
+### Grim build-8047 attribution control
+
+The published decomp.me VC6 inventory and every compiler bundle available in
+the local Crimson/Snail Mail workspaces were fingerprinted from the version
+strings embedded in `C1XX.DLL` and `C2.DLL`:
+
+| profile | C++ frontend | optimizer |
+| --- | ---: | ---: |
+| `msvc6.0` | 8168 | 8168 |
+| `msvc6.3` | 8472 | 8447 |
+| `msvc6.4` | 8867 | 8799 |
+| `msvc6.5` | 8964 | 8966 |
+| `msvc6.5pp` | 8964 | 9044 |
+| `msvc6.6` | 9782 | 9782 |
+
+None contains an 8047 frontend or optimizer. An additional compile with the
+authentic June 1998 Visual Studio 6 Enterprise RTM media
+`VSE600ENU1.ISO` (SHA-256
+`a670cfb0a5ba6c89c2aa32fd884f21fa348e72cad9d4378b63d08e9da1708f15`)
+stamps a C++ object as `@comp.id=0x000b1fe8`, or build 8168, confirming
+that 8047 is not the RTM frontend under a different profile name. The two
+otherwise-uninstalled published archives checked here were `msvc6.3.tar.gz`
+at SHA-256
+`84f73e718b3671bfd5de3b7764622b07633b572ee826ca3b77602d224c128608`
+and `msvc6.4.tar.gz` at SHA-256
+`6d4ef930390ca7481ae5b63ea3bf00d62e0993cd95f1d6f42ba06bb30f993c57`.
+Do not substitute 8168 or another nearby build and label the result 8047.
+
+The pinned VC6 SP6 `msvcrt.lib` explains why 8047 appears without such a
+compiler bundle. Its COFF members contain 3 product-4, 26 product-10, and
+4 product-11 records with build 8047. The current structural Grim relink,
+which resolves the DLL's CRT seam through that archive, carries 2 product-4,
+1 product-10, and 2 product-11 build-8047 records. The product-4 and
+product-11 counts exactly equal the reference image, while the partial
+product-10 reproduction is sufficient to falsify the inference that the
+aggregate C record count belongs to engine code.
+
+Corpus-wide controls also reject a hidden SP6 backend split. Across the current
+137-function Grim corpus, the available 8966 and 9782 optimizers produce
+`0` wins, `0` losses, and `137` ties: both report 131 exact functions,
+14,938 exact bytes, six WIPs, 20,800.513 fuzzy-weighted bytes, and total
+reference debt 1. Across all 671 executable scratches the same comparison is
+also byte-for-byte tied: 561 exact functions, 115,403 exact bytes, 110 WIPs,
+282,305.057 fuzzy-weighted bytes, and reference debt 103.
+
+Do not spend matching time searching for an 8047 game compiler unless new
+object-local evidence separates an engine translation unit from the confirmed
+import-library contribution. Rich-header aggregate counts alone are provider
+ancestry, not a compiler-selection target.
 
 Run the compiler through `wibo`. Put `wibo` on `PATH`, set
 `WIBO=/path/to/wibo`, or place it at `tools/match/bin/wibo`. On macOS/Apple
@@ -81,13 +186,6 @@ Minimum config:
 FUNCTION=console_cmd_argc_get
 ```
 
-DLL config:
-
-```sh
-IMAGE=grim.dll
-FUNCTION=grim_get_time_ms
-```
-
 Useful optional fields:
 
 ```sh
@@ -96,8 +194,100 @@ SOURCE=scratch.cpp
 SYMBOL=probe
 END=0x00401156
 COMPILER=msvc6.5
-CFLAGS="/O2 /G6 /W3 /GR-"
+CFLAGS="/O2 /GB /W3 /GR-"
+AUTO_INLINE_OFF=select_ncolors,create_colorindex
+REFERENCE_ALIASES='$E2:widget_idle_color_destroy,$E3:widget_hover_color_destroy'
+RECOVERY=semantic-complete
+RESIDUAL=compiler
 ```
+
+Only the fields shown above plus `NOTE` are accepted; misspelled or malformed
+assignments fail immediately instead of silently falling back to defaults.
+
+An exact historical provider object can be used without recompiling source:
+
+```sh
+FUNCTION=provider_function
+ARCHIVE=../../../native/providers/build/provider/provider.lib
+ARCHIVE_MEMBER='objf\i386\provider.obj'
+ARCHIVE_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+SYMBOL='?decorated_provider_symbol@@YGXXZ'
+# Choose at most one explicit aggregate boundary:
+ARCHIVE_EXTENT=section-tail
+# ARCHIVE_END_SYMBOL='?next_entry@@YAXXZ'
+# ARCHIVE_SIZE=9
+```
+
+Archive scratches are provenance-bound alternatives to source scratches:
+`ARCHIVE_SHA256`, `ARCHIVE_MEMBER`, and `SYMBOL` are mandatory, `SOURCE` is
+forbidden, and the extracted member still passes the ordinary instruction and
+reference audit. This promotes an exact pinned-library match into checkpoints
+without treating a whole archive or an ambiguous member hit as recovered code.
+`ARCHIVE_EXTENT=section-tail` is optional and covers assembler objects whose
+public entry symbol is followed by COFF-local function labels that Binary Ninja,
+IDA, or Ghidra recover as one linked function. The archive scanner considers
+this larger extent only for external entry symbols and records it explicitly in
+generated configs; ordinary compiled functions continue to use the default
+single-symbol extent. Pass `--object-extent section-tail` to the low-level
+`match diff` or `match dump` commands when inspecting one of these objects
+without a scratch config.
+`ARCHIVE_END_SYMBOL` instead selects an explicit exclusive code-symbol
+boundary in the same COFF section. It is useful when callable entry labels sit
+inside one aggregate assembler routine; it cannot be combined with a
+non-default `ARCHIVE_EXTENT`. The low-level equivalent is
+`--object-end-symbol`.
+`ARCHIVE_SIZE` supplies a positive byte size for a proven COFF code label whose
+object does not encode a function extent. It is mutually exclusive with both
+`ARCHIVE_END_SYMBOL` and a non-default `ARCHIVE_EXTENT`; the low-level
+equivalent is `--object-size`.
+
+Scan an established provider range and materialize only unambiguous matches:
+
+```sh
+uv run crimson match archive path/to/provider.lib \
+  --start 0x00460000 --end 0x00468000 --missing-scratches \
+  --expected-sha256 <sha256> --write-scratches \
+  --write-reference-aliases \
+  --scratch-note-prefix provider-release
+```
+
+Writing requires both the pinned digest and `--missing-scratches`, never
+overwrites an existing directory, and defaults to archive-member-unique hits.
+Pass `--write-symbol-unique` only when duplicate matching members expose the
+same function symbol; the generated scratch still has to pass the normal
+reference audit before it counts as exact. `--write-reference-aliases` adds
+only zero-addend relocations that align with an already unique function, data,
+or import name in the target catalog; unknown addresses and conflicting
+inferences remain unresolved.
+
+Use `--show-reference-bindings` to list still-unresolved object symbols that
+consistently align with one image base address. The report normalizes COFF
+addends before rejecting conflicting bases and includes occurrence, addend,
+function, and archive-member evidence. It is read-only so a newly discovered
+CRT global still has to be named in the data map before generated aliases can
+consume it; automatic alias generation remains restricted to zero-addend
+evidence.
+
+`REFERENCE_ALIASES` is reserved for proven object-local compiler symbols whose
+names are reused across translation units. Each comma-separated
+`object-symbol:image-symbol` pair scopes that candidate symbol to one uniquely
+named native address; normal masked-reference auditing still compares the
+resolved address.
+
+`AUTO_INLINE_OFF` is a comma-separated list of line-leading function names.
+For source scratches, the compiler staging step wraps each named definition in
+MSVC `auto_inline(off)` / `auto_inline(on)` pragmas without changing the
+canonical source file. Use it only when native disassembly proves that a helper
+survived as a call while neighboring helpers from the same translation unit
+were inlined. Archive scratches cannot use this setting.
+
+`RECOVERY` can be `incomplete` or `semantic-complete`. Use the latter when the
+port behavior is understood even though byte identity is blocked.
+`RESIDUAL` is a comma-separated set of `analysis`, `compiler`, and
+`references`. Use `analysis` when the behavior is recovered but a plausible
+source shape still needs to be found. These fields keep semantic recovery
+separate from source-analysis, compiler, and reference debt; exact matches are
+reported as `recovery=exact` automatically.
 
 Run one scratch:
 
@@ -105,30 +295,436 @@ Run one scratch:
 tools/match/match.sh tools/match/scratches/<function> --regions
 ```
 
-Regenerate the dashboard:
+Inspect one target through the matching state and all three analysis views:
 
 ```sh
-uv run crimson match status --write tools/match/STATUS.md
+uv run crimson match inspect player_update
+uv run crimson match inspect tools/match/scratches/player_update --binja-live
 ```
+
+Inspection resolves and evaluates only the selected target's scratch
+directories; it does not compile the full corpus. It starts with exact Binary
+Ninja commands and can save a bounded live evidence bundle under the ignored
+`tools/match/.cache/evidence/` tree. It then reports the address-matched IDA
+and Ghidra snapshots, the best scratch, recovery metadata, and a bounded first
+mismatch region.
+
+## Parallel Matching Batches
+
+The coordinator evaluates the corpus once, ranks the requested targets by
+remaining fuzzy gap, and creates deterministic disjoint claims:
+
+```sh
+batch_dir=/tmp/crimson-match-batch
+uv run crimson match shard --workers 4 --state missing,wip \
+  --min-bytes 32 --limit 24 --out "$batch_dir"
+```
+
+Sharding requires a clean repository so pre-existing edits cannot be mistaken
+for worker output.
+
+By default, sharding includes missing targets plus scratches whose recovery is
+`incomplete` or `unspecified`. Scratches marked `semantic-complete` are omitted
+even when they retain a large compiler/reference fuzzy gap. If that recovery
+queue is empty, the command exits without writing an inert plan and points at
+the separate residual-audit mode:
+
+```sh
+uv run crimson match shard --mode residual-audit --workers 4 \
+  --min-bytes 32 --limit 24 --out "$batch_dir"
+```
+
+Residual-audit mode defaults to `--state wip,audit` and
+`--recovery semantic-complete`. Explicit `--state` or `--recovery` values
+override either mode's defaults.
+
+`plan.json` pins the batch's starting commit. Each `worker-NN.json` assigns
+targets and their only permitted `scratches/<directory>` paths. Existing
+scratches retain their current directory; missing targets receive a stable
+directory name. Claims are balanced by estimated fuzzy-gap bytes rather than
+only target count.
+
+Give every worker a separate worktree based on the pinned commit and its one
+claim file:
+
+```sh
+git worktree add --detach ../crimson-worker-01 HEAD
+cd ../crimson-worker-01
+uv run crimson match inspect <claimed-function> --binja-live
+uv run crimson match scratch tools/match/scratches/<claimed-directory> --regions
+uv run crimson match worker-outcome "$batch_dir/worker-01.json" \
+  tools/match/scratches/<claimed-directory> \
+  --disposition falsified \
+  --summary "Supported profiles preserve the same scheduling residual." \
+  --hypothesis "toolchain:VC6 profile split" \
+  --evidence "experiments.jsonl: recorded profile matrix"
+uv run crimson match worker-check "$batch_dir/worker-01.json" \
+  --require-outcome \
+  --out "$batch_dir/worker-01-report.json"
+```
+
+Workers may edit only the scratch directories in their claim. They must not
+regenerate `STATUS.md` or edit shared matcher headers, analysis maps, or
+tooling. `worker-check` checks both commits and dirty files since the pinned
+base, rejects every path outside the claim, evaluates only claimed scratches
+that exist, and emits JSON without touching the dashboard. Add
+`--require-handled` when every claimed target is expected to have a scratch
+before handoff.
+
+`worker-outcome` appends a batch-scoped record to the scratch's
+`outcomes.jsonl`. Valid dispositions are `matched`, `improved`, `falsified`,
+and `blocked`; hypotheses use the normalized `analysis`, `references`,
+`source-shape`, `toolchain`, or `unknown` categories. The command verifies
+`matched` and `improved` claims against the live scratch, while falsified and
+blocked outcomes require evidence. `worker-check --require-outcome` rejects
+missing, malformed, or stale-batch outcomes.
+
+Keep final integration coordinator-owned. A worker can export an uncommitted
+patch, including newly created scratches, with:
+
+```sh
+git add -N tools/match/scratches
+git diff --binary -- tools/match/scratches > "$batch_dir/worker-01.patch"
+```
+
+The coordinator applies the worker patches, performs the only global corpus
+evaluation, and creates the batch commit:
+
+```sh
+git apply "$batch_dir"/worker-*.patch
+uv run crimson match checkpoint --claims "$batch_dir/plan.json"
+git add tools/match/scratches tools/match/STATUS.md
+git commit -m "feat(match): recover claimed gameplay functions"
+```
+
+Checkpoint rejects duplicate scratch targets, a stale or malformed plan,
+scratch changes outside all claims, evaluation failures, and whitespace
+errors. Because ownership is measured from the pinned base commit, the same
+check also covers worker commits if a coordinator chooses to integrate them
+directly.
+
+Regenerate and validate the dashboard:
+
+```sh
+uv run crimson match checkpoint -j 8
+```
+
+The checkpoint rejects duplicate scratch targets and configs outside the port
+scope, evaluates the corpus, rewrites `tools/match/STATUS.md`, runs
+`git diff --check`, and reports the current scratch change count. Both staged
+and unstaged diffs are checked. `just match-checkpoint` is the short form.
+The dashboard also summarizes the checked-in native object, closure, and data
+manifests. A linker row is marked current only while the three reports share
+and reproduce one audit digest, their recorded source, selection, toolchain,
+and reference inputs still hash to the live repository, and the generated
+`objects.txt` and `exports.def` companions match their recorded hashes;
+otherwise it is explicitly labeled stale, missing, or invalid.
+
+Each status row includes fuzzy-weighted bytes and its remaining fuzzy gap in
+addition to exact-match state. Keep the canonical Markdown board complete, but
+filter the terminal report when investigating a narrower slice:
+
+```sh
+uv run crimson match status --image crimsonland.exe --state wip \
+  --min-bytes 64 --sort fuzzy-gap --limit 20
+uv run crimson match status --summary-only
+uv run crimson match status --image crimsonland.exe --json
+uv run crimson match status --recovery semantic-complete --residual compiler
+```
+
+Use address-keyed triage to rank both scratch-backed and still-uncovered native
+functions. Triage resolves scratch `FUNCTION` values through the manifest and
+joins by `(image, address)`, so a raw-address scratch or stale recovered name
+cannot create a false missing-function report.
+
+```sh
+uv run crimson match triage --image crimsonland.exe \
+  --state missing,wip --min-bytes 32 --sort fuzzy-gap --limit 30
+uv run crimson match triage --state wip --sort unexplored --limit 30
+uv run crimson match triage --image crimsonland.exe --summary-only
+uv run crimson match triage --image crimsonland.exe --state missing --json
+```
+
+The `search` column is `experiment records/unique variants`; `streak` counts
+consecutive non-improving mutation sweeps, and `flags` carries experiment-log
+signals such as `stalled`, repeated variants, tradeoffs, or evaluation errors.
+`--sort unexplored` puts the least-tested targets first, then favors the larger
+remaining fuzzy gap, so residual work does not repeatedly reopen saturated
+compiler-scheduling boundaries.
+
+All matcher `--json` modes keep the rendering stack lazy and write only the
+JSON document to stdout, so their output can be piped directly to tools such as
+`jq`.
+
+Probe a source-shape experiment without editing the tracked scratch. The
+baseline and shadow build use the same selected compiler profile, and the
+report shows deltas for fuzzy bytes, instruction count, prefix, and references.
+When fuzzy bytes improve while reference debt, resolved-reference coverage,
+prefix, first mismatch, or instruction-count shape regresses, the report
+labels the result with explicit tradeoff warnings.
+
+```sh
+uv run crimson match probe tools/match/scratches/player_update \
+  --source /tmp/player_update_variant.cpp --label scalar-entry-copy
+uv run crimson match probe tools/match/scratches/player_update \
+  --stdin --json < /tmp/player_update_variant.cpp
+```
+
+Pass `--record` to append the complete result, source SHA-256, profile, label,
+and timestamp to `experiments.jsonl` in the scratch directory. Recording is
+explicit; ordinary probes leave both the scratch and repository untouched.
+
+For repeated source-shape experiments, use the bounded mutation harness. A
+JSON plan names exact, non-overlapping source spans and plausible replacements:
+
+```json
+{
+  "schema": 1,
+  "sites": [
+    {
+      "name": "sum-order",
+      "find": "entry.x + offset.x",
+      "replacements": [
+        {"name": "commuted", "text": "offset.x + entry.x"},
+        {"name": "parenthesized", "text": "(entry.x + offset.x)"}
+      ]
+    }
+  ]
+}
+```
+
+The default sweep changes one site at a time. Increase `--max-changes` to test
+interactions; `--max-variants` keeps the Cartesian search bounded. Sites must
+match exactly once unless they specify a one-based `"occurrence"`. Ambiguous
+or overlapping sites fail before compilation. Specs use byte-exact source
+spans and should be regenerated or reviewed after reformatting or refactoring
+the scratch.
+
+```sh
+uv run crimson match mutate tools/match/scratches/player_update \
+  --spec /tmp/player-update-mutations.json --jobs 8 --top 20
+uv run crimson match mutate tools/match/scratches/player_update \
+  --spec /tmp/player-update-mutations.json \
+  --max-changes 2 --max-variants 128 --time-budget 120 \
+  --stop-on-improvement --record --json
+```
+
+By default the plan mutates the configured scratch source. Pass `--source`
+when the recovered implementation lives in a scratch-local header or under
+`tools/match/include`; the selected file is shadowed ahead of the canonical
+include roots while the configured translation unit remains unchanged:
+
+```sh
+uv run crimson match mutate tools/match/scratches/config_init_defaults \
+  --spec tools/match/scratches/config_init_defaults/saved-name-loop-lifetime-mutations.json \
+  --source tools/match/include/crimson_config_defaults_impl.h --record
+```
+
+Recorded sweeps include the absolute `mutation_source` so include-backed
+experiments remain distinguishable from ordinary top-level-source sweeps.
+
+Every variant builds in an isolated temporary scratch and is ranked by the
+canonical match score, exact/reference-clean state, prefix, and instruction
+shape. Time budgets are soft: the current batch finishes, then no more variants
+are scheduled. Reports show evaluated/planned/possible coverage at each
+mutation depth and call out interaction combinations that were never
+evaluated. Ranked candidates also show movement of the first native mismatch
+byte offset.
+
+Pass `--record` to append one `kind=mutation-sweep` entry containing the full
+evaluated result set, spec SHA-256, coverage, scores, and improving winner to
+the scratch's `experiments.jsonl`. `--top` limits display only, not the recorded
+evidence. As with probe recording, do not run concurrent recording commands
+against the same scratch.
+
+Summarize the append-only experiment corpus before scheduling more sweeps:
+
+```sh
+uv run crimson match experiments --sort no-improvement --limit 20
+uv run crimson match experiments --sort errors --limit 20
+uv run crimson match experiments --scratch player_update --json --check
+```
+
+The summary counts improving, byte-neutral, degrading, and evaluation-error
+variants separately, along with repeated source/profile evaluations, repeated
+specs, exact winners, metric tradeoffs, and each scratch's trailing
+no-improvement streak. Sorting by `errors` surfaces plans whose intended
+complete variants may need an authoring audit instead of treating a failed
+compile as negative matching evidence. `stalled` means at least three recorded
+mutation sweeps since the last improving sweep; it is a prompt to change or
+falsify the current hypothesis, not a claim that the function is unmatchable.
+`--check` rejects malformed or internally inconsistent JSONL.
+
+The tracked scratch is never edited.
+`--write-best /tmp/winner.cpp` writes a candidate only when it beats the
+baseline without increasing reference debt, regressing the exact prefix or
+first mismatch, or moving the instruction count farther from native. Higher
+fuzzy-scoring tradeoffs remain ranked and recorded with warnings but are never
+selected as the retained winner. Combine `--write-best` with
+`--require-improvement` in scripted searches.
+
+Sweep one scratch across installed compilers and one or more flag sets. Options
+are repeatable and the result is ranked with exact, reference-clean matches
+first:
+
+```sh
+uv run crimson match profiles tools/match/scratches/creature_spawn \
+  --compiler msvc6.5 --compiler msvc6.5pp --compiler msvc6.6
+uv run crimson match profiles tools/match/scratches/creature_spawn \
+  --compiler msvc6.5 --cflags "/O2 /GB /W3 /GR-" \
+  --cflags "/O2 /G6 /W3 /GR-" --json
+```
+
+Scan every canonical WIP across the installed compiler corpus when a backend
+split is a live hypothesis:
+
+```sh
+uv run crimson match compiler-scan --scope port --state wip \
+  --compiler msvc6.0 --compiler msvc6.5 --compiler msvc6.5pp \
+  --compiler msvc6.6 --check
+```
+
+The scan keeps each scratch's canonical flags, compiles selected profiles in
+parallel, and prints only exact or improved leads by default; pass `--all` to
+include ties. Its summary still counts every selected target and evaluation.
+Set `DISPROVEN_COMPILERS=compiler-a,compiler-b` in `scratch.conf` when object or
+image provenance rules those profiles out. Corpus scans skip those evaluations
+by default; pass `--include-disproven` to revisit them as source-shape evidence.
+An alternate compiler win is deliberately labeled search evidence rather than
+provenance: confirm the image's PE/Rich records or object-local COFF/archive
+evidence before changing a canonical `COMPILER` value.
+Use `--json` when scanning experimental or cross-generation profiles such as
+MSVC 7; failed evaluations are returned individually in `evaluation_errors`,
+and `--check` deliberately fails if any requested profile cannot compile.
+
+Localized mismatch regions include normalized instruction spans, native and
+candidate byte ranges, native VAs, local fuzzy-weighted bytes, scoped reference
+counts, and cautious diagnostic hints:
+
+```sh
+tools/match/match.sh tools/match/scratches/player_update \
+  --regions --region-context 3 --max-regions 8
+uv run crimson match scratch tools/match/scratches/player_update \
+  --json --max-regions 8
+```
+
+Hints such as `possible-control-flow-shape`,
+`possible-x87-lifetime-or-ordering`, and
+`possible-stack-frame-or-lifetime` are triage aids, not proof. Use native
+decompilation, call/reference evidence, and plausible source shape before
+changing a scratch.
+
+The status pipeline caches unchanged results and evaluates stale scratches in
+parallel. A cache entry is invalidated by the scratch source/config, compiler
+arguments and binary, `cl.sh`, the transitive local-header graph, the target
+image and symbol maps, or the matcher itself. This keeps repeat status runs
+cheap without allowing stale objects or scores to survive an input change.
+Compiler/CFLAGS profiles use separate digest-named build directories, and
+objects plus cache metadata are published atomically, so concurrent profile
+comparisons cannot overwrite the canonical build.
 
 Compare another compiler profile without editing scratches:
 
 ```sh
 uv run crimson match status --compiler msvc6.5pp
 uv run crimson match status --compiler msvc7.0
+uv run crimson match status --cflags "/O2 /G6 /W3 /GR-"
 ```
 
-Target function extents come from `analysis/ida/raw/<image>/functions.json`.
+Target function extents come from `analysis/ida/raw/<image>/functions.json`,
+then are filtered through `analysis/matching_scope.json`.
 The status dashboard reports matched functions out of every manifest function,
 matched code bytes as a percentage of every manifest function extent, and then
-groups scratch rows under each tracked image. Pass `END` when the manifest
+groups scratch rows under each in-scope image. Pass `END` when the manifest
 extent includes unrelated code or misses a hand-curated boundary.
 
-Use `NOTE=smoke` for tiny plumbing checks. Treat compiler/settings calibration
-as provisional until it includes broader representative branches, calls, stack
-arguments, and x87 code from both images. For link-sensitive code, check `/MD`
-vs `/MT` first; `grim.dll`'s `MSVCRT.dll` import makes `/MD` the likely final
-link mode.
+Use `NOTE=smoke` for tiny plumbing checks. Treat compiler-profile calibration as
+search evidence, not per-object provenance. Establish toolchain ancestry from
+PE/COFF records or identified archive members; for link-sensitive code, check
+`/MD` vs `/MT` first.
+
+Audit recovered identities whose current presentation still exposes analyzer
+placeholders, semantic `j_*` names, or redundant address suffixes in canonical
+names, scratch directories, curated function/data aliases, reference aliases,
+or notes:
+
+```sh
+uv run crimson match naming-audit --summary-only
+uv run crimson match naming-audit --suggested-only --image crimsonland.exe
+uv run crimson match naming-audit --provider-member d3dxmath.obj --apply-suggestions
+uv run crimson match naming-audit --provider-member d3dxmathsse.obj,d3dxmathsse2.obj --apply-suggestions
+uv run crimson match naming-audit --provider-member d3dxmath.obj --prune-placeholder-aliases
+uv run crimson match naming-audit --rewrite-placeholder-references
+uv run crimson match naming-audit --repair-provider-comments
+uv run crimson match naming-audit --json --check
+uv run crimson match resolved-name-audit --check
+uv run crimson match resolved-name-audit --rewrite
+```
+
+Suggestions are intentionally narrow. The command proposes a canonical name
+when another exact scratch for the same hash-pinned archive and COFF symbol
+already has one unique non-placeholder identity. The address-keyed
+`tools/match/naming_hints.json` ledger may also supply a canonical name,
+presentation comment, and concise evidence string for an exact recovery whose
+identity comes from binary context rather than a provider symbol. Hint/provider
+conflicts are rejected instead of silently choosing one. Recognized DirectX 8.1 D3DX
+base and optimized helpers may also derive canonical `d3dx_init_*`,
+`d3dx_c_*`, `d3dx_sse*_*`, or `d3dx_x86_*` names directly from their exact
+decorated COFF symbols, including the `$$1` implementation suffix. Exact
+`CD3DXCodec_<FORMAT>::Encode` symbols similarly derive `d3dx_pixel_encode_*`
+identities. Pinned `CD3DXImage::Load*`, `CD3DXFile` methods, and
+D3DX-namespaced IJG/libpng entry points derive the corresponding
+`d3dx_image_*`, `d3dx_file_*`, `d3dx_jpeg_*`, and `d3dx_png_*` identities.
+Exact IJG 6a source recoveries use `grim_jaz_jpeg_*` so their plain C symbols
+do not collide with the separate D3DX-namespaced copy. Pinned VC6
+`intrncvt.obj` and `sbheap.obj` symbols derive their `crt_*` helper identities,
+while `cprintf.obj` locals receive a `crt_printf_*` context prefix. Weak raw
+linkage names from hash-pinned VC6 runtime objects are normalized to readable
+`crt_*` identities. Selected decorated symbols from the VC6 exception-runtime
+objects receive explicit canonicals while retaining their full decorated
+linkage aliases. This also reports
+`provider-name-conflict` when an older semantic name is meaningful but weaker
+than that exact identity, and `provider-directory-conflict` when only the
+scratch directory still carries the superseded identity. Real
+decorated/linkage symbols remain useful aliases;
+generated names such as `FUN_*`, `sub_*`, and `unknown_libname_*` are naming
+debt once a stronger identity is proven.
+`--apply-suggestions` updates canonical map rows, exact scratch `FUNCTION`
+assignments, scratch reference aliases, and matching-scope disposition names
+together. While the former identities are still known, it rewrites unambiguous
+semantic and analyzer-name references across maintained analysis, source,
+documentation, scripts, and matching notes. Decorated linkage symbols remain
+intact. It removes superseded analyzer aliases and gives a renamed scratch an
+image prefix when the canonical directory is already occupied by the
+cross-image provider peer.
+`--prune-placeholder-aliases` removes only the generated aliases reported on
+the selected function and data rows; decorated provider and linkage aliases
+are retained. Curated-map aliases are audited even when no exact scratch owns
+the row, so resolved `DAT_*`, `LAB_*`, and address-derived table labels cannot
+hide outside the exact scratch corpus. Curated comments are checked for stale
+`DAT_*`, `FUN_*`, `LAB_*`, `PTR_*`, `sub_*`, switch/case/table labels,
+`unknown_libname_*`, and `nullsub_*` references too.
+`--rewrite-placeholder-references` replaces an analyzer target only when its
+encoded address or unique raw identity resolves to one non-placeholder name in
+the curated map. It updates every scratch for that image which uses the audited
+target while leaving decorated object/linkage symbols untouched.
+`--repair-provider-comments` restores the exact source or linkage symbol when
+an older bulk rename rewrote an auto-generated provider comment to the new
+canonical identity.
+
+`resolved-name-audit` is the repository-wide companion to the scratch/map
+audit. It scans maintained analysis, Zig, documentation, source, scripts,
+matching notes, and native data initializers for analyzer identities whose
+address already has a stronger curated identity. This includes semantic raw
+function names, not only address-derived labels. Raw analyzer exports, native
+build artifacts, experiment logs, and genuinely unresolved address-named
+fields are excluded, while vtable slots such as a stale `nullsub_*` are checked
+against their explicit target address. `--rewrite` replaces unambiguous labels
+with their curated identity; when that identity is already present on the line,
+it keeps the useful address as a plain hexadecimal literal instead of repeating
+the name. Ambiguous multi-name addresses remain reported for manual review. The
+same check runs as a pre-commit gate whenever maintained maps, documentation,
+source, scripts, or tools change.
 
 ## No Fakematching
 
@@ -139,3 +735,59 @@ normalization exists only for real native functions and globals.
 
 Record residual mismatches in the scratch directory instead of forcing
 byte-shaped source.
+
+## Exact Matches and Masked References
+
+Instruction normalization replaces relocated and in-image addresses with
+`ADDR`, but an `ADDR` token is not proof that the operands refer to the same
+thing. The matcher retains the hidden reference on both sides and audits it
+against function symbols, the per-image IDA import manifest,
+`analysis/ghidra/maps/data_map.json`, exact resolved base-plus-addend addresses,
+and compiler-generated constant contents.
+
+Assembler-local constants are compared by exact operand-width bytes only when
+the COFF symbol is static and lives in a non-writable `.rdata` section. This
+proves archive objects that name private SIMD/MMX constant pools without
+treating mutable data with coincidentally equal initial contents as equivalent.
+
+A scratch is `match` only when its normalized instruction score is 100% and
+all aligned masked references are proven equal. A 100% instruction score with
+unresolved or different references is `audit`, so it is excluded from matched
+function and byte totals. The `refs` column is `ok/unresolved/mismatch`.
+
+The function manifest is overlaid by exact program/address entries from
+`analysis/ghidra/maps/name_map.json`. This lets newly recovered function names
+participate in scratch selection and reference auditing immediately, without
+waiting for a full IDA artifact regeneration. Curated `aliases` on those
+entries also connect decorated C++ constructor and destructor references to
+their proven native addresses.
+
+Decorated C++ aliases are resolved by their complete symbol before falling
+back to a short display name. This keeps same-named methods on different
+classes, such as surface and volume `Lock` helpers, distinct during the
+reference audit.
+
+VC6 exception-chain references against the absolute `__except_list` symbol are
+resolved to the linked `fs:[0]` operand. Compiler-local frame-handler labels are
+accepted only when the matcher proves the full handler graph: thunk to
+`__CxxFrameHandler`, the 28-byte VC6 FuncInfo fields, unwind-map entry, and
+cleanup funclet. Recognized cleanup shapes either call scalar `operator delete`
+or tail-jump to the same base destructor directly referenced by the protected
+function. The unwind-map record may be linked before or after FuncInfo.
+
+Compiler-local sparse switches are audited by mapping each byte lookup entry
+through its companion absolute jump table and comparing the resulting
+destination partition. This accepts linker/compiler differences in private
+table numbering only when every lookup value still reaches the same
+function-local equivalence class.
+
+Inspect exact-score reference debt with:
+
+```sh
+uv run crimson match audit --exact-only --status problem
+uv run crimson match audit --exact-only --status all --json
+```
+
+Use `--all-scores` when investigating references inside partially matching
+functions. `crimson match diff` and `crimson match scratch` exit nonzero for
+either an instruction mismatch or masked-reference debt.

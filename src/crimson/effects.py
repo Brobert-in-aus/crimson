@@ -15,7 +15,16 @@ from grim.rand import CallerStatic, Crand, CrandLike
 from .creatures.damage_runtime import CreatureDamageRuntime, DirectCreatureDamageRuntime
 from .creatures.lifecycle import creature_lifecycle_is_collidable
 from .effects_atlas import EffectId
-from .math_parity import NATIVE_TAU, f32
+from .math_parity import (
+    NATIVE_TAU,
+    f32,
+    f32_vec2,
+    x87_pc24_add,
+    x87_pc24_cos_mul,
+    x87_pc24_mul,
+    x87_pc24_sin_mul,
+    x87_pc24_sub,
+)
 from .owner_ref import OwnerRef
 from .rng_caller_static import RngCallerStatic
 
@@ -23,22 +32,22 @@ if TYPE_CHECKING:
     from .creatures.runtime import CreatureState
 
 __all__ = [
+    "EFFECT_POOL_SIZE",
     "FX_QUEUE_CAPACITY",
     "FX_QUEUE_MAX_COUNT",
     "FX_QUEUE_ROTATED_CAPACITY",
     "FX_QUEUE_ROTATED_MAX_COUNT",
-    "EFFECT_POOL_SIZE",
     "PARTICLE_POOL_SIZE",
     "SPRITE_EFFECT_POOL_SIZE",
+    "EffectEntry",
+    "EffectPool",
     "FxQueue",
     "FxQueueEntry",
     "FxQueueRotated",
     "FxQueueRotatedEntry",
-    "EffectEntry",
-    "EffectPool",
     "Particle",
-    "ParticleStyleId",
     "ParticlePool",
+    "ParticleStyleId",
     "SpriteEffect",
     "SpriteEffectPool",
 ]
@@ -52,6 +61,30 @@ FX_QUEUE_MAX_COUNT = 0x7F
 
 FX_QUEUE_ROTATED_CAPACITY = 0x40
 FX_QUEUE_ROTATED_MAX_COUNT = 0x3F
+
+_NATIVE_PARTICLE_SPIN_SCALE = f32(0.01)
+_NATIVE_SPRITE_ROTATION_SCALE = f32(0.01)
+
+
+def _native_particle_velocity(angle: float, speed: float) -> Vec2:
+    angle_f32 = f32(angle)
+    return Vec2(
+        x87_pc24_cos_mul(angle_f32, speed),
+        x87_pc24_sin_mul(angle_f32, speed),
+    )
+
+
+def _native_particle_spin(draw: int) -> float:
+    return x87_pc24_mul(float(draw % 0x274), _NATIVE_PARTICLE_SPIN_SCALE)
+
+
+def _native_clamp_unit(value: float) -> float:
+    value = f32(value)
+    if not value >= 0.0:
+        return 0.0
+    if value > 1.0:
+        return 1.0
+    return value
 
 
 class ParticleStyleId(IntEnum):
@@ -117,17 +150,18 @@ class ParticlePool:
 
         idx = self._alloc_slot(caller=RngCallerStatic.FX_SPAWN_PARTICLE_ALLOC)
         entry = self._entries[idx]
+        angle_f32 = f32(angle)
         entry.active = True
         entry.render_flag = True
-        entry.pos = pos
-        entry.vel = Vec2.from_angle(angle) * 90.0
+        entry.pos = f32_vec2(pos)
+        entry.vel = _native_particle_velocity(angle_f32, 90.0)
         entry.scale_x = 1.0
         entry.scale_y = 1.0
         entry.scale_z = 1.0
         entry.age = 0.0
-        entry.intensity = float(intensity)
-        entry.angle = float(angle)
-        entry.spin = float(self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_PARTICLE_SPIN) % 628) * 0.01
+        entry.intensity = f32(intensity)
+        entry.angle = angle_f32
+        entry.spin = _native_particle_spin(self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_PARTICLE_SPIN))
         entry.style_id = ParticleStyleId.FLAMETHROWER
         entry.target_id = -1
         entry.owner = owner
@@ -144,17 +178,18 @@ class ParticlePool:
 
         idx = self._alloc_slot(caller=RngCallerStatic.FX_SPAWN_PARTICLE_SLOW_ALLOC)
         entry = self._entries[idx]
+        angle_f32 = f32(angle)
         entry.active = True
         entry.render_flag = True
-        entry.pos = pos
-        entry.vel = Vec2.from_angle(angle) * 30.0
+        entry.pos = f32_vec2(pos)
+        entry.vel = _native_particle_velocity(angle_f32, 30.0)
         entry.scale_x = 1.0
         entry.scale_y = 1.0
         entry.scale_z = 1.0
         entry.age = 0.0
         entry.intensity = 1.0
-        entry.angle = float(angle)
-        entry.spin = float(self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_PARTICLE_SLOW_SPIN) % 628) * 0.01
+        entry.angle = angle_f32
+        entry.spin = _native_particle_spin(self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_PARTICLE_SLOW_SPIN))
         entry.style_id = ParticleStyleId.BUBBLEGUN
         entry.target_id = -1
         entry.owner = owner
@@ -197,8 +232,8 @@ class ParticlePool:
                 creature = creatures[creature_idx]
                 if not creature.active:
                     continue
-                # Native particle `creature_find_in_radius` is hitbox-gated, not
-                # HP-gated: freshly killed creatures (hp<=0, hitbox>5) can still
+                # Native particle `creature_find_in_radius` is lifecycle-gated,
+                # not HP-gated: freshly killed creatures (hp<=0, stage>5) can still
                 # receive same-tick style-0 damage callbacks.
                 if not creature_lifecycle_is_collidable(creature.lifecycle_stage):
                     continue
@@ -252,12 +287,16 @@ class ParticlePool:
                 expired.append(idx)
                 if style == int(ParticleStyleId.BUBBLEGUN) and entry.target_id != -1:
                     target_id = int(entry.target_id)
-                    entry.target_id = -1
-                    if creature_damage_runtime is not None:
-                        creature_damage_runtime.kill_creature_no_corpse(target_id, entry.owner)
-                    elif creatures is not None and 0 <= target_id < len(creatures):
-                        creatures[target_id].hp = -1.0
-                        creatures[target_id].active = False
+                    if creatures is not None and 0 <= target_id < len(creatures) and creatures[target_id].active:
+                        sound_slot = int(
+                            rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_BUBBLEGUN_EXPIRY_SFX) % 3,
+                        )
+                        if creature_damage_runtime is not None:
+                            creature_damage_runtime.on_bubblegun_expiry_sfx(target_id, sound_slot)
+                            creature_damage_runtime.kill_creature_no_corpse(target_id, entry.owner)
+                        else:
+                            creatures[target_id].hp = -1.0
+                            creatures[target_id].active = False
                 continue
 
             if entry.render_flag:
@@ -295,16 +334,6 @@ class ParticlePool:
             entry.scale_x = shade
             entry.scale_y = shade
             # Native only updates scale_x/scale_y; scale_z stays at its spawn value (1.0).
-
-            if (
-                style == int(ParticleStyleId.BUBBLEGUN)
-                and (not entry.render_flag)
-                and entry.target_id != -1
-                and creatures is not None
-            ):
-                target_id = int(entry.target_id)
-                if 0 <= target_id < len(creatures) and creatures[target_id].active:
-                    entry.pos = creatures[target_id].pos
 
             if entry.render_flag and creatures is not None:
                 hit_idx = _creature_find_in_radius(pos=entry.pos, radius=max(float(entry.intensity), 0.0) * 8.0)
@@ -345,8 +374,7 @@ class ParticlePool:
                         bounce_velocity = Vec2.from_angle(float(entry.angle)) * 82.0
                         speed_scale = f32(
                             float(
-                                rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_BOUNCE_SPEED_SCALE)
-                                % 10,
+                                rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_BOUNCE_SPEED_SCALE) % 10,
                             )
                             * 0.1,
                         )
@@ -355,7 +383,7 @@ class ParticlePool:
                             f32(float(bounce_velocity.y) * float(speed_scale)),
                         )
 
-                        damage = max(0.0, float(entry.intensity) * 10.0)
+                        damage = max(0.0, x87_pc24_mul(entry.intensity, 10.0))
                         if damage > 0.0:
                             if creature_damage_runtime is not None:
                                 creature_damage_runtime.apply_creature_damage(
@@ -369,22 +397,29 @@ class ParticlePool:
                                 creature.hp -= float(damage)
 
                         tint = creature.tint
-                        tint_sum = float(tint.r) + float(tint.g) + float(tint.b)
-                        if tint_sum > 1.6:
-                            factor = 1.0 - float(entry.intensity) * 0.01
-                            creature.tint = tint.scaled(factor).clamped()
+                        tint_sum = x87_pc24_add(x87_pc24_add(tint.g, tint.b), tint.r)
+                        tint_r = f32(tint.r)
+                        tint_g = f32(tint.g)
+                        tint_b = f32(tint.b)
+                        if tint_sum > f32(1.6):
+                            factor = x87_pc24_sub(1.0, x87_pc24_mul(entry.intensity, 0.01))
+                            tint_r = x87_pc24_mul(factor, tint_r)
+                            tint_g = x87_pc24_mul(factor, tint_g)
+                            tint_b = x87_pc24_mul(factor, tint_b)
+                        creature.tint = RGBA(
+                            _native_clamp_unit(tint_r),
+                            _native_clamp_unit(tint_g),
+                            _native_clamp_unit(tint_b),
+                            _native_clamp_unit(tint.a),
+                        )
 
                         if sprite_effects is not None and (idx % 3 == 0):
                             sprite_vel = Vec2(
                                 float(
-                                    rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_SPRITE_VEL_X)
-                                    % 60
-                                    - 30,
+                                    rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_SPRITE_VEL_X) % 60 - 30,
                                 ),
                                 float(
-                                    rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_SPRITE_VEL_Y)
-                                    % 60
-                                    - 30,
+                                    rng.rand_tagged(RngCallerStatic.PROJECTILE_UPDATE_PARTICLE_SPRITE_VEL_Y) % 60 - 30,
                                 ),
                             )
                             sprite_effects.spawn(
@@ -401,8 +436,8 @@ class ParticlePool:
                             )
 
                         creature.pos = Vec2(
-                            f32(float(creature.pos.x) + float(entry.vel.x) * float(dt)),
-                            f32(float(creature.pos.y) + float(entry.vel.y) * float(dt)),
+                            x87_pc24_add(creature.pos.x, x87_pc24_mul(entry.vel.x, dt)),
+                            x87_pc24_add(creature.pos.y, x87_pc24_mul(entry.vel.y, dt)),
                         )
 
         return expired
@@ -446,15 +481,13 @@ class SpriteEffectPool:
         entry = self._entries[idx]
         entry.active = True
         entry.color = RGBA() if color is None else color
-        entry.rotation = (
-            float(
-                self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_SPRITE_ROTATION) % 628,
-            )
-            * 0.01
+        entry.rotation = x87_pc24_mul(
+            float(self._rng.rand_tagged(RngCallerStatic.FX_SPAWN_SPRITE_ROTATION) % 628),
+            _NATIVE_SPRITE_ROTATION_SCALE,
         )
-        entry.pos = pos
-        entry.vel = vel
-        entry.scale = float(scale)
+        entry.pos = f32_vec2(pos)
+        entry.vel = f32_vec2(vel)
+        entry.scale = f32(scale)
         return idx
 
     def iter_active(self) -> list[SpriteEffect]:
@@ -612,7 +645,8 @@ class FxQueueRotated:
         """Port of `fx_queue_add_rotated` (0x00427840)."""
 
         if terrain_texture_failed:
-            return False
+            # Native skips the queue write but still reports success.
+            return True
         if self._count >= self._max_count:
             return False
 
@@ -719,19 +753,19 @@ class EffectPool:
             return None
 
         entry = self._entries[idx]
-        entry.pos = pos
+        entry.pos = f32_vec2(pos)
         entry.effect_id = int(effect_id)
-        entry.vel = vel
-        entry.rotation = float(rotation)
-        entry.scale = float(scale)
-        entry.half_width = float(half_width)
-        entry.half_height = float(half_height)
-        entry.age = float(age)
-        entry.lifetime = float(lifetime)
+        entry.vel = f32_vec2(vel)
+        entry.rotation = f32(rotation)
+        entry.scale = f32(scale)
+        entry.half_width = f32(half_width)
+        entry.half_height = f32(half_height)
+        entry.age = f32(age)
+        entry.lifetime = f32(lifetime)
         entry.flags = int(flags)
-        entry.color = color
-        entry.rotation_step = float(rotation_step)
-        entry.scale_step = float(scale_step)
+        entry.color = RGBA(f32(color.r), f32(color.g), f32(color.b), f32(color.a))
+        entry.rotation_step = f32(rotation_step)
+        entry.scale_step = f32(scale_step)
         return idx
 
     def free(self, idx: int) -> None:
@@ -744,40 +778,47 @@ class EffectPool:
     def update(self, dt: float, *, fx_queue: FxQueue | None = None) -> None:
         """Advance active effects and enqueue terrain decals on expiry."""
 
-        if dt <= 0.0:
-            return
+        dt_f32 = f32(dt)
 
         for idx, entry in enumerate(self._entries):
             flags = int(entry.flags)
             if not flags:
                 continue
 
-            age = float(entry.age) + float(dt)
+            age = f32(f32(entry.age) + dt_f32)
             entry.age = age
-            lifetime = float(entry.lifetime)
+            lifetime = f32(entry.lifetime)
 
             if age < lifetime:
                 if age >= 0.0:
-                    entry.pos = entry.pos + entry.vel * float(dt)
+                    move_x = f32(dt_f32 * f32(entry.vel.x))
+                    move_y = f32(dt_f32 * f32(entry.vel.y))
+                    entry.pos = Vec2(
+                        f32(f32(entry.pos.x) + move_x),
+                        f32(f32(entry.pos.y) + move_y),
+                    )
                     if flags & 0x4:
-                        entry.rotation += float(entry.rotation_step) * float(dt)
+                        rotation_delta = f32(dt_f32 * f32(entry.rotation_step))
+                        entry.rotation = f32(f32(entry.rotation) + rotation_delta)
                     if flags & 0x8:
-                        entry.scale += float(entry.scale_step) * float(dt)
+                        scale_delta = f32(dt_f32 * f32(entry.scale_step))
+                        entry.scale = f32(f32(entry.scale) + scale_delta)
                     if flags & 0x10:
-                        next_alpha = 1.0 - age / lifetime if lifetime > 1e-9 else 0.0
+                        next_alpha = f32(1.0 - f32(age / lifetime))
                         entry.color = entry.color.with_alpha(next_alpha)
                 continue
 
             if fx_queue is not None and (flags & 0x80):
                 # On expiry, the native code overrides alpha before queuing.
-                alpha = 0.35 if (flags & 0x100) else 0.8
+                alpha = f32(0.35 if (flags & 0x100) else 0.8)
+                entry.color = entry.color.with_alpha(alpha)
                 fx_queue.add(
                     effect_id=int(entry.effect_id),
                     pos=entry.pos,
-                    width=float(entry.half_width) * 2.0,
-                    height=float(entry.half_height) * 2.0,
-                    rotation=float(entry.rotation),
-                    rgba=entry.color.with_alpha(alpha),
+                    width=f32(f32(entry.half_width) + f32(entry.half_width)),
+                    height=f32(f32(entry.half_height) + f32(entry.half_height)),
+                    rotation=f32(entry.rotation),
+                    rgba=entry.color,
                 )
 
             self.free(idx)
@@ -877,16 +918,20 @@ class EffectPool:
         lifetime: float = 0.5,
         scale_step: float | None = None,
         color: RGBA = RGBA(0.4, 0.5, 1.0, 0.5),
+        rotation_caller: RngCallerStatic = RngCallerStatic.EFFECT_SPAWN_BURST_ROTATION,
+        vel_x_caller: RngCallerStatic = RngCallerStatic.EFFECT_SPAWN_BURST_VEL_X,
+        vel_y_caller: RngCallerStatic = RngCallerStatic.EFFECT_SPAWN_BURST_VEL_Y,
+        scale_step_caller: RngCallerStatic = RngCallerStatic.EFFECT_SPAWN_BURST_SCALE_STEP,
     ) -> None:
         """Port of `effect_spawn_burst` (0x0042ef60)."""
 
         count = max(0, int(count))
         for _ in range(count):
-            r0 = rng.rand_tagged(RngCallerStatic.EFFECT_SPAWN_BURST_ROTATION)
-            r1 = rng.rand_tagged(RngCallerStatic.EFFECT_SPAWN_BURST_VEL_X)
-            r2 = rng.rand_tagged(RngCallerStatic.EFFECT_SPAWN_BURST_VEL_Y)
+            r0 = rng.rand_tagged(rotation_caller)
+            r1 = rng.rand_tagged(vel_x_caller)
+            r2 = rng.rand_tagged(vel_y_caller)
             if scale_step is None:
-                r3 = rng.rand_tagged(RngCallerStatic.EFFECT_SPAWN_BURST_SCALE_STEP)
+                r3 = rng.rand_tagged(scale_step_caller)
                 sampled_scale_step: int | None = r3
             else:
                 sampled_scale_step = None

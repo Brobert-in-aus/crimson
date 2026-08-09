@@ -197,8 +197,8 @@ class QuestFailedView:
             float(QUEST_FAILED_PANEL_W),
             float(QUEST_FAILED_PANEL_H),
         )
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        draw_classic_menu_panel(panel_tex, dst=panel, tint=rl.WHITE, shadow=fx_detail)
+        shadows_enabled = self.state.config.display.shadows_enabled
+        draw_classic_menu_panel(panel_tex, dst=panel, tint=rl.WHITE, shadow=shadows_enabled)
 
         reaper_tex = resources.texture(TextureId.UI_TEXT_REAPER)
         src = rl.Rectangle(0.0, 0.0, float(reaper_tex.width), float(reaper_tex.height))
@@ -329,7 +329,9 @@ class QuestFailedView:
         level = outcome.level
         major, minor = level.major, level.minor
 
-        record = HighScoreRecord.blank()
+        record = HighScoreRecord.blank(
+            rand_value=int(outcome.highscore_random_tag),
+        )
         record.set_name(_player_name_default(self.state.config) or "Player")
         record.game_mode_id = GameMode.QUESTS
         record.quest_stage_major = major
@@ -394,7 +396,7 @@ class QuestFailedView:
 
         label_color = rl.Color(230, 230, 230, int(255 * 0.8))
         value_color = rl.Color(230, 230, 255, 255)
-        # `ui_text_input_render`: data_4965f8/5fc/600 = (149,175,198)/255.
+        # `ui_text_input_render`: render_tint_color.rgb = (149,175,198)/255.
         separator_color = rl.Color(149, 175, 198, int(255 * 0.7))
 
         score_label = "Score"
@@ -414,7 +416,7 @@ class QuestFailedView:
         xp_w = self._text_width(xp_value, 1.0)
         draw_small_text(font, xp_value, col2_pos + Vec2(32.0 - xp_w * 0.5, 15.0), label_color)
 
-        # `FUN_004411c0`: horizontal 192px separator at x-16 after the score row.
+        # `highscore_card_draw_horizontal_divider`: 192px separator at x-16.
         line_pos = score_pos + Vec2(-16.0, 52.0)
         rl.draw_rectangle(int(line_pos.x), int(line_pos.y), int(192.0), int(1.0), separator_color)
 

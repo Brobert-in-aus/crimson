@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import crimson.modes.base_gameplay_mode as base_gameplay_mode
 import crimson.world.render_resources as render_resources_module
 from crimson.game_modes import GameMode
+from crimson.modes import base_gameplay_mode
 from crimson.modes.typo_mode import TypoShooterMode
 from crimson.persistence.highscores import HighScoreRecord, scores_path_for_mode, write_highscore_records
 from crimson.rng_caller_static import RngCallerStatic
@@ -30,6 +30,24 @@ def test_creature_name_table_assign_random_unique_and_bounded() -> None:
         assert len(name) < NAME_MAX_CHARS
 
     assert len(set(table.names[:20])) == 20
+
+
+def test_creature_name_table_allows_native_long_name_retry_count(mocker) -> None:
+    table = CreatureNameTable.sized(1)
+    build_name = mocker.patch(
+        "crimson.typo.names.typo_build_name",
+        return_value="abcdefghijklmnop",
+    )
+
+    name = table.assign_random(
+        0,
+        Crand(1),
+        score_xp=0,
+        active_mask=[False],
+    )
+
+    assert name == "abcdefghijklmnop"
+    assert build_name.call_count == 101
 
 
 def test_creature_name_table_find_by_name_active_only() -> None:

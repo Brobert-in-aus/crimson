@@ -9,6 +9,20 @@ typedef unsigned int undefined4;
 
 typedef unsigned int uint;
 
+// MSVC 6 x86 CRT stream record. Game-owned high-score and resource-pack code
+// reads _flag directly through feof(), and the bundled CRT uses the remaining
+// fields at these standard 0x20-byte offsets.
+typedef struct _iobuf {
+    char *_ptr;
+    int _cnt;
+    char *_base;
+    int _flag;
+    int _file;
+    int _charbuf;
+    int _bufsiz;
+    char *_tmpfname;
+} FILE;
+
 typedef unsigned char Byte;
 typedef Byte *Bytef;
 typedef unsigned int uInt;
@@ -35,6 +49,10 @@ typedef png_struct *png_structp;
 typedef struct IGrim2D_vtbl IGrim2D_vtbl;
 typedef struct IGrim2D IGrim2D;
 
+typedef struct grim_config_value_t {
+    unsigned int words[4];
+} grim_config_value_t;
+
 struct IGrim2D {
     IGrim2D_vtbl *vtable;
 };
@@ -43,27 +61,27 @@ struct IGrim2D_vtbl {
     /* 0x000 */ void (*grim_release)(void);
     /* 0x004 */ void (*grim_set_paused)(int paused);
     /* 0x008 */ float (*grim_get_version)(void);
-    /* 0x00c */ int (*grim_check_device)(void);
-    /* 0x010 */ int (*grim_apply_config)(void);
-    /* 0x014 */ int (*grim_init_system)(void);
+    /* 0x00c */ unsigned char (*grim_save_screenshot)(char * path);
+    /* 0x010 */ unsigned char (*grim_apply_config)(void);
+    /* 0x014 */ unsigned char (*grim_init_system)(void);
     /* 0x018 */ void (*grim_shutdown)(void);
-    /* 0x01c */ void (*grim_apply_settings)(void);
-    /* 0x020 */ void (*grim_set_config_var)(unsigned int id, unsigned int value);
-    /* 0x024 */ void (*grim_get_config_var)(unsigned int * out, int id);
+    /* 0x01c */ unsigned char (*grim_apply_settings)(void);
+    /* 0x020 */ void (*grim_set_config_var)(unsigned int id, grim_config_value_t value);
+    /* 0x024 */ grim_config_value_t * (*grim_get_config_var)(grim_config_value_t * out, int id);
     /* 0x028 */ char * (*grim_get_error_text)(void);
     /* 0x02c */ void (*grim_clear_color)(float r, float g, float b, float a);
-    /* 0x030 */ int (*grim_set_render_target)(int target_index);
+    /* 0x030 */ unsigned char (*grim_set_render_target)(int target_index);
     /* 0x034 */ int (*grim_get_time_ms)(void);
     /* 0x038 */ void (*grim_set_time_ms)(int ms);
     /* 0x03c */ float (*grim_get_frame_dt)(void);
     /* 0x040 */ float (*grim_get_fps)(void);
-    /* 0x044 */ int (*grim_is_key_down)(unsigned int key);
-    /* 0x048 */ int (*grim_was_key_pressed)(unsigned int key);
+    /* 0x044 */ unsigned char (*grim_is_key_down)(unsigned int key);
+    /* 0x048 */ unsigned char (*grim_was_key_pressed)(unsigned int key);
     /* 0x04c */ void (*grim_flush_input)(void);
     /* 0x050 */ int (*grim_get_key_char)(void);
     /* 0x054 */ void (*grim_set_key_char_buffer)(unsigned char * buffer, int * count, int size);
-    /* 0x058 */ int (*grim_is_mouse_button_down)(int button);
-    /* 0x05c */ int (*grim_was_mouse_button_pressed)(int button);
+    /* 0x058 */ unsigned char (*grim_is_mouse_button_down)(int button);
+    /* 0x05c */ unsigned char (*grim_was_mouse_button_pressed)(int button);
     /* 0x060 */ float (*grim_get_mouse_wheel_delta)(void);
     /* 0x064 */ void (*grim_set_mouse_pos)(float x, float y);
     /* 0x068 */ float (*grim_get_mouse_x)(void);
@@ -72,7 +90,7 @@ struct IGrim2D_vtbl {
     /* 0x074 */ float (*grim_get_mouse_dy)(void);
     /* 0x078 */ float (*grim_get_mouse_dx_indexed)(int index);
     /* 0x07c */ float (*grim_get_mouse_dy_indexed)(int index);
-    /* 0x080 */ int (*grim_is_key_active)(int key);
+    /* 0x080 */ unsigned char (*grim_is_key_active)(int key);
     /* 0x084 */ float (*grim_get_config_float)(int id);
     /* 0x088 */ float (*grim_get_slot_float)(int index);
     /* 0x08c */ int (*grim_get_slot_int)(int index);
@@ -82,17 +100,17 @@ struct IGrim2D_vtbl {
     /* 0x09c */ int (*grim_get_joystick_y)(void);
     /* 0x0a0 */ int (*grim_get_joystick_z)(void);
     /* 0x0a4 */ int (*grim_get_joystick_pov)(int index);
-    /* 0x0a8 */ int (*grim_is_joystick_button_down)(int button);
-    /* 0x0ac */ int (*grim_create_texture)(char * name, int width, int height);
-    /* 0x0b0 */ int (*grim_recreate_texture)(int handle);
-    /* 0x0b4 */ int (*grim_load_texture)(char * name, char * path);
-    /* 0x0b8 */ int (*grim_validate_texture)(int handle);
+    /* 0x0a8 */ unsigned char (*grim_is_joystick_button_down)(int button);
+    /* 0x0ac */ unsigned char (*grim_create_texture)(char * name, int width, int height);
+    /* 0x0b0 */ unsigned char (*grim_recreate_texture)(int handle);
+    /* 0x0b4 */ unsigned char (*grim_load_texture)(char * name, char * path);
+    /* 0x0b8 */ unsigned char (*grim_save_texture)(int handle, char * path);
     /* 0x0bc */ void (*grim_destroy_texture)(int handle);
     /* 0x0c0 */ int (*grim_get_texture_handle)(char * name);
     /* 0x0c4 */ void (*grim_bind_texture)(int handle, int stage);
-    /* 0x0c8 */ void (*grim_draw_fullscreen_quad)(void);
+    /* 0x0c8 */ void (*grim_draw_fullscreen_quad)(int unused);
     /* 0x0cc */ void (*grim_draw_fullscreen_color)(float r, float g, float b, float a);
-    /* 0x0d0 */ void (*grim_draw_rect_filled)(float * xy, float w, float h);
+    /* 0x0d0 */ void (*grim_draw_rect_filled)(float * xy, float w, float h, float * rgba);
     /* 0x0d4 */ void (*grim_draw_rect_outline)(float * xy, float w, float h);
     /* 0x0d8 */ void (*grim_draw_circle_filled)(float x, float y, float radius);
     /* 0x0dc */ void (*grim_draw_circle_outline)(float x, float y, float radius);
@@ -116,8 +134,8 @@ struct IGrim2D_vtbl {
     /* 0x124 */ void (*grim_draw_quad_rotated_matrix)(float x, float y, float w, float h);
     /* 0x128 */ void (*grim_submit_vertices_transform)(float * verts, int count, float * offset, float * matrix);
     /* 0x12c */ void (*grim_submit_vertices_offset)(float * verts, int count, float * offset);
-    /* 0x130 */ void (*grim_submit_vertices_offset_color)(float * verts, int count, float * offset, float * color);
-    /* 0x134 */ void (*grim_submit_vertices_transform_color)(float * verts, int count, float * offset, float * matrix, float * color);
+    /* 0x130 */ void (*grim_submit_vertices_offset_color)(float * verts, int count, float * offset, unsigned long * color);
+    /* 0x134 */ void (*grim_submit_vertices_transform_color)(float * verts, int count, float * offset, float * matrix, unsigned long * color);
     /* 0x138 */ void (*grim_draw_quad_points)(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3);
     /* 0x13c */ void (*grim_draw_text_mono)(float x, float y, char * text);
     /* 0x140 */ void (*grim_draw_text_mono_fmt)(IGrim2D *self, float x, float y, char * fmt, ...);

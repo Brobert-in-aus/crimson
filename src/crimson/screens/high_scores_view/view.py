@@ -379,7 +379,7 @@ class HighScoresView:
         small_width_shift_x = hs_right_options_x_shift(float(self.state.config.display.width))
         shifted_right_top_left = right_top_left + Vec2(small_width_shift_x * scale, 0.0)
 
-        # Checkbox: "Show internet scores" (config.score_load_gate).
+        # Checkbox: "Show internet scores" (config.show_online_scores).
         if not dropdown_blocked:
             check_tex = (
                 resources.texture(TextureId.UI_CHECK_ON)
@@ -393,12 +393,13 @@ class HighScoresView:
             rect_w = float(check_tex.width) * scale + 6.0 * scale + label_w
             rect_h = max(float(check_tex.height) * scale, font_h)
             mouse_pos = Vec2.from_xy(rl.get_mouse_position())
-            if Rect.from_top_left(check_pos, rect_w, rect_h).contains(mouse_pos):
-                if rl.is_mouse_button_pressed(rl.MouseButton.MOUSE_BUTTON_LEFT):
-                    self.state.config.profile.show_internet_scores = not self.state.config.profile.show_internet_scores
-                    self._dirty = True
-                    self._reload_records()
-                    return True
+            if Rect.from_top_left(check_pos, rect_w, rect_h).contains(mouse_pos) and rl.is_mouse_button_pressed(
+                rl.MouseButton.MOUSE_BUTTON_LEFT,
+            ):
+                self.state.config.profile.show_internet_scores = not self.state.config.profile.show_internet_scores
+                self._dirty = True
+                self._reload_records()
+                return True
 
         # Dropdown: show scores date filter (config.highscore_date_mode).
         show_scores_items = ("Best of all time", "Best of month", "Best of week", "Best of day")
@@ -613,7 +614,7 @@ class HighScoresView:
 
         screen_width = float(self.state.config.display.width)
         scale = 1.0
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
+        shadows_enabled = self.state.config.display.shadows_enabled
         panel_w = MENU_PANEL_WIDTH * scale
         _angle_rad, left_slide_x = MenuView._ui_element_anim(
             self,
@@ -643,13 +644,13 @@ class HighScoresView:
             resources.texture(TextureId.UI_MENU_PANEL),
             dst=rl.Rectangle(left_panel_top_left.x, left_panel_top_left.y, panel_w, HS_LEFT_PANEL_HEIGHT * scale),
             tint=rl.WHITE,
-            shadow=fx_detail,
+            shadow=shadows_enabled,
         )
         draw_classic_menu_panel(
             resources.texture(TextureId.UI_MENU_PANEL),
             dst=rl.Rectangle(right_panel_top_left.x, right_panel_top_left.y, panel_w, HS_RIGHT_PANEL_HEIGHT * scale),
             tint=rl.WHITE,
-            shadow=fx_detail,
+            shadow=shadows_enabled,
             flip_x=True,
         )
 
@@ -689,8 +690,8 @@ class HighScoresView:
         offset_x = MENU_SIGN_OFFSET_X * sign_scale + shift_x
         offset_y = MENU_SIGN_OFFSET_Y * sign_scale
         rotation_deg = 0.0
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        if fx_detail:
+        shadows_enabled = self.state.config.display.shadows_enabled
+        if shadows_enabled:
             MenuView._draw_ui_quad_shadow(
                 texture=sign,
                 src=rl.Rectangle(0.0, 0.0, float(sign.width), float(sign.height)),

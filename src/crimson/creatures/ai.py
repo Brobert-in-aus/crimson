@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Creature AI helpers.
 
-Ported from `creature_update_all` (`FUN_00426220`).
+Ported from `creature_update_all`.
 """
 
 import math
@@ -14,7 +14,14 @@ import msgspec
 from grim.geom import Vec2
 from grim.rand import CrandLike
 
-from ..math_parity import NATIVE_PI, f32, f32_vec2, heading_from_delta_f32
+from ..math_parity import (
+    NATIVE_PI,
+    f32,
+    f32_vec2,
+    heading_from_delta_f32,
+    x87_pc24_add,
+    x87_pc24_mul,
+)
 from ..rng_caller_static import RngCallerStatic
 from .spawn import CreatureAiMode, CreatureFlags
 
@@ -34,7 +41,7 @@ class CreatureAIStateLike(Protocol):
     ai_mode: CreatureAiMode
     link_index: int
     target_offset: Vec2 | None
-    phase_seed: float
+    phase_seed: int
     orbit_angle: float
     orbit_radius: float
     heading: float
@@ -89,24 +96,29 @@ def resolve_live_link(creatures: Sequence[CreatureAIStateLike], link_index: int)
 
 
 def _distance_f32(a: Vec2, b: Vec2) -> float:
-    # Native computes deltas into float locals, then runs the distance math in
-    # x87 precision and stores only the final sqrt back to float.
+    # Gameplay leaves x87 in 24-bit precision mode: the deltas, squares, and
+    # sum each round to f32 before fsqrt stores the final distance.
     dx = f32(float(b.x) - float(a.x))
     dy = f32(float(b.y) - float(a.y))
-    dist_sq = float(dx) * float(dx) + float(dy) * float(dy)
+    dx_sq = f32(float(dx) * float(dx))
+    dy_sq = f32(float(dy) * float(dy))
+    dist_sq = f32(float(dx_sq) + float(dy_sq))
     return f32(math.sqrt(float(dist_sq)))
 
 
 def _orbit_target_f32(*, player_pos: Vec2, orbit_phase: float, dist: float, scale: float) -> Vec2:
-    orbit_dist = f32(f32(float(dist)) * f32(float(scale)))
+    orbit_dist = f32(float(dist))
+    orbit_scale = f32(float(scale))
     phase = f32(float(orbit_phase))
     px = f32(float(player_pos.x))
     py = f32(float(player_pos.y))
-    orbit_x = f32(math.cos(float(phase)))
-    orbit_y = f32(math.sin(float(phase)))
+    orbit_x = f32(math.cos(float(phase)) * float(orbit_dist))
+    orbit_x = f32(float(orbit_x) * float(orbit_scale))
+    orbit_y = f32(math.sin(float(phase)) * float(orbit_dist))
+    orbit_y = f32(float(orbit_y) * float(orbit_scale))
     return Vec2(
-        f32(f32(float(orbit_x) * float(orbit_dist)) + px),
-        f32(f32(float(orbit_y) * float(orbit_dist)) + py),
+        f32(float(orbit_x) + px),
+        f32(float(orbit_y) + py),
     )
 
 
@@ -121,6 +133,7 @@ def creature_ai_update_target(
     creature: CreatureAIStateLike,
     *,
     player_pos: Vec2,
+    distance_player_pos: Vec2 | None = None,
     creatures: Sequence[CreatureAIStateLike],
     dt: float,
 ) -> CreatureAIUpdate:
@@ -134,8 +147,9 @@ def creature_ai_update_target(
     - `orbit_radius` (AI7 non-link timer uses it as a countdown)
     """
 
-    dist_to_player = _distance_f32(creature.pos, player_pos)
-    orbit_phase = f32(f32(float(int(creature.phase_seed)) * f32(3.7)) * NATIVE_PI)
+    distance_pos = player_pos if distance_player_pos is None else distance_player_pos
+    dist_to_player = _distance_f32(creature.pos, distance_pos)
+    orbit_phase = f32(f32(float(creature.phase_seed) * f32(3.7)) * NATIVE_PI)
     move_scale = 1.0
     self_damage: float | None = None
 
@@ -214,11 +228,17 @@ def creature_ai_update_target(
         if link is None:
             creature.ai_mode = CreatureAiMode.ORBIT_PLAYER
         else:
-            angle = float(creature.orbit_angle) + float(creature.heading)
-            orbit_radius = float(creature.orbit_radius)
+            angle = x87_pc24_add(float(creature.orbit_angle), float(creature.heading))
+            orbit_radius = f32(float(creature.orbit_radius))
             creature.target = Vec2(
-                f32(math.cos(angle) * orbit_radius + float(link.pos.x)),
-                f32(math.sin(angle) * orbit_radius + float(link.pos.y)),
+                x87_pc24_add(
+                    x87_pc24_mul(math.cos(angle), orbit_radius),
+                    float(link.pos.x),
+                ),
+                x87_pc24_add(
+                    x87_pc24_mul(math.sin(angle), orbit_radius),
+                    float(link.pos.y),
+                ),
             )
 
     dist_to_target = _distance_f32(creature.pos, creature.target)

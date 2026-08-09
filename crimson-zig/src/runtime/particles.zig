@@ -8,12 +8,27 @@ const creatures_mod = @import("creatures.zig");
 const effects_mod = @import("effects.zig");
 const owner_ref = @import("owner_ref.zig");
 const runtime_helpers = @import("helpers.zig");
+const spawn_mod = @import("spawn.zig");
 const state_mod = @import("state.zig");
 const terrain_fx_mod = @import("terrain_fx.zig");
 
 const narrowF32 = native_math.roundF32;
 
 pub const particle_pool_size: usize = 0x80;
+
+fn nativeParticleVelocity(angle: f32, speed: f32) state_mod.Vec2 {
+    return .{
+        .x = native_math.pc24Mul(@cos(@as(f64, angle)), speed),
+        .y = native_math.pc24Mul(@sin(@as(f64, angle)), speed),
+    };
+}
+
+fn nativeParticleSpin(draw: u32) f32 {
+    return native_math.pc24Mul(
+        @as(f32, @floatFromInt(draw % 0x274)),
+        @as(f32, 0.01),
+    );
+}
 
 pub const ParticleStyleId = enum(i32) {
     flamethrower = 0,
@@ -63,14 +78,14 @@ pub const ParticlePool = struct {
                 .x = narrowF32(pos.x),
                 .y = narrowF32(pos.y),
             },
-            .vel = runtime_helpers.directionFromAngle(angle).mul(90.0),
+            .vel = nativeParticleVelocity(angle, 90.0),
             .scale_x = 1.0,
             .scale_y = 1.0,
             .scale_z = 1.0,
             .age = 0.0,
             .intensity = intensity,
             .angle = angle,
-            .spin = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.fx_spawn_particle_spin) % 0x274)) * 0.01,
+            .spin = nativeParticleSpin(state.rng.randTagged(rng_callers.fx_spawn_particle_spin)),
             .style_id = ParticleStyleId.flamethrower,
             .target_id = -1,
             .owner = owner,
@@ -94,14 +109,14 @@ pub const ParticlePool = struct {
                 .x = narrowF32(pos.x),
                 .y = narrowF32(pos.y),
             },
-            .vel = runtime_helpers.directionFromAngle(angle).mul(30.0),
+            .vel = nativeParticleVelocity(angle, 30.0),
             .scale_x = 1.0,
             .scale_y = 1.0,
             .scale_z = 1.0,
             .age = 0.0,
             .intensity = 1.0,
             .angle = angle,
-            .spin = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.fx_spawn_particle_slow_spin) % 0x274)) * 0.01,
+            .spin = nativeParticleSpin(state.rng.randTagged(rng_callers.fx_spawn_particle_slow_spin)),
             .style_id = ParticleStyleId.bubblegun,
             .target_id = -1,
             .owner = owner,
@@ -155,18 +170,26 @@ pub const ParticlePool = struct {
                 entry.active = false;
                 if (style == ParticleStyleId.bubblegun and entry.target_id != -1) {
                     const target_idx_i32 = entry.target_id;
-                    entry.target_id = -1;
                     if (target_idx_i32 >= 0 and target_idx_i32 < creatures.entries.len) {
-                        _ = creatures.killNoCorpse(
-                            state,
-                            players,
-                            bonuses,
-                            terrain_fx,
-                            @intCast(target_idx_i32),
-                            entry.owner,
-                            dt_f32,
-                            world_size,
-                        );
+                        const target_idx: usize = @intCast(target_idx_i32);
+                        if (creatures.entries[target_idx].active) {
+                            const sound_slot = state.rng.randTagged(
+                                rng_callers.projectile_update_particle_bubblegun_expiry_sfx,
+                            ) % 3;
+                            if (bubblegunExpirySfx(creatures.entries[target_idx].type_id, sound_slot)) |sfx_id| {
+                                state.sfx_queue.append(sfx_id);
+                            }
+                            _ = creatures.killNoCorpse(
+                                state,
+                                players,
+                                bonuses,
+                                terrain_fx,
+                                target_idx,
+                                entry.owner,
+                                dt_f32,
+                                world_size,
+                            );
+                        }
                     }
                 }
                 continue;
@@ -199,22 +222,6 @@ pub const ParticlePool = struct {
             entry.age = alpha;
             entry.scale_x = shade;
             entry.scale_y = shade;
-
-            if (style == ParticleStyleId.bubblegun and
-                !entry.render_flag and
-                entry.target_id != -1)
-            {
-                const target_idx_i32 = entry.target_id;
-                if (target_idx_i32 >= 0 and target_idx_i32 < creatures.entries.len) {
-                    const target = creatures.entries[@intCast(target_idx_i32)];
-                    if (target.active) {
-                        entry.pos = .{
-                            .x = narrowF32(target.pos.x),
-                            .y = narrowF32(target.pos.y),
-                        };
-                    }
-                }
-            }
 
             if (entry.render_flag) {
                 const radius = @max(entry.intensity, 0.0) * 8.0;
@@ -282,6 +289,23 @@ pub const ParticlePool = struct {
                             );
                         }
 
+                        const tint_sum = native_math.pc24Add(
+                            native_math.pc24Add(creature.tint[1], creature.tint[2]),
+                            creature.tint[0],
+                        );
+                        if (tint_sum > @as(f32, 1.6)) {
+                            const tint_factor = native_math.pc24Sub(
+                                @as(f32, 1.0),
+                                native_math.pc24Mul(entry.intensity, @as(f32, 0.01)),
+                            );
+                            creature.tint[0] = native_math.pc24Mul(tint_factor, creature.tint[0]);
+                            creature.tint[1] = native_math.pc24Mul(tint_factor, creature.tint[1]);
+                            creature.tint[2] = native_math.pc24Mul(tint_factor, creature.tint[2]);
+                        }
+                        for (&creature.tint) |*channel| {
+                            channel.* = nativeClampUnit(channel.*);
+                        }
+
                         if ((particle_idx % 3) == 0) {
                             const sprite_vel: state_mod.Vec2 = .{
                                 .x = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.projectile_update_particle_sprite_vel_x) % 60)) - 30.0,
@@ -296,6 +320,16 @@ pub const ParticlePool = struct {
                             );
                         }
                         _ = terrain_fx.decals.addRandom(state, creature.pos);
+                        creature.pos = .{
+                            .x = native_math.pc24Add(
+                                creature.pos.x,
+                                native_math.pc24Mul(entry.vel.x, dt_f32),
+                            ),
+                            .y = native_math.pc24Add(
+                                creature.pos.y,
+                                native_math.pc24Mul(entry.vel.y, dt_f32),
+                            ),
+                        };
                     }
                 }
             }
@@ -310,6 +344,24 @@ pub const ParticlePool = struct {
     }
 };
 
+fn nativeClampUnit(value: f32) f32 {
+    if (!(value >= 0.0)) return 0.0;
+    if (value > 1.0) return 1.0;
+    return value;
+}
+
+fn bubblegunExpirySfx(type_id: i32, sound_slot: u32) ?state_mod.SfxId {
+    const creature_type = std.enums.fromInt(spawn_mod.CreatureTypeId, type_id) orelse return null;
+    const bank: [3]state_mod.SfxId = switch (creature_type) {
+        .zombie => .{ .zombie_die_01, .zombie_die_02, .zombie_die_03 },
+        .lizard => .{ .lizard_die_01, .lizard_die_02, .lizard_die_03 },
+        .alien => .{ .alien_die_01, .alien_die_02, .alien_die_03 },
+        .spider_sp1, .spider_sp2 => .{ .spider_die_01, .spider_die_02, .spider_die_03 },
+        .trooper => .{ .trooper_die_01, .trooper_die_02, .trooper_die_03 },
+    };
+    return bank[@intCast(sound_slot % 3)];
+}
+
 fn creatureFindInRadius(
     creatures: *creatures_mod.CreaturePool,
     pos: state_mod.Vec2,
@@ -320,13 +372,12 @@ fn creatureFindInRadius(
         if (!creature.active) continue;
         if (!creature_lifecycle.isCollidable(creature.lifecycle_stage)) continue;
 
-        const size = narrowF32(creature.size);
-        const dx = narrowF32(creature.pos.x - pos.x);
-        const dy = narrowF32(creature.pos.y - pos.y);
-        const dist_sq = dx * dx + dy * dy;
-        const dist = std.math.sqrt(dist_sq) - radius;
-        const threshold = size * 0.14285715 + 3.0;
-        if (threshold < dist) continue;
+        if (!runtime_helpers.withinNativeFindRadius(
+            pos,
+            creature.pos,
+            radius,
+            creature.size,
+        )) continue;
         return idx;
     }
     return null;
@@ -334,4 +385,15 @@ fn creatureFindInRadius(
 
 fn wrapAngle(angle: f32) f32 {
     return native_math.wrapAngle0Tau(angle);
+}
+
+test "particle spawn math keeps native x87 operation boundaries" {
+    const fast = nativeParticleVelocity(@bitCast(@as(u32, 0x3ab78034)), 90.0);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x42b3fff4))), fast.x);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x3e010622))), fast.y);
+
+    const slow = nativeParticleVelocity(@bitCast(@as(u32, 0x3a6bedfa)), 30.0);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x41effffa))), slow.x);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x3cdd2f18))), slow.y);
+    try std.testing.expectEqual(@as(f32, @bitCast(@as(u32, 0x3d4ccccc))), nativeParticleSpin(5));
 }

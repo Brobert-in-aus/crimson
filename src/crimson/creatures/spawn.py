@@ -4,7 +4,7 @@ from __future__ import annotations
 
 This module combines:
 - a spawn-id labeling index (direct `type_id`/`flags` assignments extracted from
-  `creature_spawn_template`, `FUN_00430af0`)
+  `creature_spawn_template`)
 - a partial 1:1 rewrite of `creature_spawn_template` as a pure plan builder
 
 Note: in the original game, `creature_spawn_template` is an algorithm (formations,
@@ -23,7 +23,16 @@ from grim.geom import Vec2
 from grim.rand import CrandLike
 
 from ..bonuses import BonusId
-from ..math_parity import f32
+from ..math_parity import (
+    f32,
+    f32_from_bits,
+    x87_pc24_add,
+    x87_pc24_cos_mul,
+    x87_pc24_div,
+    x87_pc24_mul,
+    x87_pc24_sin_mul,
+    x87_pc24_sub,
+)
 from ..rng_caller_static import RngCallerStatic
 from .spawn_ids import (
     HAS_SPAWN_SLOT_FLAG,
@@ -37,24 +46,31 @@ from .spawn_ids import (
 )
 from .spawn_templates import SPAWN_ID_TO_TEMPLATE, SPAWN_TEMPLATES, TYPE_ID_TO_NAME, SpawnTemplate
 
+_NATIVE_CREATURE_SPAWN_ELAPSED_SCALE = f32_from_bits(0x3727C5AD)
+_NATIVE_RUSH_TINT_SIN_SCALE = f32_from_bits(0x38D1B718)
+_NATIVE_FORMATION_CHAIN_LIZARD_ANGLE_STEP = f32_from_bits(0x3EC90FDB)
+_NATIVE_FORMATION_CHAIN_ALIEN_ANGLE_STEP = f32_from_bits(0x3EB2B8C3)
+NATIVE_SPAWN_SLOT_COUNT = 0x20
+
 __all__ = [
-    "CreatureAiMode",
+    "HAS_SPAWN_SLOT_FLAG",
+    "NATIVE_SPAWN_SLOT_COUNT",
+    "RANDOM_HEADING_SENTINEL",
+    "SPAWN_ID_TO_TEMPLATE",
+    "SPAWN_TEMPLATES",
+    "TYPE_ID_TO_NAME",
     "BurstEffect",
+    "CreatureAiMode",
     "CreatureFlags",
     "CreatureInit",
     "CreatureTypeId",
-    "HAS_SPAWN_SLOT_FLAG",
-    "RANDOM_HEADING_SENTINEL",
-    "SpawnId",
-    "SPAWN_ID_TO_TEMPLATE",
-    "SPAWN_TEMPLATES",
     "SpawnEnv",
+    "SpawnId",
     "SpawnPlan",
     "SpawnSlotInit",
     "SpawnTemplate",
     "SpawnTemplateCall",
     "UnsupportedSpawnTemplateError",
-    "TYPE_ID_TO_NAME",
     "advance_survival_spawn_stage",
     "build_rush_mode_spawn_creature",
     "build_spawn_plan",
@@ -88,7 +104,7 @@ class AlienSpawnerSpec(msgspec.Struct, frozen=True):
 
 
 ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
-    SpawnId.ALIEN_SPAWNER_CHILD_1D_FAST_07: AlienSpawnerSpec(
+    SpawnId.DEN_ALIEN_BASIC_07: AlienSpawnerSpec(
         timer=1.0,
         limit=100,
         interval=2.2,
@@ -99,7 +115,7 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=3000.0,
         tint=(1.0, 1.0, 1.0, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_1D_SLOW_08: AlienSpawnerSpec(
+    SpawnId.DEN_ALIEN_BASIC_SLOWER_08: AlienSpawnerSpec(
         timer=1.0,
         limit=100,
         interval=2.8,
@@ -110,7 +126,7 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=3000.0,
         tint=(1.0, 1.0, 1.0, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_1D_LIMITED_09: AlienSpawnerSpec(
+    SpawnId.DEN_ALIEN_WEAK_SMALL_09: AlienSpawnerSpec(
         timer=1.0,
         limit=16,
         interval=2.0,
@@ -121,7 +137,7 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=1000.0,
         tint=(1.0, 1.0, 1.0, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_32_SLOW_0A: AlienSpawnerSpec(
+    SpawnId.DEN_SPIDER_BASIC_0A: AlienSpawnerSpec(
         timer=2.0,
         limit=100,
         interval=5.0,
@@ -132,18 +148,18 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=3000.0,
         tint=(0.8, 0.7, 0.4, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_3C_SLOW_0B: AlienSpawnerSpec(
+    SpawnId.DEN_SPIDER_PLASMA_SHOOTERS_0B: AlienSpawnerSpec(
         timer=2.0,
         limit=100,
         interval=6.0,
-        child_template_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+        child_template_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
         size=65.0,
         health=3500.0,
         move_speed=1.5,
         reward_value=5000.0,
         tint=(0.9, 0.1, 0.1, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_31_FAST_0C: AlienSpawnerSpec(
+    SpawnId.DEN_LIZARD_WEAK_0C: AlienSpawnerSpec(
         timer=1.5,
         limit=100,
         interval=2.0,
@@ -154,7 +170,7 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=1000.0,
         tint=(0.9, 0.8, 0.4, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_31_SLOW_0D: AlienSpawnerSpec(
+    SpawnId.DEN_LIZARD_WEAK_SLOWER_0D: AlienSpawnerSpec(
         timer=2.0,
         limit=100,
         interval=6.0,
@@ -165,7 +181,7 @@ ALIEN_SPAWNER_TEMPLATES: dict[SpawnId, AlienSpawnerSpec] = {
         reward_value=1000.0,
         tint=(0.9, 0.8, 0.4, 1.0),
     ),
-    SpawnId.ALIEN_SPAWNER_CHILD_32_FAST_10: AlienSpawnerSpec(
+    SpawnId.DEN_SPIDER_WEAK_10: AlienSpawnerSpec(
         timer=1.5,
         limit=100,
         interval=2.3,
@@ -242,7 +258,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         contact_damage=17.0,
         flags=CreatureFlags.SPLIT_ON_DEATH,
     ),
-    SpawnId.ALIEN_CONST_BROWN_TRANSPARENT_0F: ConstantSpawnSpec(
+    SpawnId.ALIEN_GHOST_0F: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=20.0,
         move_speed=2.9,
@@ -251,7 +267,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=50.0,
         contact_damage=35.0,
     ),
-    SpawnId.ALIEN_CONST_PURPLE_GHOST_21: ConstantSpawnSpec(
+    SpawnId.ALIEN_HIDDEN_1_21: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=53.0,
         move_speed=1.7,
@@ -260,7 +276,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=55.0,
         contact_damage=8.0,
     ),
-    SpawnId.ALIEN_CONST_GREEN_GHOST_22: ConstantSpawnSpec(
+    SpawnId.ALIEN_HIDDEN_2_22: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=25.0,
         move_speed=1.7,
@@ -269,7 +285,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=50.0,
         contact_damage=8.0,
     ),
-    SpawnId.ALIEN_CONST_GREEN_GHOST_SMALL_23: ConstantSpawnSpec(
+    SpawnId.ALIEN_HIDDEN_3_23: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=5.0,
         move_speed=1.7,
@@ -287,7 +303,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=50.0,
         contact_damage=4.0,
     ),
-    SpawnId.ALIEN_CONST_GREEN_SMALL_25: ConstantSpawnSpec(
+    SpawnId.ALIEN_SMALL_GREEN_MAN_25: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=25.0,
         move_speed=2.5,
@@ -296,7 +312,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=30.0,
         contact_damage=3.0,
     ),
-    SpawnId.ALIEN_CONST_PALE_GREEN_26: ConstantSpawnSpec(
+    SpawnId.ALIEN_SMALL_GRAY_26: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=50.0,
         move_speed=2.2,
@@ -305,7 +321,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=45.0,
         contact_damage=10.0,
     ),
-    SpawnId.ALIEN_CONST_WEAPON_BONUS_27: ConstantSpawnSpec(
+    SpawnId.ALIEN_BONUS_CARRIER_27: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=50.0,
         move_speed=2.1,
@@ -326,7 +342,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=55.0,
         contact_damage=8.0,
     ),
-    SpawnId.ALIEN_CONST_GREY_BRUTE_29: ConstantSpawnSpec(
+    SpawnId.ALIEN_BIG_GRAY_29: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=800.0,
         move_speed=2.5,
@@ -344,7 +360,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=60.0,
         contact_damage=8.0,
     ),
-    SpawnId.ALIEN_CONST_RED_FAST_2B: ConstantSpawnSpec(
+    SpawnId.ALIEN_DEADLY_FAST_2B: ConstantSpawnSpec(
         type_id=CreatureTypeId.ALIEN,
         health=30.0,
         move_speed=3.6,
@@ -390,7 +406,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=65.0,
         contact_damage=10.0,
     ),
-    SpawnId.SPIDER_SP1_CONST_SHOCK_BOSS_3A: ConstantSpawnSpec(
+    SpawnId.SPIDER_BOSS_3A: ConstantSpawnSpec(
         type_id=CreatureTypeId.SPIDER_SP1,
         health=4500.0,
         move_speed=2.0,
@@ -411,7 +427,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=70.0,
         contact_damage=20.0,
     ),
-    SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C: ConstantSpawnSpec(
+    SpawnId.SPIDER_PLASMA_SHOOTER_3C: ConstantSpawnSpec(
         type_id=CreatureTypeId.SPIDER_SP1,
         health=200.0,
         move_speed=2.0,
@@ -442,7 +458,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=35.0,
         contact_damage=20.0,
     ),
-    SpawnId.SPIDER_SP1_CONST_BLUE_40: ConstantSpawnSpec(
+    SpawnId.SPIDER_SMALL_BLUE_40: ConstantSpawnSpec(
         type_id=CreatureTypeId.SPIDER_SP1,
         health=70.0,
         move_speed=2.2,
@@ -451,7 +467,7 @@ CONSTANT_SPAWN_TEMPLATES: dict[SpawnId, ConstantSpawnSpec] = {
         size=45.0,
         contact_damage=5.0,
     ),
-    SpawnId.ZOMBIE_CONST_GREY_42: ConstantSpawnSpec(
+    SpawnId.ZOMBIE_SMALL_WHITE_42: ConstantSpawnSpec(
         type_id=CreatureTypeId.ZOMBIE,
         health=200.0,
         move_speed=1.7,
@@ -622,6 +638,7 @@ RING_FORMATIONS: dict[SpawnId, RingFormationSpec] = {
         count=8,
         angle_step=math.pi / 4.0,
         radius=100.0,
+        apply_fallback=True,
     ),
     SpawnId.FORMATION_RING_ALIEN_5_19: RingFormationSpec(
         parent=ConstantSpawnSpec(
@@ -646,6 +663,7 @@ RING_FORMATIONS: dict[SpawnId, RingFormationSpec] = {
         count=5,
         angle_step=math.tau / 5.0,
         radius=110.0,
+        apply_fallback=True,
         set_position=True,
     ),
 }
@@ -658,7 +676,7 @@ def spawn_id_label(spawn_id: SpawnId) -> str:
     return entry.creature
 
 
-class SpawnEnv(msgspec.Struct, frozen=True, kw_only=True):
+class SpawnEnv(msgspec.Struct, kw_only=True):
     terrain_width: float
     terrain_height: float
     demo_mode_active: bool
@@ -683,7 +701,9 @@ class CreatureInit(msgspec.Struct):
     # The base template path writes heading explicitly at tail (`final_heading`).
     heading: float | None
 
-    phase_seed: float
+    phase_seed: int
+
+    preserve_force_target: bool = False
 
     type_id: CreatureTypeId | None = None
     flags: CreatureFlags = CreatureFlags(0)
@@ -854,12 +874,16 @@ def spawn_ring_children(
         child = alloc_creature(template_id, pos, rng)
         child.ai_mode = ai_mode
         child.ai_link_parent = link_parent
-        angle = float(i) * angle_step
-        # Keep template authoring math simple here; runtime init quantizes
-        # `target_offset`/`pos` through float32 (`CreaturePool._apply_init`).
-        child.target_offset = Vec2.from_angle(angle) * radius
+        angle = x87_pc24_mul(f32(float(i)), f32(angle_step))
+        child.target_offset = Vec2(
+            x87_pc24_cos_mul(angle, f32(radius)),
+            x87_pc24_sin_mul(angle, f32(radius)),
+        )
         if set_position:
-            child.pos = pos + (child.target_offset or Vec2())
+            child.pos = Vec2(
+                x87_pc24_add(f32(pos.x), child.target_offset.x),
+                x87_pc24_add(f32(pos.y), child.target_offset.y),
+            )
         if heading_override is not None:
             child.heading = heading_override
         apply_child_spec(child, child_spec)
@@ -886,6 +910,7 @@ def spawn_grid_children(
             child = alloc_creature(template_id, pos, rng)
             child.ai_mode = ai_mode
             child.ai_link_parent = link_parent
+            child.heading = 0.0
             child.target_offset = Vec2(float(x_offset), float(y_offset))
             child.pos = Vec2(pos.x + float(x_offset), pos.y + float(y_offset))
             apply_child_spec(child, child_spec)
@@ -936,9 +961,13 @@ class PlanBuilder(msgspec.Struct):
         heading: float,
         rng: CrandLike,
         env: SpawnEnv,
-    ) -> tuple["PlanBuilder", float]:
-        # creature_alloc_slot() for the base creature.
-        creatures: list[CreatureInit] = [alloc_creature(template_id, pos, rng)]
+    ) -> tuple[PlanBuilder, float]:
+        # creature_alloc_slot() for the base creature, followed by the template
+        # prologue's explicit force-target reset. Formation children only run
+        # the allocator and therefore retain that recycled byte.
+        base = alloc_creature(template_id, pos, rng)
+        base.preserve_force_target = False
+        creatures: list[CreatureInit] = [base]
         spawn_slots: list[SpawnSlotInit] = []
         effects: list[BurstEffect] = []
 
@@ -948,7 +977,10 @@ class PlanBuilder(msgspec.Struct):
             final_heading = float(rng.rand_tagged(RngCallerStatic.CREATURE_SPAWN_TEMPLATE_RANDOM_HEADING) % 628) * 0.01
 
         # Base initialization always consumes one rand() for a transient heading value.
-        creatures[0].heading = float(rng.rand_tagged(RngCallerStatic.CREATURE_SPAWN_TEMPLATE_BASE_HEADING) % 314) * 0.01
+        creatures[0].heading = x87_pc24_mul(
+            f32(float(rng.rand_tagged(RngCallerStatic.CREATURE_SPAWN_TEMPLATE_BASE_HEADING) % 314)),
+            f32(0.01),
+        )
 
         return cls(
             template_id=template_id,
@@ -1066,11 +1098,17 @@ def alloc_creature(
 ) -> CreatureInit:
     # creature_alloc_slot():
     # - clears flags
-    # - seeds phase_seed = float(crt_rand() & 0x17f)
-    phase_seed = float(rng.rand_tagged(RngCallerStatic.CREATURE_ALLOC_SLOT_PHASE_SEED) & 0x17F)
+    # - seeds the int32 phase_seed with `crt_rand() & 0x17f`
+    phase_seed = int(rng.rand_tagged(RngCallerStatic.CREATURE_ALLOC_SLOT_PHASE_SEED)) & 0x17F
     # Native `creature_alloc_slot` does not clear heading; some template child paths
     # intentionally keep stale heading from the recycled slot.
-    return CreatureInit(origin_template_id=template_id, pos=pos, heading=None, phase_seed=phase_seed)
+    return CreatureInit(
+        origin_template_id=template_id,
+        pos=pos,
+        heading=None,
+        phase_seed=phase_seed,
+        preserve_force_target=True,
+    )
 
 
 def clamp01(value: float) -> float:
@@ -1106,6 +1144,14 @@ SURVIVAL_UPDATE_MAIN_SPAWN_POS_CALLERS = SurvivalSpawnPosCallers(
 )
 
 
+def _survival_tint_roll(rng: CrandLike, caller: RngCallerStatic) -> float:
+    return x87_pc24_mul(float(rng.rand_tagged(caller) % 10), f32(0.01))
+
+
+def _survival_tint_inverse_bucket(xp: int, divisor: int) -> float:
+    return x87_pc24_div(f32(1.0), x87_pc24_add(float(xp // divisor), f32(10.0)))
+
+
 def build_survival_spawn_creature(pos: Vec2, rng: CrandLike, *, player_experience: int) -> CreatureInit:
     """Pure model of `survival_spawn_creature` (crimsonland.exe 0x00407510).
 
@@ -1115,6 +1161,7 @@ def build_survival_spawn_creature(pos: Vec2, rng: CrandLike, *, player_experienc
     xp = int(player_experience)
 
     c = alloc_creature(-1, pos, rng)
+    c.preserve_force_target = False
     c.ai_mode = CreatureAiMode.ORBIT_PLAYER
 
     r10 = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_TYPE_ROLL) % 10
@@ -1182,95 +1229,117 @@ def build_survival_spawn_creature(pos: Vec2, rng: CrandLike, *, player_experienc
     c.health = float(health)
     c.reward_value = 0.0
 
-    # Tint based on player_experience thresholds.
-    tint_a = 1.0
+    # Tint based on player_experience thresholds. Native keeps the x87 in
+    # 24-bit precision, so each arithmetic instruction rounds to f32.
+    tint_a = f32(1.0)
+    inverse_1k_bucket = _survival_tint_inverse_bucket(xp, 1000)
+    inverse_10k_bucket = _survival_tint_inverse_bucket(xp, 10_000)
     if xp < 50_000:
-        tint_r = 1.0 - 1.0 / (float(xp // 1000) + 10.0)
-        tint_g = (
-            float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_LOW_TINT_G) % 10) * 0.01
-            + 0.9
-            - 1.0 / (float(xp // 10000) + 10.0)
+        tint_r = x87_pc24_sub(f32(1.0), inverse_1k_bucket)
+        tint_g = x87_pc24_sub(
+            x87_pc24_add(
+                _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_LOW_TINT_G),
+                f32(0.9),
+            ),
+            inverse_10k_bucket,
         )
-        tint_b = float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_LOW_TINT_B) % 10) * 0.01 + 0.7
+        tint_b = x87_pc24_add(
+            _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_LOW_TINT_B),
+            f32(0.7),
+        )
     elif xp < 100_000:
-        tint_r = 0.9 - 1.0 / (float(xp // 1000) + 10.0)
-        tint_g = (
-            float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_MID_TINT_G) % 10) * 0.01
-            + 0.8
-            - 1.0 / (float(xp // 10000) + 10.0)
+        tint_r = x87_pc24_sub(f32(0.9), inverse_1k_bucket)
+        tint_g = x87_pc24_sub(
+            x87_pc24_add(
+                _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_MID_TINT_G),
+                f32(0.8),
+            ),
+            inverse_10k_bucket,
         )
-        tint_b = (
-            float(xp - 50_000) * 6e-06
-            + float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_MID_TINT_B) % 10) * 0.01
-            + 0.7
+        tint_b = x87_pc24_add(
+            x87_pc24_add(
+                _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_MID_TINT_B),
+                x87_pc24_mul(float(xp - 50_000), f32(6e-06)),
+            ),
+            f32(0.7),
         )
     else:
-        tint_r = 1.0 - 1.0 / (float(xp // 1000) + 10.0)
-        tint_g = (
-            float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_HIGH_TINT_G) % 10) * 0.01
-            + 0.9
-            - 1.0 / (float(xp // 10000) + 10.0)
+        tint_r = x87_pc24_sub(f32(1.0), inverse_1k_bucket)
+        tint_g = x87_pc24_sub(
+            x87_pc24_add(
+                _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_HIGH_TINT_G),
+                f32(0.9),
+            ),
+            inverse_10k_bucket,
         )
-        tint_b = (
-            float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_HIGH_TINT_B) % 10) * 0.01
-            + 1.0
-            - float(xp - 100_000) * 3e-06
+        tint_b = x87_pc24_sub(
+            x87_pc24_add(
+                _survival_tint_roll(rng, RngCallerStatic.SURVIVAL_SPAWN_CREATURE_HIGH_TINT_B),
+                f32(1.0),
+            ),
+            x87_pc24_mul(float(xp - 100_000), f32(3e-06)),
         )
         if tint_b < 0.5:
-            tint_b = 0.5
+            tint_b = f32(0.5)
 
     c.tint = (tint_r, tint_g, tint_b, tint_a)
 
     # contact_damage = size * 0.0952381
     # Native multiplies by the f32 literal 0.0952381 (one ulp above 2/21).
-    c.contact_damage = float(c.size or 0.0) * float(f32(0.0952381))
+    c.contact_damage = x87_pc24_mul(float(c.size or 0.0), f32(0.0952381))
 
     # reward_value is always 0.0 at this point in the original.
-    c.reward_value = (
-        float(c.health or 0.0) * 0.4
-        + float(c.contact_damage or 0.0) * 0.8
-        + move_speed * 5.0
-        + float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_REWARD_BONUS) % 10 + 10)
+    c.reward_value = x87_pc24_add(
+        float(rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_REWARD_BONUS) % 10 + 10),
+        x87_pc24_mul(move_speed, f32(5.0)),
+    )
+    c.reward_value = x87_pc24_add(
+        c.reward_value,
+        x87_pc24_mul(float(c.contact_damage or 0.0), f32(0.8)),
+    )
+    c.reward_value = x87_pc24_add(
+        c.reward_value,
+        x87_pc24_mul(float(c.health or 0.0), f32(0.4)),
     )
 
     # Rare stat overrides (color-coded variants).
     r = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_RARE_RED)
     if r % 180 < 2:
-        apply_tint(c, (0.9, 0.4, 0.4, 1.0))
+        apply_tint(c, (f32(0.9), f32(0.4), f32(0.4), f32(1.0)))
         c.health = 65.0
         c.reward_value = 320.0
     else:
         r = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_RARE_GREEN)
         if r % 240 < 2:
-            apply_tint(c, (0.4, 0.9, 0.4, 1.0))
+            apply_tint(c, (f32(0.4), f32(0.9), f32(0.4), f32(1.0)))
             c.health = 85.0
             c.reward_value = 420.0
         else:
             r = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_RARE_BLUE)
             if r % 360 < 2:
-                apply_tint(c, (0.4, 0.4, 0.9, 1.0))
+                apply_tint(c, (f32(0.4), f32(0.4), f32(0.9), f32(1.0)))
                 c.health = 125.0
                 c.reward_value = 520.0
 
     # Rare health/size boosts (do not recompute contact_damage).
     r = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_RARE_PURPLE)
     if r % 1320 < 4:
-        apply_tint(c, (0.84, 0.24, 0.89, 1.0))
+        apply_tint(c, (f32(0.84), f32(0.24), f32(0.89), f32(1.0)))
         c.size = 80.0
         c.reward_value = 600.0
-        c.health = float(c.health or 0.0) + 230.0
+        c.health = x87_pc24_add(float(c.health or 0.0), f32(230.0))
     else:
         r = rng.rand_tagged(RngCallerStatic.SURVIVAL_SPAWN_CREATURE_RARE_YELLOW)
         if r % 1620 < 4:
-            apply_tint(c, (0.94, 0.84, 0.29, 1.0))
+            apply_tint(c, (f32(0.94), f32(0.84), f32(0.29), f32(1.0)))
             c.size = 85.0
             c.reward_value = 900.0
-            c.health = float(c.health or 0.0) + 2230.0
+            c.health = x87_pc24_add(float(c.health or 0.0), f32(2230.0))
 
     if c.health is not None:
         c.max_health = c.health
     if c.reward_value is not None:
-        c.reward_value *= 0.8
+        c.reward_value = x87_pc24_mul(c.reward_value, f32(0.8))
 
     if c.tint is not None:
         tint_r, tint_g, tint_b, tint_a = c.tint
@@ -1426,7 +1495,7 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             for i in range(4):
                 spawns.append(
                     SpawnTemplateCall(
-                        template_id=SpawnId.ALIEN_CONST_RED_FAST_2B,
+                        template_id=SpawnId.ALIEN_DEADLY_FAST_2B,
                         pos=Vec2(1088.0, float(i) * 64.0 + 384.0),
                         heading=heading,
                     ),
@@ -1461,7 +1530,7 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             stage = 6
             spawns.append(
                 SpawnTemplateCall(
-                    template_id=SpawnId.SPIDER_SP1_CONST_SHOCK_BOSS_3A, pos=Vec2(1088.0, 512.0), heading=heading,
+                    template_id=SpawnId.SPIDER_BOSS_3A, pos=Vec2(1088.0, 512.0), heading=heading,
                 ),
             )
             continue
@@ -1494,7 +1563,7 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             for i in range(4):
                 spawns.append(
                     SpawnTemplateCall(
-                        template_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                        template_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                         pos=Vec2(1088.0, float(i) * 64.0 + 384.0),
                         heading=heading,
                     ),
@@ -1502,7 +1571,7 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             for i in range(4):
                 spawns.append(
                     SpawnTemplateCall(
-                        template_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                        template_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                         pos=Vec2(-64.0, float(i) * 64.0 + 384.0),
                         heading=heading,
                     ),
@@ -1515,18 +1584,18 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             stage = 10
             spawns.append(
                 SpawnTemplateCall(
-                    template_id=SpawnId.SPIDER_SP1_CONST_SHOCK_BOSS_3A, pos=Vec2(1088.0, 512.0), heading=heading,
+                    template_id=SpawnId.SPIDER_BOSS_3A, pos=Vec2(1088.0, 512.0), heading=heading,
                 ),
             )
             spawns.append(
                 SpawnTemplateCall(
-                    template_id=SpawnId.SPIDER_SP1_CONST_SHOCK_BOSS_3A, pos=Vec2(-64.0, 512.0), heading=heading,
+                    template_id=SpawnId.SPIDER_BOSS_3A, pos=Vec2(-64.0, 512.0), heading=heading,
                 ),
             )
             for i in range(4):
                 spawns.append(
                     SpawnTemplateCall(
-                        template_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                        template_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                         pos=Vec2(float(i) * 64.0 + 384.0, -64.0),
                         heading=heading,
                     ),
@@ -1534,7 +1603,7 @@ def advance_survival_spawn_stage(stage: int, *, player_level: int) -> tuple[int,
             for i in range(4):
                 spawns.append(
                     SpawnTemplateCall(
-                        template_id=SpawnId.SPIDER_SP1_CONST_RANGED_VARIANT_3C,
+                        template_id=SpawnId.SPIDER_PLASMA_SHOOTER_3C,
                         pos=Vec2(float(i) * 64.0 + 384.0, 1088.0),
                         heading=heading,
                     ),
@@ -1558,13 +1627,14 @@ def build_rush_mode_spawn_creature(
     elapsed_ms = int(survival_elapsed_ms)
 
     c = alloc_creature(-1, pos, rng)
+    c.preserve_force_target = False
     c.type_id = CreatureTypeId(type_id)
     c.ai_mode = CreatureAiMode.ORBIT_PLAYER
 
     elapsed_f32 = f32(float(elapsed_ms))
-    c.health = float(f32(elapsed_f32 * f32(1e-4) + 10.0))
+    c.health = x87_pc24_add(x87_pc24_mul(elapsed_f32, f32(1e-4)), 10.0)
     c.heading = float(f32(f32(float(rng.rand_tagged(RngCallerStatic.CREATURE_SPAWN_HEADING) % 314)) * f32(0.01)))
-    c.move_speed = float(f32(elapsed_f32 * f32(1e-5) + 2.5))
+    c.move_speed = x87_pc24_add(x87_pc24_mul(elapsed_f32, _NATIVE_CREATURE_SPAWN_ELAPSED_SCALE), 2.5)
     c.reward_value = float(rng.rand_tagged(RngCallerStatic.CREATURE_SPAWN_REWARD) % 30 + 140)
 
     c.tint = tint_rgba
@@ -1572,7 +1642,7 @@ def build_rush_mode_spawn_creature(
 
     if c.health is not None:
         c.max_health = c.health
-    c.size = float(f32(elapsed_f32 * f32(1e-5) + 47.0))
+    c.size = x87_pc24_add(x87_pc24_mul(elapsed_f32, _NATIVE_CREATURE_SPAWN_ELAPSED_SCALE), 47.0)
 
     return c
 
@@ -1597,7 +1667,7 @@ def tick_rush_mode_spawns(
         t = f32(float(int(float(survival_elapsed_ms) + 1.0)))
         tint_r = clamp01(f32(t * f32(1.0 / 120000.0) + 0.3))
         tint_g = clamp01(f32(t * 10000.0 + 0.3))
-        tint_b = clamp01(f32(math.sin(float(f32(t * f32(1e-4)))) + 0.3))
+        tint_b = clamp01(f32(math.sin(float(f32(t * _NATIVE_RUSH_TINT_SIN_SCALE))) + 0.3))
         tint_a = 1.0
         tint = (tint_r, tint_g, tint_b, tint_a)
 
@@ -1633,7 +1703,7 @@ def build_tutorial_stage3_fire_spawns() -> tuple[SpawnTemplateCall, ...]:
     heading = float(math.pi)
     return (
         SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(-164.0, 412.0), heading=heading),
-        SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_PALE_GREEN_26, pos=Vec2(-184.0, 512.0), heading=heading),
+        SpawnTemplateCall(template_id=SpawnId.ALIEN_SMALL_GRAY_26, pos=Vec2(-184.0, 512.0), heading=heading),
         SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(-154.0, 612.0), heading=heading),
     )
 
@@ -1643,7 +1713,7 @@ def build_tutorial_stage4_clear_spawns() -> tuple[SpawnTemplateCall, ...]:
     heading = float(math.pi)
     return (
         SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(1188.0, 412.0), heading=heading),
-        SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_PALE_GREEN_26, pos=Vec2(1208.0, 512.0), heading=heading),
+        SpawnTemplateCall(template_id=SpawnId.ALIEN_SMALL_GRAY_26, pos=Vec2(1208.0, 512.0), heading=heading),
         SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(1178.0, 612.0), heading=heading),
     )
 
@@ -1670,14 +1740,14 @@ def build_tutorial_stage5_repeat_spawns(repeat_spawn_count: int) -> tuple[SpawnT
         if n < 6:
             spawns.append(
                 SpawnTemplateCall(
-                    template_id=SpawnId.ALIEN_CONST_WEAPON_BONUS_27, pos=Vec2(1056.0, 1056.0), heading=heading,
+                    template_id=SpawnId.ALIEN_BONUS_CARRIER_27, pos=Vec2(1056.0, 1056.0), heading=heading,
                 ),
             )
         spawns.append(
             SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(1188.0, 1136.0), heading=heading),
         )
         spawns.append(
-            SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_PALE_GREEN_26, pos=Vec2(1208.0, 512.0), heading=heading),
+            SpawnTemplateCall(template_id=SpawnId.ALIEN_SMALL_GRAY_26, pos=Vec2(1208.0, 512.0), heading=heading),
         )
         spawns.append(
             SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(1178.0, 612.0), heading=heading),
@@ -1685,7 +1755,7 @@ def build_tutorial_stage5_repeat_spawns(repeat_spawn_count: int) -> tuple[SpawnT
         if n == 4:
             spawns.append(
                 SpawnTemplateCall(
-                    template_id=SpawnId.SPIDER_SP1_CONST_BLUE_40, pos=Vec2(512.0, 1056.0), heading=heading,
+                    template_id=SpawnId.SPIDER_SMALL_BLUE_40, pos=Vec2(512.0, 1056.0), heading=heading,
                 ),
             )
         return tuple(spawns)
@@ -1693,7 +1763,7 @@ def build_tutorial_stage5_repeat_spawns(repeat_spawn_count: int) -> tuple[SpawnT
     # Odd: left-side spawn pack.
     if n < 6:
         spawns.append(
-            SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_WEAPON_BONUS_27, pos=Vec2(-32.0, 1056.0), heading=heading),
+            SpawnTemplateCall(template_id=SpawnId.ALIEN_BONUS_CARRIER_27, pos=Vec2(-32.0, 1056.0), heading=heading),
         )
     spawns.extend(build_tutorial_stage3_fire_spawns())
     return tuple(spawns)
@@ -1810,8 +1880,8 @@ def apply_unhandled_creature_type_fallback(plan_creatures: list[CreatureInit], p
     # Some template paths jump to the "Unhandled creatureType.\n" debug block in the original,
     # which forcibly overwrites `type_id` and `health` on the *current* creature pointer.
     # See artifacts/creature_spawn_template/binja-hlil.txt (label_431099).
-    # Notably: several grid/ring templates in the late formation switch ladder
-    # (e.g. 0x11, 0x13..0x17) reach LAB_00431094.
+    # Notably: both rings (0x12, 0x19), both chains (0x11, 0x13), and the
+    # 0x14..0x17 grids reach LAB_00431094.
     c = plan_creatures[primary_idx]
     c.type_id = CreatureTypeId.ALIEN
     c.health = 20.0
@@ -2019,8 +2089,11 @@ def template_11_formation_chain_lizard_4(ctx: PlanBuilder) -> None:
 
     def setup_child(child: CreatureInit, idx: int) -> None:
         child.target_offset = Vec2(-256.0 + float(idx) * 64.0, -256.0)
-        angle = float(2 + idx * 2) * (math.pi / 8.0)
-        child.pos = Vec2.from_angle(angle) * 256.0 + ctx.pos
+        angle = x87_pc24_mul(f32(float(2 + idx * 2)), _NATIVE_FORMATION_CHAIN_LIZARD_ANGLE_STEP)
+        child.pos = Vec2(
+            x87_pc24_add(f32(ctx.pos.x), x87_pc24_cos_mul(angle, f32(256.0))),
+            x87_pc24_add(f32(ctx.pos.y), x87_pc24_sin_mul(angle, f32(256.0))),
+        )
 
     chain_prev = ctx.chain_children(
         count=4,
@@ -2062,8 +2135,11 @@ def template_13_formation_chain_alien_10(ctx: PlanBuilder) -> None:
 
     def setup_child(child: CreatureInit, idx: int) -> None:
         angle_idx = 2 + idx * 2
-        angle = float(angle_idx) * math.radians(20.0)
-        child.pos = Vec2.from_angle(angle) * 256.0 + ctx.pos
+        angle = x87_pc24_mul(f32(float(angle_idx)), _NATIVE_FORMATION_CHAIN_ALIEN_ANGLE_STEP)
+        child.pos = Vec2(
+            x87_pc24_add(f32(ctx.pos.x), x87_pc24_cos_mul(angle, f32(256.0))),
+            x87_pc24_add(f32(ctx.pos.y), x87_pc24_sin_mul(angle, f32(256.0))),
+        )
 
     chain_prev = ctx.chain_children(
         count=10,

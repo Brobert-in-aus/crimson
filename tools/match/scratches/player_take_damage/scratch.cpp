@@ -1,10 +1,19 @@
 #include <math.h>
 #include "crimsonland_gameplay.h"
 
-typedef union player_damage_impulse_t {
-    int i[2];
-    float f[2];
-} player_damage_impulse_t;
+static __inline float abs_bits(float value)
+{
+    unsigned int bits = *(unsigned int *)&value;
+    bits &= 0x7fffffff;
+    return *(float *)&bits;
+}
+
+static __inline float vec2_distance(const vec2f_t *lhs, const vec2f_t *rhs)
+{
+    float dx = lhs->x - rhs->x;
+    float dy = lhs->y - rhs->y;
+    return (float)sqrt(dx * dx + dy * dy);
+}
 
 extern "C" void player_take_damage(int player_index, float damage)
 {
@@ -59,54 +68,62 @@ post_damage:
             return;
         }
 
-        if (perk_count_get(perk_id_final_revenge) == 0) {
-            unsigned int death_sfx = (unsigned int)crt_rand() & 0x80000001;
-            if ((int)death_sfx < 0) {
-                death_sfx = ((death_sfx - 1) | 0xfffffffe) + 1;
-            }
-            sfx_play_panned((int)death_sfx + sfx_trooper_die_01,
-                            &player_state_table[player_index].pos_x,
-                            1.0f);
-        } else {
-            float *player_pos = &player_state_table[player_index].pos_x;
+        if (perk_count_get(perk_id_final_revenge) != 0) {
+            const vec2f_t *player_pos =
+                &player_state_table[player_index].position;
             effect_spawn_explosion_burst(player_pos, 1.8f);
             bonus_spawn_guard = 1;
 
             int creature_index = 0;
-            unsigned char *creature_cursor = (unsigned char *)creature_pool;
             do {
-                creature_t *creature = (creature_t *)creature_cursor;
-                if (creature->active) {
-                    abs_delta = creature->pos_x - player_pos[0];
-                    *(int *)&abs_delta &= 0x7fffffff;
-                    if (abs_delta < 512.0f) {
-                        abs_delta = creature->pos_y - player_state_table[player_index].pos_y;
-                        *(int *)&abs_delta &= 0x7fffffff;
-                        if (abs_delta < 512.0f) {
-                            float dx = creature->pos_x - player_pos[0];
-                            float dy = creature->pos_y - player_pos[1];
-                            float blast = 512.0f - (float)sqrt(dx * dx + dy * dy);
+                if (creature_pool[creature_index].active) {
+                    abs_delta = abs_bits(
+                        creature_pool[creature_index].position.x - player_pos->x);
+                    if (abs_delta <= 512.0f) {
+                        abs_delta = abs_bits(
+                            creature_pool[creature_index].position.y - player_state_table[player_index].position.y
+                        );
+                        if (abs_delta <= 512.0f) {
+                            float blast = 512.0f - vec2_distance(
+                                &creature_pool[creature_index].position,
+                                player_pos
+                            );
                             if (blast > 0.0f) {
-                                player_damage_impulse_t impulse;
-                                impulse.i[0] = 0;
-                                impulse.i[1] = 0;
-                                creature_apply_damage(creature_index, blast * 5.0f, 3, impulse.f);
+                                vec2f_t impulse;
+                                impulse.x = 0.0f;
+                                impulse.y = 0.0f;
+                                creature_apply_damage(
+                                    creature_index,
+                                    blast * 5.0f,
+                                    3,
+                                    &impulse);
                             }
                         }
                     }
                 }
-                creature_cursor += sizeof(creature_t);
                 ++creature_index;
-            } while ((int)creature_cursor < (int)&creature_pool[0x180]);
+            } while (creature_index < 0x180);
 
             bonus_spawn_guard = 0;
-            sfx_play_panned(sfx_explosion_large, player_pos, 1.0f);
-            sfx_play_panned(sfx_shockwave, player_pos, 1.0f);
+            sfx_play_panned(
+                sfx_explosion_large,
+                player_pos,
+                1.0f);
+            sfx_play_panned(
+                sfx_shockwave,
+                player_pos,
+                1.0f);
+        } else {
+            sfx_play_panned(
+                crt_rand() % 2 + sfx_trooper_die_01,
+                &player_state_table[player_index].position,
+                1.0f);
         }
     } else {
-        sfx_play_panned(crt_rand() % 3 + sfx_trooper_inpain_01,
-                        &player_state_table[player_index].pos_x,
-                        1.0f);
+        sfx_play_panned(
+            crt_rand() % 3 + sfx_trooper_inpain_01,
+            &player_state_table[player_index].position,
+            1.0f);
         if (was_dead) {
             return;
         }

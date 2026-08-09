@@ -16,20 +16,14 @@ Attach:
 frida -n crimsonland.exe -l C:\share\frida\survival_autoplay.js
 ```
 
-Just shortcut (Windows VM):
-
-```text
-just frida-survival-autoplay
-```
-
 ## What it does
 
 - Does **not** auto-start Survival.
 - Does **not** inject movement input.
 - Does **not** auto-pick perks.
 - Only enforces control config for the selected player:
-  - `config_player_mode_flags[player]` (default `2`, static movement)
-  - `config_aim_scheme[player]` (default `5`, computer aiming)
+  - `config_movement_schemes[player]` (default `2`, static movement)
+  - `config_aim_schemes[player]` (default `5`, computer aiming)
 - Does **not** patch game mode, player count, or demo-mode flags.
 
 ## Use with differential capture

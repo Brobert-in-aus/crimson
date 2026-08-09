@@ -1,4 +1,4 @@
-﻿//! C-ABI host exports for embedding the deterministic runtime in external
+//! C-ABI host exports for embedding the deterministic runtime in external
 //! frontends (crimson-vr Godot app and similar hosts).
 //!
 //! Contract notes:
@@ -758,7 +758,7 @@ pub export fn crimson_host_session_create(
         .world_size = config.world_size,
         .tick_rate = config.tick_rate,
         .detail_preset = config.detail_preset,
-        .gore_disabled = config.gore_disabled,
+        .violence_disabled = config.gore_disabled,
         .hardcore = config.hardcore,
         .preserve_bugs = config.preserve_bugs,
         .demo_mode_active = config.demo_mode_active,

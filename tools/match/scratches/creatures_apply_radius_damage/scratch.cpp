@@ -1,24 +1,40 @@
 #include <math.h>
+#define creatures_apply_radius_damage creatures_apply_radius_damage_pointer_abi
 #include "crimsonland_gameplay.h"
+#undef creatures_apply_radius_damage
 
-extern "C" void creatures_apply_radius_damage(float *pos, float radius, float damage, int damage_type)
+static __inline float vec2_distance(const vec2f_t *lhs, const vec2f_t *rhs)
 {
-    float impulse[2];
-    impulse[0] = 0.0f;
-    impulse[1] = 0.0f;
+    float dx = lhs->x - rhs->x;
+    float dy = lhs->y - rhs->y;
+    float distance_sq = dx * dx;
+    distance_sq += dy * dy;
+    return (float)sqrt(distance_sq);
+}
+
+extern "C" void creatures_apply_radius_damage(
+    vec2f_t &spot,
+    float radius,
+    float damage,
+    int damage_type)
+{
+    vec2f_t impulse = {0.0f, 0.0f};
 
     int creature_id = 0;
-    creature_t *creature = creature_pool;
     do {
-        if (creature->active) {
-            float dx = creature->pos_x - pos[0];
-            float dy = creature->pos_y - pos[1];
-            if ((float)sqrt(dx * dx + dy * dy) - radius < creature->size * 0.14285715f + 3.0f
-                && creature->hitbox_size > 5.0f) {
-                creature_apply_damage(creature_id, damage, damage_type, impulse);
-            }
+        if (creature_pool[creature_id].active
+            && vec2_distance(
+                   &creature_pool[creature_id].position,
+                   &spot)
+                    - radius
+                < creature_pool[creature_id].size * 0.14285715f + 3.0f
+            && creature_pool[creature_id].lifecycle_stage > 5.0f) {
+            creature_apply_damage(
+                creature_id,
+                damage,
+                damage_type,
+                &impulse);
         }
-        ++creature;
         ++creature_id;
-    } while ((int)creature < (int)&creature_pool[0x180]);
+    } while (creature_id < 0x180);
 }

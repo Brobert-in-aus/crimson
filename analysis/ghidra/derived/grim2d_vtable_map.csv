@@ -2,16 +2,16 @@ offset_hex,offset_dec,callsites,unique_functions,sample_calls,func_addr,section,
 0x0,0,0,0,,0x10005c80,.text,grim_release,8,unknown,void,0,void grim_release(void),DEFAULT
 0x4,4,0,0,,0x10005c90,.text,grim_set_paused,12,unknown,void,1,void grim_set_paused(int paused),DEFAULT
 0x8,8,0,0,,0x10005ca0,.text,grim_get_version,7,unknown,float,0,float grim_get_version(void),DEFAULT
-0xc,12,0,0,,0x10005cb0,.text,grim_check_device,140,unknown,int,0,int grim_check_device(void),DEFAULT
-0x10,16,1,1,FUN_0042c450:L19443,0x10005d40,.text,grim_apply_config,367,unknown,int,0,int grim_apply_config(void),DEFAULT
-0x14,20,1,1,FUN_0042c450:L19504,0x10005eb0,.text,grim_init_system,318,__fastcall,int,0,int grim_init_system(void),DEFAULT
+0xc,12,0,0,,0x10005cb0,.text,grim_save_screenshot,140,unknown,bool,1,bool grim_save_screenshot(char *path),DEFAULT
+0x10,16,1,1,FUN_0042c450:L19443,0x10005d40,.text,grim_apply_config,367,unknown,bool,0,bool grim_apply_config(void),DEFAULT
+0x14,20,1,1,FUN_0042c450:L19504,0x10005eb0,.text,grim_init_system,318,__fastcall,bool,0,bool grim_init_system(void),DEFAULT
 0x18,24,1,1,FUN_0042c450:L19599,0x10005ff0,.text,grim_shutdown,38,unknown,void,0,void grim_shutdown(void),DEFAULT
-0x1c,28,1,1,FUN_0042c450:L19581,0x10006020,.text,grim_apply_settings,8,unknown,void,0,void grim_apply_settings(void),DEFAULT
+0x1c,28,1,1,FUN_0042c450:L19581,0x10006020,.text,grim_apply_settings,8,unknown,bool,0,bool grim_apply_settings(void),DEFAULT
 0x20,32,206,35,FUN_00401dd0:L754;FUN_00401dd0:L755;FUN_00401dd0:L847;FUN_00402d50:L1438;FUN_00402d50:L1460;FUN_004047c0:L3147;FUN_00405160:L3373;FUN_00405160:L3377,0x10006580,.text,grim_set_config_var,1534,unknown,void,2,"void grim_set_config_var(uint id, uint value)",DEFAULT
 0x24,36,17,4,FUN_0041ec60:L13402;FUN_0041ec60:L13410;FUN_0041ec60:L13413;FUN_0041ec60:L13415;FUN_0041ec60:L13417;FUN_0041ec60:L13419;FUN_0042c450:L19456;FUN_0042c450:L19458,0x10006c30,.text,grim_get_config_var,102,unknown,void,2,"void grim_get_config_var(uint * out, int id)",DEFAULT
 0x28,40,1,1,FUN_0042c450:L19509,0x10006ca0,.text,grim_get_error_text,6,unknown,char *,0,char * grim_get_error_text(void),DEFAULT
 0x2c,44,5,3,FUN_00417b80:L9215;FUN_004181b0:L9452;FUN_0042c450:L19534;FUN_0042c450:L19538;FUN_0042c450:L19547,0x10006cb0,.text,grim_clear_color,150,unknown,void,4,"void grim_clear_color(float r, float g, float b, float a)",DEFAULT
-0x30,48,6,3,FUN_00417b80:L9209;FUN_00417b80:L9333;FUN_004181b0:L9446;FUN_004181b0:L9563;FUN_00427920:L17949;FUN_00427920:L18035,0x10006d50,.text,grim_set_render_target,240,unknown,int,1,int grim_set_render_target(int target_index),DEFAULT
+0x30,48,6,3,FUN_00417b80:L9209;FUN_00417b80:L9333;FUN_004181b0:L9446;FUN_004181b0:L9563;FUN_00427920:L17949;FUN_00427920:L18035,0x10006d50,.text,grim_set_render_target,240,unknown,bool,1,bool grim_set_render_target(int target_index),DEFAULT
 0x34,52,0,0,,0x10006e40,.text,grim_get_time_ms,6,unknown,int,0,int grim_get_time_ms(void),DEFAULT
 0x38,56,0,0,,0x10006e50,.text,grim_set_time_ms,12,unknown,void,1,void grim_set_time_ms(int ms),DEFAULT
 0x3c,60,0,0,,0x10006e60,.text,grim_get_frame_dt,33,unknown,float,0,float grim_get_frame_dt(void),DEFAULT
@@ -42,10 +42,10 @@ offset_hex,offset_dec,callsites,unique_functions,sample_calls,func_addr,section,
 0xa0,160,0,0,,0x100075a0,.text,grim_get_joystick_z,6,unknown,int,0,int grim_get_joystick_z(void),DEFAULT
 0xa4,164,2,2,FUN_0041e8d0:L13164;FUN_0041e8f0:L13177,0x100075b0,.text,grim_get_joystick_pov,14,unknown,int,1,int grim_get_joystick_pov(int index),DEFAULT
 0xa8,168,0,0,,0x100075c0,.text,grim_is_joystick_button_down,16,unknown,int,1,int grim_is_joystick_button_down(int button),DEFAULT
-0xac,172,1,1,FUN_0042a9f0:L19084,0x100075d0,.text,grim_create_texture,257,__stdcall,int,3,"int grim_create_texture(char * name, int width, int height)",DEFAULT
-0xb0,176,0,0,,0x10007790,.text,grim_recreate_texture,157,__stdcall,int,1,int grim_recreate_texture(int handle),DEFAULT
-0xb4,180,3,3,FUN_00419d00:L10132;FUN_0042a670:L18970;FUN_0042a700:L18996,0x100076e0,.text,grim_load_texture,21,unknown,int,2,"int grim_load_texture(char * name, char * path)",DEFAULT
-0xb8,184,0,0,,0x10007750,.text,grim_validate_texture,50,unknown,int,1,int grim_validate_texture(int handle),DEFAULT
+0xac,172,1,1,FUN_0042a9f0:L19084,0x100075d0,.text,grim_create_texture,257,__stdcall,unsigned char,3,"unsigned char grim_create_texture(char * name, int width, int height)",USER_DEFINED
+0xb0,176,0,0,,0x10007790,.text,grim_recreate_texture,157,__stdcall,unsigned char,1,unsigned char grim_recreate_texture(int handle),USER_DEFINED
+0xb4,180,3,3,FUN_00419d00:L10132;FUN_0042a670:L18970;FUN_0042a700:L18996,0x100076e0,.text,grim_load_texture,21,__stdcall,unsigned char,2,"unsigned char grim_load_texture(char * name, char * path)",USER_DEFINED
+0xb8,184,0,0,,0x10007750,.text,grim_save_texture,50,unknown,unsigned char,2,"unsigned char grim_save_texture(int handle, char * path)",USER_DEFINED
 0xbc,188,0,0,,0x10007700,.text,grim_destroy_texture,64,unknown,void,1,void grim_destroy_texture(int handle),DEFAULT
 0xc0,192,22,8,FUN_0040b740:L6362;FUN_0040b740:L6374;FUN_00412dc0:L8687;FUN_00412dc0:L8698;FUN_00412dc0:L8710;FUN_00412dc0:L8722;FUN_00412dc0:L8734;FUN_00412dc0:L8750,0x10007740,.text,grim_get_texture_handle,16,unknown,int,1,int grim_get_texture_handle(char * name),DEFAULT
 0xc4,196,66,22,FUN_004061e0:L3882;FUN_004061e0:L3891;FUN_0040a510:L5641;FUN_0040a510:L5663;FUN_00417ae0:L9120;FUN_00417b80:L9220;FUN_00417b80:L9265;FUN_00417b80:L9296,0x10007830,.text,grim_bind_texture,58,__stdcall,void,2,"void grim_bind_texture(int handle, int stage)",DEFAULT

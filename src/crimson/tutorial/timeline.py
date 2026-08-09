@@ -149,6 +149,7 @@ def _tick_hint(
     hint_bonus_died: bool,
 ) -> tuple[tuple[SpawnTemplateCall, ...], str, float]:
     hint_spawns: list[SpawnTemplateCall] = []
+    fade_in_this_frame = bool(state.hint_fade_in)
 
     if (not state.hint_fade_in) and bool(hint_bonus_died):
         state.hint_fade_in = True
@@ -157,7 +158,7 @@ def _tick_hint(
             (
                 SpawnTemplateCall(template_id=SpawnId.ALIEN_CONST_GREEN_24, pos=Vec2(128.0, 128.0), heading=3.1415927),
                 SpawnTemplateCall(
-                    template_id=SpawnId.ALIEN_CONST_PALE_GREEN_26,
+                    template_id=SpawnId.ALIEN_SMALL_GRAY_26,
                     pos=Vec2(152.0, 160.0),
                     heading=3.1415927,
                 ),
@@ -165,7 +166,7 @@ def _tick_hint(
         )
 
     delta = int(frame_dt_ms) * 3
-    state.hint_alpha = int(state.hint_alpha) + (delta if state.hint_fade_in else -delta)
+    state.hint_alpha = int(state.hint_alpha) + (delta if fade_in_this_frame else -delta)
     if state.hint_alpha < 0:
         state.hint_alpha = 0
     elif state.hint_alpha > 1000:
@@ -283,9 +284,13 @@ def tick_tutorial_timeline(
         if int(perk_pending_count) < 1 and state.stage_transition_timer_ms == -1:
             state.stage_transition_timer_ms = -1000
             spawn_templates.extend(build_tutorial_stage6_perks_done_spawns())
-    elif stage_index == 7:
-        if bool(bonus_pool_empty) and bool(creatures_none_active) and state.stage_transition_timer_ms == -1:
-            state.stage_transition_timer_ms = -1000
+    elif (
+        stage_index == 7
+        and bool(bonus_pool_empty)
+        and bool(creatures_none_active)
+        and state.stage_transition_timer_ms == -1
+    ):
+        state.stage_transition_timer_ms = -1000
 
     return (
         state,

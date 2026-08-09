@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import msgspec
 
@@ -12,7 +12,7 @@ from ...perks.ids import PerkId, perk_display_name
 from ...replay import Replay
 from ...sim.hooks import TickResult
 from ...sim.input_providers import (
-    GameCommand,
+    GameFrameRngAdvanceOperation,
     PerkMenuOpenCommand,
     TypoBackspaceCommand,
     TypoCharCommand,
@@ -36,11 +36,12 @@ ReplayInfoCoreEventKind = Literal[
 ReplayInfoExtraEventKind = Literal[
     "creature_deaths",
     "perk_menu_open",
+    "game_frame_rng_advance",
     "typo_backspace",
     "typo_char",
     "typo_submit",
 ]
-ReplayInfoEventKind: TypeAlias = ReplayInfoCoreEventKind | ReplayInfoExtraEventKind
+type ReplayInfoEventKind = ReplayInfoCoreEventKind | ReplayInfoExtraEventKind
 
 _CORE_EVENT_KINDS: frozenset[ReplayInfoCoreEventKind] = frozenset(
     (
@@ -126,7 +127,7 @@ def _append_event(
 
 def _append_extra_replay_commands(
     *,
-    commands: Sequence[GameCommand],
+    commands: Sequence[object],
     tick_index: int,
     elapsed_ms: int,
     timeline: list[ReplayInfoTimelineEvent],
@@ -136,7 +137,19 @@ def _append_extra_replay_commands(
     if not include_extra_events:
         return
     for cmd in commands:
-        if isinstance(cmd, PerkMenuOpenCommand):
+        if isinstance(cmd, GameFrameRngAdvanceOperation):
+            _append_event(
+                timeline,
+                tick_index=tick_index,
+                elapsed_ms=elapsed_ms,
+                kind="game_frame_rng_advance",
+                player_index=None,
+                detail=f"replay advanced {cmd.frames} native frame RNG side effect(s)",
+                data={"frames": cmd.frames},
+                player_filter=player_filter,
+                include_extra_events=True,
+            )
+        elif isinstance(cmd, PerkMenuOpenCommand):
             _append_event(
                 timeline,
                 tick_index=tick_index,
@@ -383,21 +396,25 @@ def collect_replay_info(
     player_filter = _validate_player_filter(replay=replay, player_index=player_index)
     timeline: list[ReplayInfoTimelineEvent] = []
 
-    def _append_tick(tick_result: TickResult, *, after_players: list[PlayerState], before: list[_PlayerSnapshot]) -> None:
+    def _append_tick(
+        tick_result: TickResult,
+        *,
+        after_players: list[PlayerState],
+        before: list[_PlayerSnapshot],
+    ) -> None:
         source_tick = tick_result.source_tick
         tick = tick_result.payload
         after = _capture_snapshots(after_players)
 
         elapsed_ms = int(tick.elapsed_ms)
-        if mode != GameMode.RUSH:
-            _append_extra_replay_commands(
-                commands=source_tick.commands,
-                tick_index=int(source_tick.tick_index),
-                elapsed_ms=elapsed_ms,
-                timeline=timeline,
-                player_filter=player_filter,
-                include_extra_events=include_extra_events,
-            )
+        _append_extra_replay_commands(
+            commands=(*source_tick.prelude, *source_tick.commands),
+            tick_index=int(source_tick.tick_index),
+            elapsed_ms=elapsed_ms,
+            timeline=timeline,
+            player_filter=player_filter,
+            include_extra_events=include_extra_events,
+        )
 
         _append_bonus_pickup_events(
             tick_index=int(source_tick.tick_index),
@@ -430,6 +447,15 @@ def collect_replay_info(
             timeline=timeline,
             preserve_bugs=replay.header.preserve_bugs,
             violence_disabled=replay.header.violence_disabled,
+            player_filter=player_filter,
+            include_extra_events=include_extra_events,
+        )
+
+        _append_extra_replay_commands(
+            commands=source_tick.postlude,
+            tick_index=int(source_tick.tick_index),
+            elapsed_ms=elapsed_ms,
+            timeline=timeline,
             player_filter=player_filter,
             include_extra_events=include_extra_events,
         )

@@ -1,0 +1,1354 @@
+{
+  "schema": 3,
+  "image": "grim.dll",
+  "entry": "DllMain",
+  "image_base": "0x10000000",
+  "mode": "structural",
+  "archives": [
+    {
+      "id": "grim-recovered-platform-vc6",
+      "path": "tools/native/providers/build/grim-platform/grim-platform.lib",
+      "sha256": "192b49592a7671b265dd43f481d4965071abb2306cf0be099b39b3c03b799fe3",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "derived_artifact": "grim-recovered-platform-vc6-provider"
+      }
+    },
+    {
+      "id": "directx-8.1-d3dx8",
+      "path": "tools/native/providers/build/directx-8.1/d3dx8.lib",
+      "sha256": "39a8e21889a7c1f0b966f04a9e7d392de14ddebb3e091dfa1e5ce3e19564fc28",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "source_artifact": "directx-8.1-sdk-full",
+        "member": "DXF/DXSDK/lib/d3dx8.lib"
+      }
+    },
+    {
+      "id": "directx-8.1-dinput8",
+      "path": "tools/native/providers/build/directx-8.1/dinput8.lib",
+      "sha256": "1aefd62d9df8a26aa312817bd98b2fc3340477b238c918fc9edc04f7498a5b34",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "source_artifact": "directx-8.1-sdk-full",
+        "member": "DXF/DXSDK/lib/dinput8.lib"
+      }
+    },
+    {
+      "id": "directx-8.1-dxguid",
+      "path": "tools/native/providers/build/directx-8.1/dxguid.lib",
+      "sha256": "73a147b9ff6e4527e543e9a436cb244adcdae4ad89b89df51a0634f9a8c13682",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "source_artifact": "directx-8.1-sdk-full",
+        "member": "DXF/DXSDK/lib/dxguid.lib"
+      }
+    },
+    {
+      "id": "ijg-libjpeg-6a-vc6-jaz",
+      "path": "tools/native/providers/build/ijg-libjpeg-6a/libjpeg.lib",
+      "sha256": "c0bf240e27e8684357c676030e3cb8913d04e6b1e14f8000f069b43b17de6869",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "derived_artifact": "ijg-libjpeg-6a-vc6-jaz-provider"
+      }
+    },
+    {
+      "id": "vc6-sp6-msvcrt",
+      "path": "tools/native/providers/build/vc6-sp6/vc98/lib/msvcrt.lib",
+      "sha256": "3efc3ddf045a459a2b6403f0b821be2cb7c316ffca67dddddb346cea7a9e4f63",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "source_artifact": "visual-cpp-6-sp6-media",
+        "member": "vs6sp6.iso/VS6sp61.cab/vc98/lib/msvcrt.lib"
+      }
+    },
+    {
+      "id": "zlib-1.1.3-vc6",
+      "path": "tools/native/providers/build/zlib-1.1.3/zlib.lib",
+      "sha256": "6b44ac2a8a67123b929cb9286c343730af5f6777609a54e12e402e5ac7e503b0",
+      "provenance": {
+        "path": "analysis/library_provenance.json",
+        "derived_artifact": "zlib-1.1.3-vc6-provider"
+      }
+    }
+  ],
+  "providers": [
+    {
+      "name": "msvcrt.dll",
+      "kind": "reference-import",
+      "resolution": "archive-library",
+      "module": "MSVCRT.dll",
+      "archive": "vc6-sp6-msvcrt",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports these exports from MSVCRT."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The provenance manifest pins the original VC6 SP6 MSVCRT import archive used by the reference runtime seam."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "_strdup",
+          "target": "__strdup"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "??2@YAPAXI@Z",
+          "link_name": "??2@YAPAXI@Z",
+          "export": "??2@YAPAXI@Z"
+        },
+        {
+          "name": "??3@YAXPAX@Z",
+          "link_name": "??3@YAXPAX@Z",
+          "export": "??3@YAXPAX@Z"
+        },
+        {
+          "name": "___CxxFrameHandler",
+          "link_name": "__CxxFrameHandler",
+          "export": "__CxxFrameHandler"
+        },
+        {
+          "name": "___CxxLongjmpUnwind@4",
+          "link_name": "__CxxLongjmpUnwind@4",
+          "export": "__CxxLongjmpUnwind"
+        },
+        {
+          "name": "__ftol",
+          "link_name": "_ftol",
+          "export": "_ftol"
+        },
+        {
+          "name": "__imp__longjmp",
+          "link_name": "longjmp",
+          "export": "longjmp"
+        },
+        {
+          "name": "__setjmp3",
+          "link_name": "_setjmp3",
+          "export": "_setjmp3"
+        },
+        {
+          "name": "__imp___getcwd",
+          "link_name": "_getcwd",
+          "export": "_getcwd"
+        },
+        {
+          "name": "__imp__fclose",
+          "link_name": "fclose",
+          "export": "fclose"
+        },
+        {
+          "name": "__imp__fopen",
+          "link_name": "fopen",
+          "export": "fopen"
+        },
+        {
+          "name": "__imp__fread",
+          "link_name": "fread",
+          "export": "fread"
+        },
+        {
+          "name": "__imp__fseek",
+          "link_name": "fseek",
+          "export": "fseek"
+        },
+        {
+          "name": "__imp__ftell",
+          "link_name": "ftell",
+          "export": "ftell"
+        },
+        {
+          "name": "__imp__vsprintf",
+          "link_name": "vsprintf",
+          "export": "vsprintf"
+        },
+        {
+          "name": "__imp__strdup",
+          "link_name": "strdup",
+          "export": "_strdup"
+        },
+        {
+          "name": "_strdup",
+          "link_name": "strdup",
+          "export": "_strdup"
+        }
+      ]
+    },
+    {
+      "name": "user32.dll",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "USER32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports these exports from USER32."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__LoadIconA@8",
+          "target": "__imp__LoadIconA"
+        },
+        {
+          "alias": "__imp__MessageBoxA@16",
+          "target": "__imp__MessageBoxA"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__LoadIconA@8",
+          "link_name": "LoadIconA",
+          "export": "LoadIconA"
+        },
+        {
+          "name": "__imp__MessageBoxA@16",
+          "link_name": "MessageBoxA",
+          "export": "MessageBoxA"
+        }
+      ]
+    },
+    {
+      "name": "winmm.dll",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "WINMM.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports these exports from WINMM."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__timeBeginPeriod@4",
+          "target": "__imp__timeBeginPeriod"
+        },
+        {
+          "alias": "__imp__timeGetTime@0",
+          "target": "__imp__timeGetTime"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__timeBeginPeriod@4",
+          "link_name": "timeBeginPeriod",
+          "export": "timeBeginPeriod"
+        },
+        {
+          "name": "__imp__timeGetTime@0",
+          "link_name": "timeGetTime",
+          "export": "timeGetTime"
+        }
+      ]
+    },
+    {
+      "name": "d3d8.dll",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "d3d8.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports Direct3DCreate8 from d3d8."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "_Direct3DCreate8@4",
+          "target": "_Direct3DCreate8"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_Direct3DCreate8@4",
+          "link_name": "Direct3DCreate8",
+          "export": "Direct3DCreate8"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform",
+      "kind": "platform-replaced",
+      "resolution": "archive-library",
+      "archive": "grim-recovered-platform-vc6",
+      "evidence": [
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The deterministic recovered-provider recipe requires exact instruction and reference matches for every archive member."
+        },
+        {
+          "path": "tools/match/scratches/grim_config_dialog_populate_display_modes/NOTES.md",
+          "note": "The legacy display-mode helper is an exact 646-byte match and preserves its persisted-byte comparison."
+        },
+        {
+          "path": "tools/match/scratches/grim_parental_lock_dialog_proc/NOTES.md",
+          "note": "The legacy parental-lock callback is an exact 318-instruction match, including its password and dialog-state behavior."
+        },
+        {
+          "path": "tools/match/scratches/grim_advanced_config_dialog_proc/NOTES.md",
+          "note": "The legacy advanced-config callback is an exact 459-instruction match, including texture-format probing and control persistence."
+        },
+        {
+          "path": "tools/match/scratches/grim_config_dialog_proc/NOTES.md",
+          "note": "The legacy launcher callback is an exact 404-instruction match, including adapter filtering, mode parsing, and child-dialog routing."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "?grim_apply_config@IGrim2D_cpp@@UAE_NXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_d3d_init@@YA_NXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_d3d_shutdown@@YAXXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_joystick_button_down@@YAEI@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_joystick_init@@YA_NPAUHWND__@@@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_joystick_shutdown@@YAXXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_keyboard_init@@YA_NPAUHWND__@@@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_keyboard_key_down@@YAEI@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_keyboard_shutdown@@YAXXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_mouse_button_down@@YAEH@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_mouse_init@@YA_NPAUHWND__@@@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_mouse_shutdown@@YAXXZ",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_save_screenshot@IGrim2D_cpp@@UAE_NPAD@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_save_texture@IGrim2D_cpp@@UAE_NHPAD@Z",
+          "binding": "function"
+        },
+        {
+          "name": "?grim_window_destroy@@YAHXZ",
+          "binding": "function"
+        },
+        {
+          "name": "_grim_run_loop",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-config-dialog",
+      "scope": "link-dependency",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "grim-recovered-platform-vc6",
+      "evidence": [
+        {
+          "path": "tools/match/scratches/grim_config_dialog_proc/NOTES.md",
+          "note": "The exact recovered launcher callback is retained transitively by grim_apply_config."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The deterministic recovered platform archive includes the exact callback and both exact child dialog members."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "?grim_config_dialog_proc@@YGHPAUHWND__@@IIJ@Z",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-callback-frontier",
+      "scope": "link-dependency",
+      "kind": "static-library",
+      "resolution": "placeholder-object",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/functions.json",
+          "note": "The sole remaining recovered-platform reference is a bounded native callback with a known address and signature but no matching scratch yet."
+        },
+        {
+          "path": "tools/match/scratches/grim_window_create/scratch.cpp",
+          "note": "The exact window creator references the native window callback."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "?grim_window_proc@@YGJPAUHWND__@@IIJ@Z",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-dinput8",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "DINPUT8.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports DirectInput8Create from DINPUT8."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The pinned DirectX 8.1 SDK supplies the original dinput8 import archive."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_DirectInput8Create@20",
+          "link_name": "DirectInput8Create@20",
+          "export": "DirectInput8Create"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-dinput-data",
+      "scope": "link-dependency",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "directx-8.1-dinput8",
+      "evidence": [
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The pinned DirectX 8.1 SDK dinput8 archive supplies the canonical DirectInput data-format objects."
+        },
+        {
+          "path": "tools/match/scratches/grim_mouse_init/scratch.cpp",
+          "note": "The exact recovered input initializers retain the SDK data-format references."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_c_dfDIJoystick2",
+          "binding": "data"
+        },
+        {
+          "name": "_c_dfDIKeyboard",
+          "binding": "data"
+        },
+        {
+          "name": "_c_dfDIMouse2",
+          "binding": "data"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-dxguid",
+      "scope": "link-dependency",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "directx-8.1-dxguid",
+      "evidence": [
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The pinned DirectX 8.1 SDK supplies the exact DirectInput GUID and data-format definitions referenced by the recovered input backends."
+        },
+        {
+          "path": "tools/match/scratches/grim_mouse_init/scratch.cpp",
+          "note": "The exact recovered input initializers retain the SDK GUID and data-format references."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_GUID_SysKeyboard",
+          "binding": "data"
+        },
+        {
+          "name": "_GUID_SysMouse",
+          "binding": "data"
+        },
+        {
+          "name": "_IID_IDirectInput8A",
+          "binding": "data"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-user32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "USER32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports these Win32 window, dialog, and message-loop exports from USER32."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The exact recovered platform archive retains the corresponding decorated import references."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__AdjustWindowRectEx@16",
+          "target": "__imp__AdjustWindowRectEx"
+        },
+        {
+          "alias": "__imp__CreateWindowExA@48",
+          "target": "__imp__CreateWindowExA"
+        },
+        {
+          "alias": "__imp__DestroyWindow@4",
+          "target": "__imp__DestroyWindow"
+        },
+        {
+          "alias": "__imp__DialogBoxParamA@20",
+          "target": "__imp__DialogBoxParamA"
+        },
+        {
+          "alias": "__imp__DispatchMessageA@4",
+          "target": "__imp__DispatchMessageA"
+        },
+        {
+          "alias": "__imp__EndDialog@8",
+          "target": "__imp__EndDialog"
+        },
+        {
+          "alias": "__imp__GetClientRect@8",
+          "target": "__imp__GetClientRect"
+        },
+        {
+          "alias": "__imp__GetDesktopWindow@0",
+          "target": "__imp__GetDesktopWindow"
+        },
+        {
+          "alias": "__imp__GetDlgItem@8",
+          "target": "__imp__GetDlgItem"
+        },
+        {
+          "alias": "__imp__GetForegroundWindow@0",
+          "target": "__imp__GetForegroundWindow"
+        },
+        {
+          "alias": "__imp__GetSystemMetrics@4",
+          "target": "__imp__GetSystemMetrics"
+        },
+        {
+          "alias": "__imp__GetWindowTextA@12",
+          "target": "__imp__GetWindowTextA"
+        },
+        {
+          "alias": "__imp__LoadCursorA@8",
+          "target": "__imp__LoadCursorA"
+        },
+        {
+          "alias": "__imp__PeekMessageA@20",
+          "target": "__imp__PeekMessageA"
+        },
+        {
+          "alias": "__imp__PostQuitMessage@4",
+          "target": "__imp__PostQuitMessage"
+        },
+        {
+          "alias": "__imp__RegisterClassExA@4",
+          "target": "__imp__RegisterClassExA"
+        },
+        {
+          "alias": "__imp__SendMessageA@16",
+          "target": "__imp__SendMessageA"
+        },
+        {
+          "alias": "__imp__SetFocus@4",
+          "target": "__imp__SetFocus"
+        },
+        {
+          "alias": "__imp__SetForegroundWindow@4",
+          "target": "__imp__SetForegroundWindow"
+        },
+        {
+          "alias": "__imp__SetWindowTextA@8",
+          "target": "__imp__SetWindowTextA"
+        },
+        {
+          "alias": "__imp__ShowCursor@4",
+          "target": "__imp__ShowCursor"
+        },
+        {
+          "alias": "__imp__ShowWindow@8",
+          "target": "__imp__ShowWindow"
+        },
+        {
+          "alias": "__imp__TranslateMessage@4",
+          "target": "__imp__TranslateMessage"
+        },
+        {
+          "alias": "__imp__UnregisterClassA@8",
+          "target": "__imp__UnregisterClassA"
+        },
+        {
+          "alias": "__imp__UpdateWindow@4",
+          "target": "__imp__UpdateWindow"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__AdjustWindowRectEx@16",
+          "link_name": "AdjustWindowRectEx",
+          "export": "AdjustWindowRectEx"
+        },
+        {
+          "name": "__imp__CreateWindowExA@48",
+          "link_name": "CreateWindowExA",
+          "export": "CreateWindowExA"
+        },
+        {
+          "name": "__imp__DestroyWindow@4",
+          "link_name": "DestroyWindow",
+          "export": "DestroyWindow"
+        },
+        {
+          "name": "__imp__DialogBoxParamA@20",
+          "link_name": "DialogBoxParamA",
+          "export": "DialogBoxParamA"
+        },
+        {
+          "name": "__imp__DispatchMessageA@4",
+          "link_name": "DispatchMessageA",
+          "export": "DispatchMessageA"
+        },
+        {
+          "name": "__imp__EndDialog@8",
+          "link_name": "EndDialog",
+          "export": "EndDialog"
+        },
+        {
+          "name": "__imp__GetClientRect@8",
+          "link_name": "GetClientRect",
+          "export": "GetClientRect"
+        },
+        {
+          "name": "__imp__GetDesktopWindow@0",
+          "link_name": "GetDesktopWindow",
+          "export": "GetDesktopWindow"
+        },
+        {
+          "name": "__imp__GetDlgItem@8",
+          "link_name": "GetDlgItem",
+          "export": "GetDlgItem"
+        },
+        {
+          "name": "__imp__GetForegroundWindow@0",
+          "link_name": "GetForegroundWindow",
+          "export": "GetForegroundWindow"
+        },
+        {
+          "name": "__imp__GetSystemMetrics@4",
+          "link_name": "GetSystemMetrics",
+          "export": "GetSystemMetrics"
+        },
+        {
+          "name": "__imp__GetWindowTextA@12",
+          "link_name": "GetWindowTextA",
+          "export": "GetWindowTextA"
+        },
+        {
+          "name": "__imp__LoadCursorA@8",
+          "link_name": "LoadCursorA",
+          "export": "LoadCursorA"
+        },
+        {
+          "name": "__imp__PeekMessageA@20",
+          "link_name": "PeekMessageA",
+          "export": "PeekMessageA"
+        },
+        {
+          "name": "__imp__PostQuitMessage@4",
+          "link_name": "PostQuitMessage",
+          "export": "PostQuitMessage"
+        },
+        {
+          "name": "__imp__RegisterClassExA@4",
+          "link_name": "RegisterClassExA",
+          "export": "RegisterClassExA"
+        },
+        {
+          "name": "__imp__SendMessageA@16",
+          "link_name": "SendMessageA",
+          "export": "SendMessageA"
+        },
+        {
+          "name": "__imp__SetFocus@4",
+          "link_name": "SetFocus",
+          "export": "SetFocus"
+        },
+        {
+          "name": "__imp__SetForegroundWindow@4",
+          "link_name": "SetForegroundWindow",
+          "export": "SetForegroundWindow"
+        },
+        {
+          "name": "__imp__SetWindowTextA@8",
+          "link_name": "SetWindowTextA",
+          "export": "SetWindowTextA"
+        },
+        {
+          "name": "__imp__ShowCursor@4",
+          "link_name": "ShowCursor",
+          "export": "ShowCursor"
+        },
+        {
+          "name": "__imp__ShowWindow@8",
+          "link_name": "ShowWindow",
+          "export": "ShowWindow"
+        },
+        {
+          "name": "__imp__TranslateMessage@4",
+          "link_name": "TranslateMessage",
+          "export": "TranslateMessage"
+        },
+        {
+          "name": "__imp__UnregisterClassA@8",
+          "link_name": "UnregisterClassA",
+          "export": "UnregisterClassA"
+        },
+        {
+          "name": "__imp__UpdateWindow@4",
+          "link_name": "UpdateWindow",
+          "export": "UpdateWindow"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-kernel32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "KERNEL32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports these launcher and runtime exports from KERNEL32."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__GetLocalTime@4",
+          "target": "__imp__GetLocalTime"
+        },
+        {
+          "alias": "__imp__Sleep@4",
+          "target": "__imp__Sleep"
+        },
+        {
+          "alias": "__imp__WinExec@8",
+          "target": "__imp__WinExec"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__GetLocalTime@4",
+          "link_name": "GetLocalTime",
+          "export": "GetLocalTime"
+        },
+        {
+          "name": "__imp__Sleep@4",
+          "link_name": "Sleep",
+          "export": "Sleep"
+        },
+        {
+          "name": "__imp__WinExec@8",
+          "link_name": "WinExec",
+          "export": "WinExec"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-gdi32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "GDI32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports GetStockObject from GDI32."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__GetStockObject@4",
+          "target": "__imp__GetStockObject"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__GetStockObject@4",
+          "link_name": "GetStockObject",
+          "export": "GetStockObject"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-winmm",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "WINMM.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports timeEndPeriod from WINMM."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__timeEndPeriod@4",
+          "target": "__imp__timeEndPeriod"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__timeEndPeriod@4",
+          "link_name": "timeEndPeriod",
+          "export": "timeEndPeriod"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-msvcrt",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "MSVCRT.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports strchr from MSVCRT."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The pinned VC6 SP6 MSVCRT import archive supplies the original import object."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__strchr",
+          "link_name": "strchr",
+          "export": "strchr"
+        }
+      ]
+    },
+    {
+      "name": "recovered-platform-urlmon",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "urlmon.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports HlinkNavigateString from URLMON."
+        },
+        {
+          "path": "tools/match/scratches/grim_config_dialog_proc/NOTES.md",
+          "note": "The exact recovered launcher callback retains the decorated hyperlink import."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "_HlinkNavigateString@8",
+          "target": "_HlinkNavigateString"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_HlinkNavigateString@8",
+          "link_name": "HlinkNavigateString",
+          "export": "HlinkNavigateString"
+        }
+      ]
+    },
+    {
+      "name": "directx-8.1-d3dx8-static",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "directx-8.1-d3dx8",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/functions.json",
+          "note": "These D3DX8 bodies are statically linked into the reference image rather than imported."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The provenance manifest pins the exact DirectX 8.1 SDK archive whose normalized functions match the reference image."
+        },
+        {
+          "path": "docs/contributor/project-tracking/third-party-libs.md",
+          "note": "The archive proof records exact matches for the four public APIs and the internal D3DXComputeNormalMap body."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "_d3dx_copy_texture_filtered@24",
+          "target": "_D3DXComputeNormalMap@24"
+        },
+        {
+          "alias": "_jpeg_std_error",
+          "target": "?jpeg_std_error@D3DX@@YAPAUjpeg_error_mgr@1@PAU21@@Z"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_D3DXCreateTexture@32",
+          "binding": "function"
+        },
+        {
+          "name": "_D3DXCreateTextureFromFileExA@56",
+          "binding": "function"
+        },
+        {
+          "name": "_D3DXCreateTextureFromFileInMemoryEx@60",
+          "binding": "function"
+        },
+        {
+          "name": "_D3DXVec2Normalize@8",
+          "binding": "function"
+        },
+        {
+          "name": "_d3dx_copy_texture_filtered@24",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_std_error",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "directx-8.1-d3dx8-kernel32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "KERNEL32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The retained D3DX8 platform imports are present in the reference image."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The pinned DirectX 8.1 archive records these decorated import references in the selected members."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__CloseHandle@4",
+          "target": "__imp__CloseHandle"
+        },
+        {
+          "alias": "__imp__CreateFileA@28",
+          "target": "__imp__CreateFileA"
+        },
+        {
+          "alias": "__imp__CreateFileMappingA@24",
+          "target": "__imp__CreateFileMappingA"
+        },
+        {
+          "alias": "__imp__CreateFileW@28",
+          "target": "__imp__CreateFileW"
+        },
+        {
+          "alias": "__imp__FindResourceA@12",
+          "target": "__imp__FindResourceA"
+        },
+        {
+          "alias": "__imp__FindResourceW@12",
+          "target": "__imp__FindResourceW"
+        },
+        {
+          "alias": "__imp__GetFileSize@8",
+          "target": "__imp__GetFileSize"
+        },
+        {
+          "alias": "__imp__GetLastError@0",
+          "target": "__imp__GetLastError"
+        },
+        {
+          "alias": "__imp__GetModuleHandleA@4",
+          "target": "__imp__GetModuleHandleA"
+        },
+        {
+          "alias": "__imp__GetProcAddress@8",
+          "target": "__imp__GetProcAddress"
+        },
+        {
+          "alias": "__imp__GetVersionExA@4",
+          "target": "__imp__GetVersionExA"
+        },
+        {
+          "alias": "__imp__IsProcessorFeaturePresent@4",
+          "target": "__imp__IsProcessorFeaturePresent"
+        },
+        {
+          "alias": "__imp__LoadLibraryA@4",
+          "target": "__imp__LoadLibraryA"
+        },
+        {
+          "alias": "__imp__LoadResource@8",
+          "target": "__imp__LoadResource"
+        },
+        {
+          "alias": "__imp__LockResource@4",
+          "target": "__imp__LockResource"
+        },
+        {
+          "alias": "__imp__MapViewOfFile@20",
+          "target": "__imp__MapViewOfFile"
+        },
+        {
+          "alias": "__imp__SizeofResource@8",
+          "target": "__imp__SizeofResource"
+        },
+        {
+          "alias": "__imp__UnmapViewOfFile@4",
+          "target": "__imp__UnmapViewOfFile"
+        },
+        {
+          "alias": "__imp__WideCharToMultiByte@32",
+          "target": "__imp__WideCharToMultiByte"
+        },
+        {
+          "alias": "__imp__WriteFile@20",
+          "target": "__imp__WriteFile"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__CloseHandle@4",
+          "link_name": "CloseHandle",
+          "export": "CloseHandle"
+        },
+        {
+          "name": "__imp__CreateFileA@28",
+          "link_name": "CreateFileA",
+          "export": "CreateFileA"
+        },
+        {
+          "name": "__imp__CreateFileMappingA@24",
+          "link_name": "CreateFileMappingA",
+          "export": "CreateFileMappingA"
+        },
+        {
+          "name": "__imp__CreateFileW@28",
+          "link_name": "CreateFileW",
+          "export": "CreateFileW"
+        },
+        {
+          "name": "__imp__FindResourceA@12",
+          "link_name": "FindResourceA",
+          "export": "FindResourceA"
+        },
+        {
+          "name": "__imp__FindResourceW@12",
+          "link_name": "FindResourceW",
+          "export": "FindResourceW"
+        },
+        {
+          "name": "__imp__GetFileSize@8",
+          "link_name": "GetFileSize",
+          "export": "GetFileSize"
+        },
+        {
+          "name": "__imp__GetLastError@0",
+          "link_name": "GetLastError",
+          "export": "GetLastError"
+        },
+        {
+          "name": "__imp__GetModuleHandleA@4",
+          "link_name": "GetModuleHandleA",
+          "export": "GetModuleHandleA"
+        },
+        {
+          "name": "__imp__GetProcAddress@8",
+          "link_name": "GetProcAddress",
+          "export": "GetProcAddress"
+        },
+        {
+          "name": "__imp__GetVersionExA@4",
+          "link_name": "GetVersionExA",
+          "export": "GetVersionExA"
+        },
+        {
+          "name": "__imp__IsProcessorFeaturePresent@4",
+          "link_name": "IsProcessorFeaturePresent",
+          "export": "IsProcessorFeaturePresent"
+        },
+        {
+          "name": "__imp__LoadLibraryA@4",
+          "link_name": "LoadLibraryA",
+          "export": "LoadLibraryA"
+        },
+        {
+          "name": "__imp__LoadResource@8",
+          "link_name": "LoadResource",
+          "export": "LoadResource"
+        },
+        {
+          "name": "__imp__LockResource@4",
+          "link_name": "LockResource",
+          "export": "LockResource"
+        },
+        {
+          "name": "__imp__MapViewOfFile@20",
+          "link_name": "MapViewOfFile",
+          "export": "MapViewOfFile"
+        },
+        {
+          "name": "__imp__SizeofResource@8",
+          "link_name": "SizeofResource",
+          "export": "SizeofResource"
+        },
+        {
+          "name": "__imp__UnmapViewOfFile@4",
+          "link_name": "UnmapViewOfFile",
+          "export": "UnmapViewOfFile"
+        },
+        {
+          "name": "__imp__WideCharToMultiByte@32",
+          "link_name": "WideCharToMultiByte",
+          "export": "WideCharToMultiByte"
+        },
+        {
+          "name": "__imp__WriteFile@20",
+          "link_name": "WriteFile",
+          "export": "WriteFile"
+        }
+      ]
+    },
+    {
+      "name": "directx-8.1-d3dx8-gdi32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "GDI32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The reference image imports DeleteObject from GDI32."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The selected D3DX8 resource member records a decorated DeleteObject import reference."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__DeleteObject@4",
+          "target": "__imp__DeleteObject"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__DeleteObject@4",
+          "link_name": "DeleteObject",
+          "export": "DeleteObject"
+        }
+      ]
+    },
+    {
+      "name": "directx-8.1-d3dx8-advapi32",
+      "scope": "link-dependency",
+      "kind": "reference-import",
+      "resolution": "import-library",
+      "module": "ADVAPI32.dll",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/imports.json",
+          "note": "The D3DX8 CPU-detection registry imports are present in the reference image."
+        },
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The selected D3DX8 CPU-detection member records these decorated ADVAPI32 import references."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "__imp__RegCloseKey@4",
+          "target": "__imp__RegCloseKey"
+        },
+        {
+          "alias": "__imp__RegOpenKeyA@12",
+          "target": "__imp__RegOpenKeyA"
+        },
+        {
+          "alias": "__imp__RegQueryValueExA@24",
+          "target": "__imp__RegQueryValueExA"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__imp__RegCloseKey@4",
+          "link_name": "RegCloseKey",
+          "export": "RegCloseKey"
+        },
+        {
+          "name": "__imp__RegOpenKeyA@12",
+          "link_name": "RegOpenKeyA",
+          "export": "RegOpenKeyA"
+        },
+        {
+          "name": "__imp__RegQueryValueExA@24",
+          "link_name": "RegQueryValueExA",
+          "export": "RegQueryValueExA"
+        }
+      ]
+    },
+    {
+      "name": "grim-jaz-libjpeg-6a-vc6-static",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "ijg-libjpeg-6a-vc6-jaz",
+      "evidence": [
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The deterministic mixed-profile VC6 archive reproduces all six JAZ closure entries plus jpeg_destroy_decompress byte-for-byte."
+        },
+        {
+          "path": "docs/contributor/project-tracking/third-party-libs.md",
+          "note": "The one-byte boolean ABI, compiler profiles, archive hash, custom source reconstruction, and 18 exact reference functions are recorded here."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_grim_jpeg_memory_src",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_CreateDecompress",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_destroy_decompress",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_finish_decompress",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_read_header",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_read_scanlines",
+          "binding": "function"
+        },
+        {
+          "name": "_jpeg_start_decompress",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "zlib-1.1.3-static",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "zlib-1.1.3-vc6",
+      "evidence": [
+        {
+          "path": "analysis/library_provenance.json",
+          "note": "The normalized VC6 archive is derived from the pinned zlib 1.1.3 source release and has a reproducible hash."
+        },
+        {
+          "path": "docs/contributor/project-tracking/third-party-libs.md",
+          "note": "The stock uncompress entry is a 156-byte exact reference match; the archive contains 24 exact Grim functions."
+        }
+      ],
+      "aliases": [
+        {
+          "alias": "_zlib_uncompress",
+          "target": "_uncompress"
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_zlib_uncompress",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "msvc6-runtime-static",
+      "kind": "static-library",
+      "resolution": "archive-library",
+      "archive": "vc6-sp6-msvcrt",
+      "evidence": [
+        {
+          "path": "analysis/ida/raw/grim.dll/functions.json",
+          "note": "The reference image contains its atexit adapter rather than importing atexit."
+        },
+        {
+          "path": "docs/contributor/project-tracking/third-party-libs.md",
+          "note": "VC6 SP6 atonexit.obj uniquely matches Grim's __onexit and _atexit functions byte-for-byte."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "_atexit",
+          "binding": "function"
+        }
+      ]
+    },
+    {
+      "name": "msvc6-toolchain",
+      "kind": "toolchain",
+      "resolution": "archive-library",
+      "archive": "vc6-sp6-msvcrt",
+      "evidence": [
+        {
+          "path": "analysis/native/grim.dll/closure.json",
+          "note": "The native closure classifier identifies these as MSVC toolchain externals."
+        },
+        {
+          "path": "docs/contributor/project-tracking/third-party-libs.md",
+          "note": "VC6 SP6 dllsupp.obj defines __except_list and __fltused as absolute toolchain symbols."
+        }
+      ],
+      "symbols": [
+        {
+          "name": "__except_list",
+          "binding": "data"
+        },
+        {
+          "name": "__fltused",
+          "binding": "data"
+        }
+      ]
+    }
+  ]
+}

@@ -558,9 +558,8 @@ class GameLoopView:
 
         self._demo_trial_info = None
         self._tick_statistics_playtime(dt)
-        if gameplay is not None:
-            if self._update_demo_trial_overlay(dt):
-                return
+        if gameplay is not None and self._update_demo_trial_overlay(dt):
+            return
 
         self._active.update(dt)
         self._sync_gameplay_frame_telemetry_to_state()
@@ -740,7 +739,7 @@ class GameLoopView:
             console.quit_requested = False
 
     def _tick_statistics_playtime(self, dt: float) -> None:
-        # Native `_game_sequence_id` advances on gameplay frames only (state 9)
+        # Native `_play_time_ms` advances on gameplay frames only (state 9)
         # and is used by the Statistics "played for ... hours ... minutes" row.
         if self.state.demo_enabled:
             return
@@ -749,7 +748,7 @@ class GameLoopView:
         delta_ms = int(float(dt) * 1000.0)
         if delta_ms <= 0:
             return
-        self.state.status.game_sequence_id = int(self.state.status.game_sequence_id + delta_ms)
+        self.state.status.play_time_ms = int(self.state.status.play_time_ms + delta_ms)
 
     def _sync_console_elapsed_ms(self) -> None:
         views: list[Screen] = []
@@ -801,7 +800,7 @@ class GameLoopView:
         current = demo_trial_overlay_info(
             demo_build=True,
             game_mode_id=mode_id,
-            global_playtime_ms=int(self.state.status.game_sequence_id),
+            global_playtime_ms=int(self.state.status.play_time_ms),
             quest_grace_elapsed_ms=int(self.state.demo_trial_elapsed_ms),
             quest_level=quest_level,
         )
@@ -812,18 +811,18 @@ class GameLoopView:
             demo_build=True,
             game_mode_id=mode_id,
             overlay_visible=bool(current.visible),
-            global_playtime_ms=int(self.state.status.game_sequence_id),
+            global_playtime_ms=int(self.state.status.play_time_ms),
             quest_grace_elapsed_ms=int(self.state.demo_trial_elapsed_ms),
             dt_ms=int(dt_ms),
         )
-        if used_ms != int(self.state.status.game_sequence_id):
-            self.state.status.game_sequence_id = int(used_ms)
+        if used_ms != int(self.state.status.play_time_ms):
+            self.state.status.play_time_ms = int(used_ms)
         self.state.demo_trial_elapsed_ms = int(grace_ms)
 
         info = demo_trial_overlay_info(
             demo_build=True,
             game_mode_id=mode_id,
-            global_playtime_ms=int(self.state.status.game_sequence_id),
+            global_playtime_ms=int(self.state.status.play_time_ms),
             quest_grace_elapsed_ms=int(self.state.demo_trial_elapsed_ms),
             quest_level=quest_level,
         )
@@ -949,9 +948,19 @@ class GameLoopView:
         level = self.state.pending_quest_level
         if level is None:
             return
+        # The native retry counter is one shared global: the failed-quest
+        # screen increments it and creature spawning consumes the same value.
+        # QuestMode persists across front-view transitions, so refresh its
+        # launch setting from the game owner before every retry.
+        gameplay.quest_fail_retry_count = int(self.state.quest_fail_retry_count)
         gameplay.start_run(level, status=self.state.status)
 
     def _resolve_gameplay_action(self, gameplay: GameplayScreen, action: str | None) -> str | None:
+        if isinstance(gameplay, QuestMode):
+            # Hardcore creature spawning clears the native global. Reflect the
+            # simulation-owned value back into the front-end owner before a
+            # failed-run panel (or any early exit) observes it.
+            self.state.quest_fail_retry_count = int(gameplay.sim_world.spawn_env.quest_fail_retry_count)
         if action == "open_high_scores":
             self.state.pending_high_scores = HighScoresRequest(game_mode_id=gameplay.default_game_mode_id)
             return action

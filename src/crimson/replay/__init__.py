@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..sim.input_providers import GameFrameRngAdvanceOperation
 from .codec import ReplayCodecError, dump_replay, dump_replay_file, load_replay, load_replay_file
 from .input_codec import pack_player_input, pack_tick_inputs, unpack_player_input, unpack_tick_inputs
 from .recorder import ReplayRecorder
@@ -31,40 +32,41 @@ from .types import (
 from .versioning import ReplayGameVersionError, ReplayGameVersionWarning, warn_on_game_version_mismatch
 
 __all__ = [
-    "FIRE_DOWN_FLAG",
-    "FIRE_PRESSED_FLAG",
     "AIM_SCHEME_PRESENT_FLAG",
     "AIM_SCHEME_SHIFT",
+    "FIRE_DOWN_FLAG",
+    "FIRE_PRESSED_FLAG",
     "MOVE_BACKWARD_FLAG",
     "MOVE_FORWARD_FLAG",
+    "MOVE_KEYS_PRESENT_FLAG",
     "MOVE_MODE_PRESENT_FLAG",
     "MOVE_MODE_SHIFT",
-    "MOVE_KEYS_PRESENT_FLAG",
     "RELOAD_PRESSED_FLAG",
     "TURN_LEFT_FLAG",
     "TURN_RIGHT_FLAG",
+    "GameFrameRngAdvanceOperation",
     "PackedPlayerInput",
     "PackedTickInputs",
-    "ReplayClaimedStatsSnapshot",
     "Replay",
+    "ReplayClaimedStatsSnapshot",
     "ReplayCodecError",
+    "ReplayGameVersionError",
+    "ReplayGameVersionWarning",
     "ReplayHeader",
     "ReplayRecorder",
     "ReplayTick",
-    "ReplayGameVersionError",
-    "ReplayGameVersionWarning",
     "dump_replay",
     "dump_replay_file",
     "load_replay",
     "load_replay_file",
-    "pack_player_input",
     "pack_input_flags",
+    "pack_player_input",
     "pack_tick_inputs",
-    "unpack_player_input",
-    "unpack_packed_player_input",
     "unpack_input_flags",
     "unpack_input_mode_flags",
     "unpack_input_move_key_flags",
+    "unpack_packed_player_input",
+    "unpack_player_input",
     "unpack_tick_inputs",
     "warn_on_game_version_mismatch",
 ]

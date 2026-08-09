@@ -53,7 +53,6 @@ const bonus_time_max: f32 = 10.0;
 const bonus_weapon_near_radius: f32 = 56.0;
 const bonus_aim_hover_radius: f32 = 24.0;
 const bonus_telekinetic_pickup_ms: f32 = 650.0;
-const reflex_timer_subtract_bias: f32 = 4e-9;
 
 inline fn weaponIdIndex(weapon_id: game_ids.WeaponId) usize {
     return @intCast(@intFromEnum(weapon_id));
@@ -72,6 +71,15 @@ const AllocSlot = union(enum) {
     sentinel,
     index: usize,
 };
+
+pub fn clampSpawnPosition(pos: state_mod.Vec2, world_size: f32) state_mod.Vec2 {
+    var clamped = pos;
+    if (clamped.x < bonus_spawn_margin) clamped.x = bonus_spawn_margin;
+    if (clamped.y < bonus_spawn_margin) clamped.y = bonus_spawn_margin;
+    if (world_size - bonus_spawn_margin < clamped.x) clamped.x = world_size - bonus_spawn_margin;
+    if (world_size - bonus_spawn_margin < clamped.y) clamped.y = world_size - bonus_spawn_margin;
+    return clamped;
+}
 
 pub const BonusPool = struct {
     entries: [bonus_pool_size]BonusEntry = [_]BonusEntry{.{}} ** bonus_pool_size,
@@ -102,15 +110,13 @@ pub const BonusPool = struct {
         if (state.bonus_spawn_guard) return null;
         if (players.len == 0) return null;
 
-        var has_pistol = false;
-        for (players) |player| {
-            if (player.weapon.weapon_id == game_ids.WeaponId.pistol) {
-                has_pistol = true;
-                break;
-            }
-        }
+        const has_pistol = anyPlayerHasPistol(players);
+        const force_drop_has_pistol = if (state.preserve_bugs)
+            nativeForceDropHasPistol(players)
+        else
+            has_pistol;
 
-        if (has_pistol and (state.rng.randTagged(rng_callers.bonus_try_spawn_on_kill_pistol_force_weapon) & 3) < 3) {
+        if (force_drop_has_pistol and (state.rng.randTagged(rng_callers.bonus_try_spawn_on_kill_pistol_force_weapon) & 3) < 3) {
             const slot = spawnAtPos(self, pos, state, players, world_size);
             var entry = slotPtr(self, slot);
             entry.bonus_id = .weapon;
@@ -127,7 +133,9 @@ pub const BonusPool = struct {
                 return null;
             }
 
-            if (entry.amount == weapon_data.weaponIdToInt(.pistol) or anyPerkActive(players, PerkId.my_favourite_weapon)) {
+            if (entry.amount == weapon_data.weaponIdToInt(.pistol) or
+                perkActiveByBugPolicy(players, PerkId.my_favourite_weapon, state.preserve_bugs))
+            {
                 clearEntry(self, entry);
                 return null;
             }
@@ -139,11 +147,15 @@ pub const BonusPool = struct {
         const base_roll = state.rng.randTagged(rng_callers.bonus_try_spawn_on_kill_base_gate);
         if ((base_roll % 9) != 1) {
             var allow_without_magnet = false;
-            if (has_pistol) {
+            const fallback_gate_has_pistol = if (state.preserve_bugs)
+                players[0].weapon.weapon_id == .pistol
+            else
+                has_pistol;
+            if (fallback_gate_has_pistol) {
                 allow_without_magnet = (state.rng.randTagged(rng_callers.bonus_try_spawn_on_kill_pistol_allow_without_magnet) % 5) == 1;
             }
             if (!allow_without_magnet) {
-                if (!anyPerkActive(players, PerkId.bonus_magnet)) {
+                if (!perkActiveByBugPolicy(players, PerkId.bonus_magnet, state.preserve_bugs)) {
                     return null;
                 }
                 if ((state.rng.randTagged(rng_callers.bonus_try_spawn_on_kill_bonus_magnet) % 10) != 2) return null;
@@ -153,19 +165,9 @@ pub const BonusPool = struct {
         const slot = spawnAtPos(self, pos, state, players, world_size);
         var entry = slotPtr(self, slot);
 
-        if (entry.bonus_id == .weapon) {
-            const near_sq = bonus_weapon_near_radius * bonus_weapon_near_radius;
-            var near_player = false;
-            for (players) |player| {
-                if (distanceSq(pos, player.pos) < near_sq) {
-                    near_player = true;
-                    break;
-                }
-            }
-            if (near_player) {
-                entry.bonus_id = .points;
-                entry.amount = 100;
-            }
+        if (entry.bonus_id == .weapon and weaponDropNearPlayer(pos, players, state.preserve_bugs)) {
+            entry.bonus_id = .points;
+            entry.amount = 100;
         }
 
         if (entry.bonus_id != .points and countMatches(self, entry.bonus_id) > 1) {
@@ -173,12 +175,9 @@ pub const BonusPool = struct {
             return null;
         }
 
-        if (entry.bonus_id == .weapon) {
-            const weapon_id = weapon_data.weaponIdFromInt(entry.amount);
-            if (carriedWeaponId(players, weapon_id)) {
-                clearEntry(self, entry);
-                return null;
-            }
+        if (suppressSpawnedBonusForCarriedWeapon(entry.*, players, state.preserve_bugs)) {
+            clearEntry(self, entry);
+            return null;
         }
 
         if (slot == .sentinel) return null;
@@ -193,32 +192,37 @@ pub const BonusPool = struct {
         state: *state_mod.GameplayState,
         world_size: f32,
     ) ?*BonusEntry {
-        _ = state;
-        if (pos.x < bonus_spawn_margin or pos.y < bonus_spawn_margin or
-            pos.x > world_size - bonus_spawn_margin or pos.y > world_size - bonus_spawn_margin)
-        {
-            return null;
-        }
+        const clamped_pos = clampSpawnPosition(pos, world_size);
+        if (state.game_mode == .rush) return null;
 
-        var slot = allocSlotOrSentinel(self);
-        const min_dist_sq = bonus_spawn_min_distance * bonus_spawn_min_distance;
-        for (self.entries) |active| {
-            if (active.bonus_id == .unused) continue;
-            if (distanceSq(pos, active.pos) < min_dist_sq) {
-                slot = .sentinel;
-                break;
-            }
-        }
+        const slot = allocSlotOrSentinel(self);
 
         var entry = slotPtr(self, slot);
         entry.bonus_id = bonus_id;
         entry.picked = false;
-        entry.pos = pos;
+        entry.pos = clamped_pos;
         entry.time_left = narrowF32(bonus_time_max);
         entry.time_max = narrowF32(bonus_time_max);
-        entry.amount = if (duration_override >= 0) duration_override else defaultBonusAmount(bonus_id);
+        entry.amount = if (duration_override == -1) defaultBonusAmount(bonus_id) else duration_override;
 
         return if (slot == .sentinel) null else entry;
+    }
+
+    pub fn seedTutorialEntry(
+        self: *BonusPool,
+        index: usize,
+        pos: state_mod.Vec2,
+        bonus_id: BonusId,
+        amount: i32,
+    ) *BonusEntry {
+        const entry = &self.entries[index];
+        entry.bonus_id = bonus_id;
+        entry.time_left = 100.0;
+        entry.time_max = 100.0;
+        entry.picked = false;
+        entry.amount = amount;
+        entry.pos = pos;
+        return entry;
     }
 
     pub fn update(
@@ -231,8 +235,6 @@ pub const BonusPool = struct {
         pickup_records: ?*BonusPickupBuffer,
     ) BonusRuntimeError!void {
         if (!(dt > 0.0)) return;
-
-        const pickup_sq = bonus_pickup_radius * bonus_pickup_radius;
 
         for (&self.entries) |*entry| {
             if (isEmpty(entry.*)) continue;
@@ -259,7 +261,7 @@ pub const BonusPool = struct {
             // pickup radius applies the bonus this tick.
             var picked_now = false;
             for (players) |*player| {
-                if (distanceSq(entry.pos, player.pos) >= pickup_sq) continue;
+                if (!withinNativeRadius(entry.pos, player.pos, bonus_pickup_radius)) continue;
 
                 try applyBonus(state, player, players, entry.bonus_id, entry.amount, entry.pos);
                 appendPickupBonusId(pickup_bonus_ids, pickup_count, entry.bonus_id);
@@ -294,12 +296,10 @@ pub fn updatePrePickupTimers(
         state.bonuses.energizer -= dt;
     }
     if (state.bonuses.reflex_boost > 0.0) {
-        const reflex_before = state.bonuses.reflex_boost;
-        var subtract = dt;
-        if (reflex_before > 0.0 and reflex_before < 1.0) {
-            subtract += reflex_timer_subtract_bias;
-        }
-        state.bonuses.reflex_boost = reflex_before - subtract;
+        state.bonuses.reflex_boost = native_math.pc24Sub(
+            state.bonuses.reflex_boost,
+            dt,
+        );
     }
 }
 
@@ -412,7 +412,7 @@ pub fn emitBonusPickupEffects(
 ) void {
     for (pickups) |pickup| {
         if (pickup.bonus_id != .nuke) {
-            effects.spawnBurst(
+            effects.spawnBurstWithCallers(
                 state,
                 pickup.pos,
                 12,
@@ -420,6 +420,7 @@ pub fn emitBonusPickupEffects(
                 0.4,
                 0.1,
                 .{ .r = 0.4, .g = 0.5, .b = 1.0, .a = 0.5 },
+                effects_mod.EffectPool.bonus_pickup_burst_callers,
             );
         }
         switch (pickup.bonus_id) {
@@ -521,7 +522,10 @@ fn bonusTelekineticUpdate(
         player.bonus_aim_hover_timer_ms += dt_ms;
 
         if (player.bonus_aim_hover_timer_ms <= bonus_telekinetic_pickup_ms) continue;
-        if (!perkActive(player.*, PerkId.telekinetic)) continue;
+        // Native calls the singleton perk_count_get here, so player zero owns
+        // the perk gate even though the iterated player receives the pickup.
+        const perk_player = if (state.preserve_bugs and players.len > 0) players[0] else player.*;
+        if (!perkActive(perk_player, PerkId.telekinetic)) continue;
 
         var entry = &pool.entries[hovered.index];
         if (entry.picked or entry.bonus_id == .unused) continue;
@@ -548,9 +552,7 @@ fn applyFireblastBonus(
     origin: state_mod.Vec2,
 ) void {
     const projectile_owner = owner_ref.OwnerRef.fromLocalPlayer(0);
-    const prev_spawn_guard = state.bonus_spawn_guard;
     state.bonus_spawn_guard = true;
-    defer state.bonus_spawn_guard = prev_spawn_guard;
 
     const count: usize = 16;
     const step = std.math.tau / @as(f32, @floatFromInt(count));
@@ -560,6 +562,7 @@ fn applyFireblastBonus(
         const meta = projectileTravelBudgetFromRawId(type_id);
         _ = projectiles.spawn(origin, narrowF32(angle), type_id, projectile_owner, meta, false);
     }
+    state.bonus_spawn_guard = false;
 }
 
 fn applyShockChainBonus(
@@ -594,13 +597,12 @@ fn applyShockChainBonus(
     const type_id = @intFromEnum(game_ids.ProjectileTypeId.ion_rifle);
     const meta = projectileTravelBudgetFromRawId(type_id);
 
-    const prev_spawn_guard = state.bonus_spawn_guard;
     state.bonus_spawn_guard = true;
-    defer state.bonus_spawn_guard = prev_spawn_guard;
 
     state.shock_chain_links_left = 0x20;
     const proj_idx = projectiles.spawn(origin, narrowF32(angle), type_id, projectile_owner, meta, false);
     state.shock_chain_projectile_id = @intCast(proj_idx);
+    state.bonus_spawn_guard = false;
 }
 
 fn applyNukeBonus(
@@ -627,38 +629,56 @@ fn applyNukeBonus(
     bullet_count += 4;
     var bullet_idx: i32 = 0;
     while (bullet_idx < bullet_count) : (bullet_idx += 1) {
-        const angle = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.bonus_apply_nuke_pistol_angle) % 0x274)) * 0.01;
+        const angle = native_math.pc24Mul(
+            @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.bonus_apply_nuke_pistol_angle) % 0x274)),
+            @as(f32, 0.01),
+        );
         var type_id = @intFromEnum(game_ids.ProjectileTypeId.pistol);
-        applyPlayerProjectileSpawnRules(state, players, projectile_owner, &type_id);
+        applyPlayerProjectileSpawnRules(state, players, projectile_owner, 0, &type_id);
         const meta = projectileTravelBudgetFromRawId(type_id);
         const proj_idx = projectiles.spawn(origin, narrowF32(angle), type_id, projectile_owner, meta, false);
-        const speed_scale = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.bonus_apply_nuke_pistol_speed_scale) % 0x32)) * 0.01 + 0.5;
-        projectiles.entries[proj_idx].speed_scale *= narrowF32(speed_scale);
+        const speed_scale = native_math.pc24Add(
+            native_math.pc24Mul(
+                @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.bonus_apply_nuke_pistol_speed_scale) % 0x32)),
+                @as(f32, 0.01),
+            ),
+            @as(f32, 0.5),
+        );
+        projectiles.entries[proj_idx].speed_scale = native_math.pc24Mul(
+            projectiles.entries[proj_idx].speed_scale,
+            speed_scale,
+        );
     }
 
     for (0..2) |gauss_idx| {
         const angle_caller = if (gauss_idx == 0) rng_callers.bonus_apply_nuke_gauss_angle_1 else rng_callers.bonus_apply_nuke_gauss_angle_2;
-        const angle = @as(f32, @floatFromInt(state.rng.randTagged(angle_caller) % 0x274)) * 0.01;
+        const angle = native_math.pc24Mul(
+            @as(f32, @floatFromInt(state.rng.randTagged(angle_caller) % 0x274)),
+            @as(f32, 0.01),
+        );
         var type_id = @intFromEnum(game_ids.ProjectileTypeId.gauss_gun);
-        applyPlayerProjectileSpawnRules(state, players, projectile_owner, &type_id);
+        applyPlayerProjectileSpawnRules(state, players, projectile_owner, 0, &type_id);
         const meta = projectileTravelBudgetFromRawId(type_id);
         _ = projectiles.spawn(origin, narrowF32(angle), type_id, projectile_owner, meta, false);
     }
 
     effects.spawnExplosionBurst(state, origin, 1.0, 5);
 
-    const prev_spawn_guard = state.bonus_spawn_guard;
     state.bonus_spawn_guard = true;
-    defer state.bonus_spawn_guard = prev_spawn_guard;
 
     for (creatures.entries, 0..) |creature, idx| {
         if (!creature.active) continue;
-        const dx = creature.pos.x - origin.x;
-        const dy = creature.pos.y - origin.y;
+        const dx = native_math.pc24Sub(creature.pos.x, origin.x);
+        const dy = native_math.pc24Sub(creature.pos.y, origin.y);
         if (@abs(dx) > 256.0 or @abs(dy) > 256.0) continue;
-        const dist = std.math.sqrt(dx * dx + dy * dy);
-        if (dist >= 256.0) continue;
-        const damage = (256.0 - dist) * 5.0;
+        const distance_sq = native_math.pc24Add(
+            native_math.pc24Mul(dx, dx),
+            native_math.pc24Mul(dy, dy),
+        );
+        const distance = native_math.pc24Sqrt(distance_sq);
+        const damage_base = native_math.pc24Sub(@as(f32, 256.0), distance);
+        if (!(damage_base > 0.0)) continue;
+        const damage = native_math.pc24Mul(damage_base, @as(f32, 5.0));
         const xp = creatures.applyExplosionDamage(
             state,
             players,
@@ -674,6 +694,7 @@ fn applyNukeBonus(
         );
         if (xp > 0) nuke_kill_count += 1;
     }
+    state.bonus_spawn_guard = false;
 }
 
 fn bonusFindAimHoverEntry(
@@ -706,7 +727,10 @@ fn applyBonus(
         effective_amount = defaultBonusAmount(bonus_id);
     }
 
-    const economist_multiplier: f32 = if (perkActive(player.*, PerkId.bonus_economist)) 1.5 else 1.0;
+    // Native perk_count_get always reads player slot zero, even when player one
+    // is the pickup owner. Corrected mode keeps intuitive per-player ownership.
+    const perk_player = if (state.preserve_bugs and players.len > 0) players[0] else player.*;
+    const economist_multiplier: f32 = if (perkActive(perk_player, PerkId.bonus_economist)) 1.5 else 1.0;
     state.sfx_queue.append(.ui_bonus);
 
     switch (bonus_id) {
@@ -723,9 +747,7 @@ fn applyBonus(
             state.bonuses.weapon_power_up = narrowF32(state.bonuses.weapon_power_up + @as(f32, @floatFromInt(effective_amount)) * economist_multiplier);
             player.weapon_reset_latch = 0;
             player.weapon.shot_cooldown = 0.0;
-            player.weapon.reload_active = false;
             player.weapon.reload_timer = 0.0;
-            player.weapon.reload_timer_max = 0.0;
             player.weapon.ammo = @floatFromInt(player.weapon.clip_size);
         },
         .double_experience => {
@@ -735,9 +757,7 @@ fn applyBonus(
             state.bonuses.reflex_boost = narrowF32(state.bonuses.reflex_boost + @as(f32, @floatFromInt(effective_amount)) * economist_multiplier);
             for (players) |*target| {
                 target.weapon.ammo = @floatFromInt(target.weapon.clip_size);
-                target.weapon.reload_active = false;
                 target.weapon.reload_timer = 0.0;
-                target.weapon.reload_timer_max = 0.0;
             }
         },
         .shield => {
@@ -759,9 +779,7 @@ fn applyBonus(
             player.fire_bullets_timer = narrowF32(player.fire_bullets_timer + bonusApplySeconds(bonus_id, effective_amount) * economist_multiplier);
             player.weapon_reset_latch = 0;
             player.weapon.shot_cooldown = 0.0;
-            player.weapon.reload_active = false;
             player.weapon.reload_timer = 0.0;
-            player.weapon.reload_timer_max = 0.0;
             player.weapon.ammo = @floatFromInt(player.weapon.clip_size);
         },
         .weapon => {
@@ -840,6 +858,28 @@ fn anyPerkActive(players: []const state_mod.PlayerState, perk_id: PerkId) bool {
     return false;
 }
 
+fn anyPlayerHasPistol(players: []const state_mod.PlayerState) bool {
+    for (players) |player| {
+        if (player.weapon.weapon_id == .pistol) return true;
+    }
+    return false;
+}
+
+fn nativeForceDropHasPistol(players: []const state_mod.PlayerState) bool {
+    if (players.len == 0) return false;
+    if (players[0].weapon.weapon_id == .pistol) return true;
+    return players.len == 2 and players[1].weapon.weapon_id == .pistol;
+}
+
+fn perkActiveByBugPolicy(
+    players: []const state_mod.PlayerState,
+    perk_id: PerkId,
+    preserve_bugs: bool,
+) bool {
+    if (preserve_bugs) return primaryPlayerPerkActive(players, perk_id);
+    return anyPerkActive(players, perk_id);
+}
+
 fn carriedWeaponId(players: []const state_mod.PlayerState, weapon_id: game_ids.WeaponId) bool {
     for (players) |player| {
         if (player.weapon.weapon_id == weapon_id) return true;
@@ -848,6 +888,36 @@ fn carriedWeaponId(players: []const state_mod.PlayerState, weapon_id: game_ids.W
         }
     }
     return false;
+}
+
+fn suppressSpawnedBonusForCarriedWeapon(
+    entry: BonusEntry,
+    players: []const state_mod.PlayerState,
+    preserve_bugs: bool,
+) bool {
+    if (preserve_bugs) {
+        if (players.len == 0) return false;
+        const amount_weapon_id = std.enums.fromInt(game_ids.WeaponId, entry.amount) orelse return false;
+        return players[0].weapon.weapon_id == amount_weapon_id;
+    }
+    if (entry.bonus_id != .weapon) return false;
+    const weapon_id = std.enums.fromInt(game_ids.WeaponId, entry.amount) orelse return false;
+    return carriedWeaponId(players, weapon_id);
+}
+
+test "preserved bonus suppression treats amount as weapon id" {
+    const players = [_]state_mod.PlayerState{.{
+        .index = 0,
+        .pos = .{},
+        .weapon = .{ .weapon_id = .multi_plasma },
+    }};
+    const entry: BonusEntry = .{
+        .bonus_id = .weapon_power_up,
+        .amount = 10,
+    };
+
+    try std.testing.expect(suppressSpawnedBonusForCarriedWeapon(entry, players[0..], true));
+    try std.testing.expect(!suppressSpawnedBonusForCarriedWeapon(entry, players[0..], false));
 }
 
 fn weaponRefreshAvailable(state: *state_mod.GameplayState) void {
@@ -881,7 +951,7 @@ fn weaponRefreshAvailable(state: *state_mod.GameplayState) void {
         state.weapon_available.set(.submachine_gun, true);
     }
 
-    if (!state.demo_mode_active and unlock_index_full >= 0x28) {
+    if (unlock_index_full >= 0x28) {
         state.weapon_available.set(.splitter_gun, true);
     }
 
@@ -892,7 +962,6 @@ fn weaponRefreshAvailable(state: *state_mod.GameplayState) void {
 
 pub fn buildWeaponAvailabilityForStatus(
     game_mode: game_ids.GameModeId,
-    demo_mode_active: bool,
     quest_unlock_index: i32,
     quest_unlock_index_full: i32,
 ) state_mod.WeaponAvailability {
@@ -914,7 +983,7 @@ pub fn buildWeaponAvailabilityForStatus(
         availability.set(.submachine_gun, true);
     }
 
-    if (!demo_mode_active and quest_unlock_index_full >= 0x28) {
+    if (quest_unlock_index_full >= 0x28) {
         availability.set(.splitter_gun, true);
     }
 
@@ -931,7 +1000,7 @@ pub fn questUnlockWeaponForIndex(global_index: i32) ?game_ids.WeaponId {
 pub fn weaponPickRandomAvailable(state: *state_mod.GameplayState) game_ids.WeaponId {
     weaponRefreshAvailable(state);
 
-    for (0..1000) |_| {
+    while (true) {
         var base_rand = state.rng.randTagged(rng_callers.weapon_pick_random_available_pick);
         var weapon_id: i32 = @intCast(base_rand % weapon_drop_id_count + 1);
         var weapon_enum = weapon_data.weaponIdFromInt(weapon_id);
@@ -955,7 +1024,6 @@ pub fn weaponPickRandomAvailable(state: *state_mod.GameplayState) game_ids.Weapo
         }
         return weapon_enum;
     }
-    return .pistol;
 }
 
 fn bonusPickRandomType(
@@ -1002,19 +1070,26 @@ fn bonusPickSuppressed(
     }
 
     if (bonus_id == .freeze and state.bonuses.freeze > 0.0) return true;
-    if (bonus_id == .shield and anyShieldActive(players)) return true;
+    // Native reads both shield slots directly, but perk_count_get reads only
+    // player 0. Preserve that asymmetry for larger port-side player slices.
+    if (bonus_id == .shield and nativeShieldActive(players)) return true;
     if (bonus_id == .weapon and has_fire_bullets_drop) return true;
-    if (bonus_id == .weapon and anyPerkActive(players, PerkId.my_favourite_weapon)) return true;
-    if (bonus_id == .medikit and anyPerkActive(players, PerkId.death_clock)) return true;
+    if (bonus_id == .weapon and primaryPlayerPerkActive(players, PerkId.my_favourite_weapon)) return true;
+    if (bonus_id == .medikit and primaryPlayerPerkActive(players, PerkId.death_clock)) return true;
     if (bonus_id == .unused) return true;
     return false;
 }
 
-fn anyShieldActive(players: []const state_mod.PlayerState) bool {
-    for (players) |player| {
+fn nativeShieldActive(players: []const state_mod.PlayerState) bool {
+    for (players[0..@min(players.len, 2)]) |player| {
         if (player.shield_timer > 0.0) return true;
     }
     return false;
+}
+
+fn primaryPlayerPerkActive(players: []const state_mod.PlayerState, perk_id: PerkId) bool {
+    if (players.len == 0) return false;
+    return players[0].perk_counts.get(perk_id) > 0;
 }
 
 fn bonusIdFromRoll(
@@ -1056,6 +1131,40 @@ fn distanceSq(a: state_mod.Vec2, b: state_mod.Vec2) f32 {
     return dx * dx + dy * dy;
 }
 
+fn withinNativeRadius(a: state_mod.Vec2, b: state_mod.Vec2, radius: f32) bool {
+    return native_math.pc24Hypot(
+        native_math.pc24Sub(a.x, b.x),
+        native_math.pc24Sub(a.y, b.y),
+    ) < radius;
+}
+
+fn weaponDropNearPlayer(
+    pos: state_mod.Vec2,
+    players: []const state_mod.PlayerState,
+    preserve_bugs: bool,
+) bool {
+    const candidates = if (preserve_bugs and players.len > 0) players[0..1] else players;
+    for (candidates) |player| {
+        if (withinNativeRadius(pos, player.pos, bonus_weapon_near_radius)) return true;
+    }
+    return false;
+}
+
+test "weapon drop near check uses native pc24 boundary and player slot" {
+    const players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{ .x = 500.0, .y = 500.0 } },
+    };
+
+    try std.testing.expect(!weaponDropNearPlayer(
+        .{ .x = 43.35334777832031, .y = 35.44696044921875 },
+        players[0..1],
+        true,
+    ));
+    try std.testing.expect(!weaponDropNearPlayer(.{ .x = 500.0, .y = 500.0 }, players[0..], true));
+    try std.testing.expect(weaponDropNearPlayer(.{ .x = 500.0, .y = 500.0 }, players[0..], false));
+}
+
 fn projectileTravelBudgetFromRawId(raw_id: i32) f32 {
     const weapon_id = weapon_data.weaponIdFromInt(raw_id);
     return weapon_data.weapon_stats.get(weapon_id).travel_budget;
@@ -1065,6 +1174,7 @@ fn applyPlayerProjectileSpawnRules(
     state: *state_mod.GameplayState,
     players: []const state_mod.PlayerState,
     owner: owner_ref.OwnerRef,
+    owner_player_index: ?usize,
     type_id: *i32,
 ) void {
     if (state.bonus_spawn_guard) return;
@@ -1072,26 +1182,80 @@ fn applyPlayerProjectileSpawnRules(
         .player => |ref| ref,
         else => return,
     };
-    const player_index: ?usize = if (player_ref.local_host and player_ref.index == 0)
+    if (state.preserve_bugs and !owner.usesNativePlayerProjectilePath()) return;
+    const inferred_player_index: ?usize = if (player_ref.local_host and player_ref.index == 0)
         if (players.len == 1) @as(?usize, 0) else null
     else if (player_ref.index < players.len)
         player_ref.index
     else
         null;
+    const player_index: ?usize = if (owner_player_index) |idx|
+        idx
+    else
+        inferred_player_index;
 
     var shot_credit: i32 = 1;
+    const fire_bullets_active = if (state.preserve_bugs) blk: {
+        for (players[0..@min(players.len, 2)]) |player| {
+            if (player.fire_bullets_timer > 0.0) break :blk true;
+        }
+        break :blk false;
+    } else if (player_index) |idx|
+        idx < players.len and players[idx].fire_bullets_timer > 0.0
+    else
+        false;
+    if (type_id.* != @intFromEnum(game_ids.ProjectileTypeId.fire_bullets) and
+        fire_bullets_active)
+    {
+        type_id.* = @intFromEnum(game_ids.ProjectileTypeId.fire_bullets);
+        shot_credit = 2;
+    }
     if (player_index) |idx| {
-        if (type_id.* != @intFromEnum(game_ids.ProjectileTypeId.fire_bullets) and
-            players[idx].fire_bullets_timer > 0.0)
-        {
-            type_id.* = @intFromEnum(game_ids.ProjectileTypeId.fire_bullets);
-            shot_credit = 2;
-        }
-        if (idx < state.shots_fired.len) {
-            state.shots_fired[idx] += shot_credit;
-        }
+        if (idx < state.shots_fired.len) state.shots_fired[idx] += shot_credit;
     }
     state.shots_fired_total += shot_credit;
+}
+
+test "player projectile spawn rules preserve global fire bullets timer" {
+    const players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{}, .fire_bullets_timer = 1.0 },
+    };
+    const owner = owner_ref.OwnerRef.fromLocalPlayer(0);
+
+    var preserved_state = state_mod.GameplayState.init(1);
+    preserved_state.preserve_bugs = true;
+    var preserved_type_id = @intFromEnum(game_ids.ProjectileTypeId.pistol);
+    applyPlayerProjectileSpawnRules(
+        &preserved_state,
+        players[0..],
+        owner,
+        0,
+        &preserved_type_id,
+    );
+    try std.testing.expectEqual(
+        @intFromEnum(game_ids.ProjectileTypeId.fire_bullets),
+        preserved_type_id,
+    );
+    try std.testing.expectEqual(@as(i32, 2), preserved_state.shots_fired[0]);
+    try std.testing.expectEqual(@as(i32, 2), preserved_state.shots_fired_total);
+
+    var corrected_state = state_mod.GameplayState.init(1);
+    corrected_state.preserve_bugs = false;
+    var corrected_type_id = @intFromEnum(game_ids.ProjectileTypeId.pistol);
+    applyPlayerProjectileSpawnRules(
+        &corrected_state,
+        players[0..],
+        owner,
+        0,
+        &corrected_type_id,
+    );
+    try std.testing.expectEqual(
+        @intFromEnum(game_ids.ProjectileTypeId.pistol),
+        corrected_type_id,
+    );
+    try std.testing.expectEqual(@as(i32, 1), corrected_state.shots_fired[0]);
+    try std.testing.expectEqual(@as(i32, 1), corrected_state.shots_fired_total);
 }
 
 fn appendPickupBonusId(
@@ -1175,10 +1339,13 @@ fn spawnAtPos(
     var slot = allocSlotOrSentinel(self);
     const bonus_id = bonusPickRandomType(self, state, players);
 
-    const min_dist_sq = bonus_spawn_min_distance * bonus_spawn_min_distance;
     for (self.entries) |active| {
         if (active.bonus_id == .unused) continue;
-        if (distanceSq(pos, active.pos) < min_dist_sq) {
+        const distance = native_math.pc24Hypot(
+            native_math.pc24Sub(pos.x, active.pos.x),
+            native_math.pc24Sub(pos.y, active.pos.y),
+        );
+        if (distance < bonus_spawn_min_distance) {
             slot = .sentinel;
             break;
         }
@@ -1200,6 +1367,26 @@ fn spawnAtPos(
     }
 
     return slot;
+}
+
+test "bonus spawn spacing uses native pc24 hypotenuse boundary" {
+    var state = state_mod.GameplayState.init(1);
+    var pool: BonusPool = .{};
+    pool.entries[0].bonus_id = .points;
+    pool.entries[0].pos = .{ .x = 100.0, .y = 100.0 };
+
+    const slot = spawnAtPos(
+        &pool,
+        .{ .x = 123.16073417663574, .y = 122.08122253417969 },
+        &state,
+        &.{},
+        1024.0,
+    );
+
+    try std.testing.expect(switch (slot) {
+        .index => true,
+        .sentinel => false,
+    });
 }
 
 test "bonus pool spawn-on-kill can materialize weapon drop" {
@@ -1267,6 +1454,61 @@ test "bonus update pre-pickup decrements timers" {
     try std.testing.expect(state.bonuses.reflex_boost < 0.5);
 }
 
+test "bonus pickup uses native pc24 radius boundary" {
+    var state = state_mod.GameplayState.init(1);
+    var pool: BonusPool = .{};
+    pool.entries[0] = .{
+        .bonus_id = .shield,
+        .time_left = 1.0,
+        .time_max = 1.0,
+        .pos = .{},
+    };
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{ .x = 25.999998092651367, .y = 0.009600000455975533 },
+        },
+    };
+    var pickup_bonus_ids = [_]BonusId{.unused} ** bonus_pool_size;
+    var pickup_count: usize = 0;
+
+    try pool.update(
+        &state,
+        players[0..],
+        0.01,
+        &pickup_bonus_ids,
+        &pickup_count,
+        null,
+    );
+
+    try std.testing.expectEqual(@as(usize, 0), pickup_count);
+    try std.testing.expect(!pool.entries[0].picked);
+    try std.testing.expectEqual(@as(f32, 0.0), players[0].shield_timer);
+}
+
+test "tutorial bonus seed overwrites its fixed slot with the native timer" {
+    var pool: BonusPool = .{};
+    pool.entries[1].bonus_id = .nuke;
+    pool.entries[1].time_left = 7.0;
+
+    const entry = pool.seedTutorialEntry(
+        1,
+        .{ .x = 600.0, .y = 400.0 },
+        .points,
+        1000,
+    );
+
+    try std.testing.expect(entry == &pool.entries[1]);
+    try std.testing.expectEqual(BonusId.unused, pool.entries[0].bonus_id);
+    try std.testing.expectEqual(BonusId.points, entry.bonus_id);
+    try std.testing.expectApproxEqAbs(@as(f32, 100.0), entry.time_left, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 100.0), entry.time_max, 1e-6);
+    try std.testing.expect(!entry.picked);
+    try std.testing.expectEqual(@as(i32, 1000), entry.amount);
+    try std.testing.expectApproxEqAbs(@as(f32, 600.0), entry.pos.x, 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 400.0), entry.pos.y, 1e-6);
+}
+
 test "bonus spawn-on-kill rng cadence matches observed pistol path" {
     var state = state_mod.GameplayState.init(1);
     state.rng.state = 3_857_056_479;
@@ -1286,6 +1528,69 @@ test "bonus spawn-on-kill rng cadence matches observed pistol path" {
     try std.testing.expectEqual(BonusId.weapon, spawned.?.bonus_id);
     try std.testing.expectEqual(@as(i32, 11), spawned.?.amount);
     try std.testing.expectEqual(@as(u32, 258_047_690), state.rng.state);
+}
+
+test "spawn-on-kill preserve bugs keeps native player slot policy" {
+    var players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{},
+            .weapon = .{ .weapon_id = .assault_rifle },
+        },
+        .{
+            .index = 1,
+            .pos = .{},
+            .weapon = .{ .weapon_id = .pistol },
+        },
+        .{
+            .index = 2,
+            .pos = .{},
+            .weapon = .{ .weapon_id = .pistol },
+        },
+    };
+    players[1].perk_counts.set(PerkId.my_favourite_weapon, 1);
+    players[1].perk_counts.set(PerkId.bonus_magnet, 1);
+
+    try std.testing.expect(anyPlayerHasPistol(players[0..]));
+    try std.testing.expect(nativeForceDropHasPistol(players[0..2]));
+    try std.testing.expect(!nativeForceDropHasPistol(players[0..]));
+    try std.testing.expect(perkActiveByBugPolicy(players[0..], PerkId.my_favourite_weapon, false));
+    try std.testing.expect(!perkActiveByBugPolicy(players[0..], PerkId.my_favourite_weapon, true));
+    try std.testing.expect(perkActiveByBugPolicy(players[0..], PerkId.bonus_magnet, false));
+    try std.testing.expect(!perkActiveByBugPolicy(players[0..], PerkId.bonus_magnet, true));
+}
+
+test "native forced weapon drop ignores player two favourite weapon" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    state.rng.state = 3_857_056_479;
+    state.game_mode = .survival;
+    state.status_quest_unlock_index = 49;
+    state.status_quest_unlock_index_full = 50;
+    state.status_weapon_usage_counts.set(.splitter_gun, 10);
+
+    var pool: BonusPool = .{};
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
+        .{
+            .index = 1,
+            .pos = .{ .x = 512.0, .y = 512.0 },
+            .weapon = .{ .weapon_id = .assault_rifle },
+        },
+    };
+    player_runtime.weaponAssignPlayer(&players[0], .pistol);
+    players[1].perk_counts.set(PerkId.my_favourite_weapon, 1);
+
+    const spawned = pool.trySpawnOnKill(
+        .{ .x = 420.0, .y = 420.0 },
+        &state,
+        players[0..],
+        1024.0,
+    );
+
+    try std.testing.expect(spawned != null);
+    try std.testing.expectEqual(BonusId.weapon, spawned.?.bonus_id);
+    try std.testing.expectEqual(@as(i32, 11), spawned.?.amount);
 }
 
 test "bonus economist extends double experience timer" {
@@ -1321,6 +1626,58 @@ test "bonus economist extends double experience timer" {
         null,
     );
     try std.testing.expectApproxEqAbs(@as(f32, 9.0), perk_state.bonuses.double_experience, 1e-6);
+}
+
+test "bonus economist keeps native player zero ownership in bug mode" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+    };
+    players[0].perk_counts.set(PerkId.bonus_economist, 1);
+
+    try applyBonus(
+        &state,
+        &players[1],
+        players[0..],
+        .double_experience,
+        10,
+        null,
+    );
+    try std.testing.expectApproxEqAbs(@as(f32, 9.0), state.bonuses.double_experience, 1e-6);
+
+    state.bonuses.double_experience = 0.0;
+    players[0].perk_counts.set(PerkId.bonus_economist, 0);
+    players[1].perk_counts.set(PerkId.bonus_economist, 1);
+    try applyBonus(
+        &state,
+        &players[1],
+        players[0..],
+        .double_experience,
+        10,
+        null,
+    );
+    try std.testing.expectApproxEqAbs(@as(f32, 6.0), state.bonuses.double_experience, 1e-6);
+}
+
+test "bonus economist keeps pickup owner in corrected mode" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+    };
+    players[1].perk_counts.set(PerkId.bonus_economist, 1);
+
+    try applyBonus(
+        &state,
+        &players[1],
+        players[0..],
+        .double_experience,
+        10,
+        null,
+    );
+    try std.testing.expectApproxEqAbs(@as(f32, 9.0), state.bonuses.double_experience, 1e-6);
 }
 
 test "alternate weapon starts with preloaded pistol alt slot" {
@@ -1389,6 +1746,32 @@ test "bonus magnet allows spawn on secondary roll" {
         1024.0,
     );
     try std.testing.expect(perk_spawned != null);
+
+    var native_state = state_mod.GameplayState.init(7);
+    native_state.game_mode = .survival;
+    native_state.preserve_bugs = true;
+    var native_pool: BonusPool = .{};
+    var native_players = [_]state_mod.PlayerState{
+        .{
+            .index = 0,
+            .pos = .{},
+            .weapon = .{ .weapon_id = game_ids.WeaponId.assault_rifle },
+        },
+        .{
+            .index = 1,
+            .pos = .{},
+            .weapon = .{ .weapon_id = game_ids.WeaponId.assault_rifle },
+        },
+    };
+    native_players[1].perk_counts.set(PerkId.bonus_magnet, 1);
+
+    const native_spawned = native_pool.trySpawnOnKill(
+        .{ .x = 100.0, .y = 100.0 },
+        &native_state,
+        native_players[0..],
+        1024.0,
+    );
+    try std.testing.expect(native_spawned == null);
 }
 
 test "bonus pick random type quest suppression parity" {
@@ -1431,6 +1814,29 @@ test "bonus pick random type quest suppression parity" {
     );
 }
 
+test "bonus suppression keeps native player slot asymmetry" {
+    var state = state_mod.GameplayState.init(1);
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+        .{ .index = 1, .pos = .{} },
+        .{ .index = 2, .pos = .{}, .shield_timer = 1.0 },
+    };
+
+    players[1].perk_counts.set(PerkId.my_favourite_weapon, 1);
+    players[1].perk_counts.set(PerkId.death_clock, 1);
+    try std.testing.expect(!bonusPickSuppressed(&state, players[0..], .weapon, false));
+    try std.testing.expect(!bonusPickSuppressed(&state, players[0..], .medikit, false));
+    try std.testing.expect(!bonusPickSuppressed(&state, players[0..], .shield, false));
+
+    players[0].perk_counts.set(PerkId.my_favourite_weapon, 1);
+    players[0].perk_counts.set(PerkId.death_clock, 1);
+    try std.testing.expect(bonusPickSuppressed(&state, players[0..], .weapon, false));
+    try std.testing.expect(bonusPickSuppressed(&state, players[0..], .medikit, false));
+
+    players[1].shield_timer = 1.0;
+    try std.testing.expect(bonusPickSuppressed(&state, players[0..], .shield, false));
+}
+
 test "weapon refresh available includes survival defaults" {
     var state = state_mod.GameplayState.init(1);
     state.game_mode = .survival;
@@ -1457,6 +1863,16 @@ test "weapon refresh available unlocks quest weapon ids by unlock index" {
     try std.testing.expect(!state.weapon_available.get(.shotgun));
 }
 
+test "weapon refresh keeps full version unlocks in demo mode" {
+    var state = state_mod.GameplayState.init(1);
+    state.demo_mode_active = true;
+    state.status_quest_unlock_index_full = 0x28;
+
+    weaponRefreshAvailable(&state);
+
+    try std.testing.expect(state.weapon_available.get(.splitter_gun));
+}
+
 test "weapon pick random available enforces unlock table in quests" {
     var state = state_mod.GameplayState.init(1);
     state.game_mode = .quests;
@@ -1479,20 +1895,17 @@ test "quest unlock weapon lookup exposes exact reward table rows" {
 }
 
 test "weapon pick random available rerolls used weapons on even gate" {
-    const seed: u32 = 160;
+    // CRT rand draws 4917, 9518, 4390: pistol, even reroll gate,
+    // then assault rifle.
+    const seed: u32 = 1494;
     var state = state_mod.GameplayState.init(seed);
     state.game_mode = .quests;
     state.status_quest_unlock_index = 1;
     state.status_quest_unlock_index_full = 0;
     state.status_weapon_usage_counts.set(.pistol, 1);
 
-    // Reference ground truth (weapon_pick_random_available run against
-    // src/crimson with this exact state: quests, unlock 1, pistol used once,
-    // seed 160): the draw sequence lands on PISTOL. The pick loop draws over
-    // all 33 drop ids and retries unavailable ones, so the outcome is a
-    // property of the full RNG path, not of the reroll bias alone.
     const picked = weaponPickRandomAvailable(&state);
-    try std.testing.expectEqual(game_ids.WeaponId.pistol, picked);
+    try std.testing.expectEqual(game_ids.WeaponId.assault_rifle, picked);
 }
 fn setTestBonusEntry(
     pool: *BonusPool,
@@ -1563,6 +1976,79 @@ test "telekinetic picks up bonus after hover timer threshold" {
 
     try std.testing.expect(pool.entries[0].picked);
     try std.testing.expectEqual(@as(i32, 500), perk_players[0].experience);
+}
+
+test "telekinetic keeps native player zero ownership in bug mode" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var pool: BonusPool = .{};
+    setTestBonusEntry(
+        &pool,
+        0,
+        .points,
+        .{ .x = 100.0, .y = 100.0 },
+        500,
+    );
+
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 100.0, .aim = .{} },
+        .{ .index = 1, .pos = .{}, .health = 100.0, .aim = .{ .x = 100.0, .y = 100.0 } },
+    };
+    players[0].perk_counts.set(PerkId.telekinetic, 1);
+
+    try runTelekineticUpdate(&pool, &state, players[0..], 0.7);
+
+    try std.testing.expect(pool.entries[0].picked);
+    try std.testing.expectEqual(@as(i32, 500), players[0].experience);
+    try std.testing.expectEqual(@as(i32, 0), players[1].experience);
+}
+
+test "telekinetic ignores secondary player perk in bug mode" {
+    var state = state_mod.GameplayState.init(1);
+    state.preserve_bugs = true;
+    var pool: BonusPool = .{};
+    setTestBonusEntry(
+        &pool,
+        0,
+        .points,
+        .{ .x = 100.0, .y = 100.0 },
+        500,
+    );
+
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 100.0, .aim = .{} },
+        .{ .index = 1, .pos = .{}, .health = 100.0, .aim = .{ .x = 100.0, .y = 100.0 } },
+    };
+    players[1].perk_counts.set(PerkId.telekinetic, 1);
+
+    try runTelekineticUpdate(&pool, &state, players[0..], 0.7);
+
+    try std.testing.expect(!pool.entries[0].picked);
+    try std.testing.expectEqual(@as(i32, 0), players[1].experience);
+}
+
+test "telekinetic keeps secondary player ownership in corrected mode" {
+    var state = state_mod.GameplayState.init(1);
+    var pool: BonusPool = .{};
+    setTestBonusEntry(
+        &pool,
+        0,
+        .points,
+        .{ .x = 100.0, .y = 100.0 },
+        500,
+    );
+
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{}, .health = 100.0, .aim = .{} },
+        .{ .index = 1, .pos = .{}, .health = 100.0, .aim = .{ .x = 100.0, .y = 100.0 } },
+    };
+    players[1].perk_counts.set(PerkId.telekinetic, 1);
+
+    try runTelekineticUpdate(&pool, &state, players[0..], 0.7);
+
+    try std.testing.expect(pool.entries[0].picked);
+    try std.testing.expectEqual(@as(i32, 500), players[0].experience);
+    try std.testing.expectEqual(@as(i32, 0), players[1].experience);
 }
 
 test "telekinetic nuke stores pending origin from bonus position" {
@@ -1722,6 +2208,7 @@ fn runQuestSuppressionCase(
 
 test "pending fireblast spawns sixteen plasma rifle projectiles" {
     var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
     };
@@ -1752,10 +2239,52 @@ test "pending fireblast spawns sixteen plasma rifle projectiles" {
     }
     try std.testing.expectEqual(@as(i32, 16), active_count);
     try std.testing.expectEqual(@as(i32, 0), state.pending_fireblast_count);
+    try std.testing.expect(!state.bonus_spawn_guard);
+}
+
+test "pending shock chain spawns ion rifle and clears native guard" {
+    var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
+    };
+    var projectiles: projectiles_mod.ProjectilePool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    var bonuses: BonusPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+
+    creatures.entries[0].active = true;
+    creatures.entries[0].pos = .{ .x = 600.0, .y = 512.0 };
+    creatures.entries[0].hp = 100.0;
+    creatures.entries[0].max_hp = 100.0;
+    state.pending_shock_chain_origins[0] = players[0].pos;
+    state.pending_shock_chain_count = 1;
+
+    applyPendingBonusEffects(
+        &state,
+        players[0..],
+        &projectiles,
+        &creatures,
+        &bonuses,
+        &terrain_fx,
+        0.016,
+        1024.0,
+    );
+
+    const projectile_id: usize = @intCast(state.shock_chain_projectile_id);
+    try std.testing.expect(projectiles.entries[projectile_id].active);
+    try std.testing.expectEqual(
+        @intFromEnum(game_ids.ProjectileTypeId.ion_rifle),
+        projectiles.entries[projectile_id].type_id,
+    );
+    try std.testing.expectEqual(@as(i32, 0x20), state.shock_chain_links_left);
+    try std.testing.expectEqual(@as(i32, 0), state.pending_shock_chain_count);
+    try std.testing.expect(!state.bonus_spawn_guard);
 }
 
 test "pending nuke spawns pistol and gauss projectiles with native meta ranges" {
     var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
     var players = [_]state_mod.PlayerState{
         .{ .index = 0, .pos = .{ .x = 512.0, .y = 512.0 } },
     };
@@ -1797,6 +2326,7 @@ test "pending nuke spawns pistol and gauss projectiles with native meta ranges" 
     try std.testing.expect(pistol_count >= 4);
     try std.testing.expect(pistol_count <= 7);
     try std.testing.expectEqual(@as(i32, 2), gauss_count);
+    try std.testing.expect(!state.bonus_spawn_guard);
 }
 
 test "pending creature projectile queue materializes hostile shots before projectile step" {

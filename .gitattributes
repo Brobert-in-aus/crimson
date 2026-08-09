@@ -1,1 +1,44 @@
 * text=auto eol=lf
+
+# Keep provenance-pinned upstream snapshots byte-for-byte, including their
+# historical trailing whitespace. Local sources remain subject to diff checks.
+third_party/headers/jdct.h whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jidctflt.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jidctfst.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jidctint.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jidctred.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdapimin.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdapistd.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdmarker.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jcomapi.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jerror.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jmemmgr.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdmaster.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdinput.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdsample.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdmerge.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jquant1.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jquant2.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jutils.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdhuff.c whitespace=-trailing-space
+third_party/sources/ijg-libjpeg-6a/jdphuff.c whitespace=-trailing-space
+third_party/headers/jversion.h whitespace=-trailing-space
+third_party/headers/infblock.h whitespace=-trailing-space
+third_party/headers/infcodes.h whitespace=-trailing-space
+third_party/headers/inffast.h whitespace=-trailing-space
+third_party/headers/inftrees.h whitespace=-trailing-space
+third_party/headers/infutil.h whitespace=-trailing-space
+third_party/headers/deflate.h whitespace=-trailing-space
+third_party/headers/zutil.h whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/adler32.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/deflate.c whitespace=-trailing-space,-space-before-tab
+third_party/sources/zlib-1.1.3/infblock.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/infcodes.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/inffast.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/inflate.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/infutil.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/inftrees.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/trees.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/uncompr.c whitespace=-trailing-space
+third_party/sources/zlib-1.1.3/zutil.c whitespace=-trailing-space
+third_party/headers/trees.h whitespace=-blank-at-eof

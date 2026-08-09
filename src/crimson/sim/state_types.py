@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING
 
 import msgspec
 
 from grim.geom import Vec2
 
 from ..bonuses.ids import BonusId
+from ..math_parity import f32
 from ..weapons import WeaponId
 
 PERK_COUNT_SIZE = 0x80
@@ -50,7 +51,7 @@ class PlayerState(msgspec.Struct):
     shot_seq: int = 0
     weapon_reset_latch: int = 0
     aux_timer: float = 0.0
-    spread_heat: float = 0.01
+    spread_heat: float = f32(0.01)
     muzzle_flash_alpha: float = 0.0
 
     experience: int = 0
@@ -76,6 +77,6 @@ class BonusPickupEvent(msgspec.Struct, frozen=True):
 
 
 if TYPE_CHECKING:
-    from ..gameplay import GameplayState as GameplayState
+    from ..gameplay import GameplayState
 else:
-    GameplayState: TypeAlias = object
+    type GameplayState = object

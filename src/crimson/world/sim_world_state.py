@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import struct
 from collections.abc import Sequence
 from typing import cast
@@ -14,6 +13,7 @@ from ..creatures.runtime import CreatureAiMode, CreaturePool, CreatureState, Cre
 from ..creatures.spawn import SpawnEnv
 from ..creatures.spawn_ids import CreatureFlags
 from ..gameplay import GameplayState
+from ..math_parity import f32
 from ..replay.types import ReplayCreatureSlotResidue
 from ..sim.presentation_step import DeterministicPresentationPlan
 from ..sim.state_types import PlayerState
@@ -27,7 +27,7 @@ def _weapon_damage_scale_map() -> dict[int, float]:
     for entry in WEAPON_TABLE:
         if int(entry.weapon_id) <= 0:
             continue
-        table[int(entry.weapon_id)] = float(cast(float, entry.damage_scale))
+        table[int(entry.weapon_id)] = float(entry.damage_scale)
     return table
 
 
@@ -37,10 +37,10 @@ def apply_creature_pool_residue(
 ) -> None:
     """Seed the fresh pool with the run-start residue captured natively.
 
-    `creature_reset_all` (0x4281e0) clears only `active`; spawn paths
-    overwrite only the fields they write, so stale reads (link_index,
-    target_heading, AI7 timers, ...) must see the previous occupant's values
-    to replay a native session run-for-run."""
+    `creature_reset_all` (0x4281e0) clears `active` and detaches linked
+    spawn-slot owners, but leaves the other creature fields intact. Spawn
+    paths overwrite only the fields they write, so stale reads (link_index,
+    target_heading, AI7 timers, ...) must see the previous occupant's values."""
 
     for slot in residue:
         idx = int(slot.index)
@@ -48,7 +48,7 @@ def apply_creature_pool_residue(
             continue
         entry = creatures[idx]
         entry.active = False
-        entry.phase_seed = float(slot.phase_seed)
+        entry.phase_seed = int(slot.phase_seed)
         entry.plague_infected = bool(slot.collision_flag)
         entry.collision_timer = float(slot.collision_timer)
         entry.lifecycle_stage = float(slot.lifecycle_stage)
@@ -88,13 +88,13 @@ def _reset_player_weapon_native(player: PlayerState) -> None:
     Native resets every run to a hardcoded 10-round pistol with a primed
     1.0s reload duration and a decaying 0.8s shot cooldown; it does not go
     through `weapon_assign_player` (no table stats, no usage count, no
-    reload sfx). Quest setup assigns the start weapon on top of this."""
+    reload sfx), and it leaves the primary reload-active byte untouched.
+    Quest setup assigns the start weapon on top of this."""
 
     weapon = player.weapon
     weapon.weapon_id = WeaponId.PISTOL
     weapon.clip_size = 10
     weapon.ammo = 10.0
-    weapon.reload_active = False
     weapon.reload_timer = 0.0
     weapon.reload_timer_max = 1.0
     weapon.shot_cooldown = 0.8
@@ -108,22 +108,54 @@ def reset_world_players(
     player_count: int,
     spawn_pos: Vec2 | None = None,
 ) -> None:
+    previous_players = tuple(players)
     players.clear()
 
-    base = Vec2(float(world_size) * 0.5, float(world_size) * 0.5) if spawn_pos is None else spawn_pos
-    count = max(1, int(player_count))
-    if count <= 1:
-        offsets = [Vec2()]
+    if spawn_pos is None:
+        center = f32(float(world_size) * 0.5)
+        base = Vec2(center, center)
     else:
-        radius = 32.0
-        step = math.tau / float(count)
-        offsets = [Vec2.from_angle(float(idx) * step) * radius for idx in range(count)]
+        base = Vec2(f32(spawn_pos.x), f32(spawn_pos.y))
+    count = max(1, int(player_count))
 
     for idx in range(count):
-        pos = (base + offsets[idx]).clamp_rect(0.0, 0.0, float(world_size), float(world_size))
-        player = PlayerState(index=idx, pos=pos)
+        offset = f32(float(idx * 0x50))
+        if idx % 2:
+            pos = Vec2(f32(base.x - offset), f32(base.y - offset))
+        else:
+            pos = Vec2(f32(base.x + offset), f32(base.y + offset))
+        if idx < len(previous_players):
+            player = previous_players[idx]
+            player.index = idx
+        else:
+            player = PlayerState(index=idx, pos=pos)
+
+        # `player_reset_all` mutates selected fields in the two static native
+        # records; it does not reconstruct the player object. Keep the same
+        # contract here so run-transition residue remains observable.
+        player.pos = pos
+        player.health = 100.0
+        player.size = 48.0
+        player.speed_multiplier = 2.0
+        player.move_speed = 0.0
+        player.heading = 0.0
+        player.death_timer = 16.0
+        player.experience = 0
+        player.level = 1
+        player.spread_heat = 0.0
+        player.perk_counts = [0] * len(player.perk_counts)
+        player.plaguebearer_active = False
+        player.speed_bonus_timer = 0.0
+        player.shield_timer = 0.0
         _reset_player_weapon_native(player)
         init_default_alt_weapon(player)
+
+        # `gameplay_reset_state` immediately follows `player_reset_all` with
+        # these represented per-player writes. The native move target is held
+        # by the input runtime rather than PlayerState in this port.
+        player.low_health_timer = 100.0
+        player.auto_target = 0
+        player.aux_timer = 0.0
         players.append(player)
 
 
@@ -148,6 +180,7 @@ class SimWorldState(msgspec.Struct):
         default_factory=lambda: WorldEvents(hits=[], deaths=(), pickups=[], sfx=[]),
     )
     last_presentation: DeterministicPresentationPlan = msgspec.field(default_factory=DeterministicPresentationPlan)
+
     def __post_init__(self) -> None:
         self.reset(seed=0xBEEF, player_count=1)
 
@@ -185,6 +218,7 @@ class SimWorldState(msgspec.Struct):
             player_count=int(player_count),
             spawn_pos=spawn_pos,
         )
+        self.creatures.apply_gameplay_reset_target_players(len(self.players))
 
     def load_world_state(self, world_state: WorldState) -> None:
         self.world_state = world_state
@@ -194,7 +228,6 @@ class SimWorldState(msgspec.Struct):
         self.creatures = self.world_state.creatures
         self.last_events = WorldEvents(hits=[], deaths=(), pickups=[], sfx=[])
         self.last_presentation = DeterministicPresentationPlan()
-
 
     def apply_step_metadata(
         self,

@@ -143,7 +143,7 @@ class AlienZooKeeperView:
 
         self._board: list[int] = [0] * _BOARD_CELLS
         self._selected_index = -1
-        self._timer_ms = _TIMER_RESET_MS
+        self._timer_ms = 0
         self._anim_time_ms = 0
         self._score = 0
 
@@ -165,8 +165,9 @@ class AlienZooKeeperView:
         self._reset_button = UiButtonState(_RESET_LABEL, force_wide=False)
         self._back_button = UiButtonState(_BACK_LABEL, force_wide=False)
 
-        self._anim_time_ms = 0
-        self._reset_state()
+        # Native puzzle state is process-lifetime storage. The initial board
+        # and timer are zeroed, and leaving/re-entering the screen does not
+        # reroll or restart it; only the Reset button calls _reset_state().
         self._is_open = True
 
     def close(self) -> None:
@@ -415,8 +416,8 @@ class AlienZooKeeperView:
             MENU_PANEL_WIDTH * scale,
             378.0 * scale,
         )
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        draw_classic_menu_panel(resources.texture(TextureId.UI_MENU_PANEL), dst=dst, tint=rl.WHITE, shadow=fx_detail)
+        shadows_enabled = self.state.config.display.shadows_enabled
+        draw_classic_menu_panel(resources.texture(TextureId.UI_MENU_PANEL), dst=dst, tint=rl.WHITE, shadow=shadows_enabled)
 
         draw_small_text(font, _TITLE, Vec2(layout.title_x, layout.title_y), rl.WHITE)
         draw_small_text(font, _SUBTITLE_1, Vec2(layout.subtitle_1_x, layout.subtitle_1_y), rl.WHITE)
@@ -526,8 +527,8 @@ class AlienZooKeeperView:
         offset_x = MENU_SIGN_OFFSET_X * sign_scale + shift_x
         offset_y = MENU_SIGN_OFFSET_Y * sign_scale
         rotation_deg = 0.0
-        fx_detail = self.state.config.display.fx_detail_enabled(level=0, default=False)
-        if fx_detail:
+        shadows_enabled = self.state.config.display.shadows_enabled
+        if shadows_enabled:
             MenuView._draw_ui_quad_shadow(
                 texture=sign,
                 src=rl.Rectangle(0.0, 0.0, float(sign.width), float(sign.height)),

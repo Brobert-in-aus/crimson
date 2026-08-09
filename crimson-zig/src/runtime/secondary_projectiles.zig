@@ -9,6 +9,7 @@ const effects_mod = @import("effects.zig");
 const owner_ref = @import("owner_ref.zig");
 const rng_callers = @import("../rng_caller_static.zig");
 const runtime_helpers = @import("helpers.zig");
+const spawn_mod = @import("spawn.zig");
 const state_mod = @import("state.zig");
 const terrain_fx_mod = @import("terrain_fx.zig");
 
@@ -92,17 +93,26 @@ pub const SecondaryProjectilePool = struct {
             return index;
         }
 
-        var base_speed: f32 = 90.0;
+        const radians = narrowF32(entry.angle - native_math.native_half_pi);
+        const cos_ext = std.math.cos(@as(f64, radians));
+        const sin_ext = std.math.sin(@as(f64, radians));
         if (type_id == SecondaryProjectileTypeId.homing_rocket) {
-            base_speed = 190.0;
+            entry.vel = .{
+                .x = narrowF32(narrowF32(cos_ext) * 190.0),
+                .y = narrowF32(narrowF32(sin_ext) * 190.0),
+            };
+        } else {
+            entry.vel = .{
+                .x = narrowF32(cos_ext * 90.0),
+                .y = narrowF32(sin_ext * 90.0),
+            };
         }
-        entry.vel = runtime_helpers.directionFromHeading(entry.angle).mul(base_speed);
         entry.speed = time_to_live;
 
         if (type_id == SecondaryProjectileTypeId.homing_rocket) {
             if (creatures) |pool| {
                 const origin = target_hint orelse pos;
-                entry.target_id = @intCast(creatureFindNearestAlive(pool, origin));
+                entry.target_id = @intCast(creatureFindNearestSeekerTarget(pool, origin));
             } else if (target_hint) |hint| {
                 entry.target_hint_active = true;
                 entry.target_hint = .{
@@ -233,10 +243,8 @@ pub const SecondaryProjectilePool = struct {
                         &killed_now,
                     );
                     if (hp_before > 0.0 and killed_now) {
-                        if (!freeze_active) {
-                            _ = terrain_fx.decals.addRandom(state, target.pos);
-                            _ = terrain_fx.decals.addRandom(state, target.pos);
-                        }
+                        _ = terrain_fx.decals.addRandom(state, target.pos);
+                        _ = terrain_fx.decals.addRandom(state, target.pos);
                         _ = creatures.handleSecondaryDetonationDeathFollowup(
                             state,
                             players,
@@ -288,36 +296,32 @@ pub const SecondaryProjectilePool = struct {
                         entry.target_hint_active = false;
                         search_pos = entry.target_hint;
                     }
-                    const nearest = creatureFindNearestAlive(creatures, search_pos);
+                    const nearest = creatureFindNearestSeekerTarget(creatures, search_pos);
                     entry.target_id = @intCast(nearest);
                     target_id = entry.target_id;
                 }
 
                 if (target_id >= 0 and target_id < creatures.entries.len) {
                     const target = creatures.entries[@intCast(target_id)];
-                    // Native steering: angle = atan2(pos - target) kept in
-                    // extended precision; the stored f32 angle is atan - pi/2.
-                    // vel_x adds cos((atan - pi/2) - pi/2) from the extended
-                    // angle; vel_y (and the over-cap subtraction for both
-                    // components) recompute from the stored f32 angle, so the
-                    // add-then-subtract is not an exact identity.
-                    const half_pi: f32 = native_math.roundF32(native_math.native_half_pi);
-                    const atan_ext: f64 = std.math.atan2(
-                        @as(f64, entry.pos.y) - @as(f64, target.pos.y),
-                        @as(f64, entry.pos.x) - @as(f64, target.pos.x),
-                    );
-                    entry.angle = @floatCast(atan_ext - @as(f64, half_pi));
-                    const accel_scale: f64 = @as(f64, dt_f32) * 800.0;
+                    const half_pi: f32 = native_math.native_half_pi;
+                    const dy = narrowF32(entry.pos.y - target.pos.y);
+                    const dx = narrowF32(entry.pos.x - target.pos.x);
+                    const atan_ext = native_math.fpatan(dy, dx);
+                    entry.angle = narrowF32(atan_ext - @as(f64, half_pi));
+                    const heading = narrowF32(entry.angle - half_pi);
+                    const accel_x_dt = narrowF32(std.math.cos(@as(f64, heading)) * @as(f64, dt_f32));
+                    const accel_y_dt = narrowF32(std.math.sin(@as(f64, heading)) * @as(f64, dt_f32));
+                    const accel_x = narrowF32(accel_x_dt * 800.0);
+                    const accel_y = narrowF32(accel_y_dt * 800.0);
                     entry.vel = .{
-                        .x = @floatCast(@cos(atan_ext - @as(f64, half_pi) - @as(f64, half_pi)) * accel_scale + @as(f64, entry.vel.x)),
-                        .y = @floatCast(@sin(@as(f64, entry.angle) - @as(f64, half_pi)) * accel_scale + @as(f64, entry.vel.y)),
+                        .x = narrowF32(entry.vel.x + accel_x),
+                        .y = narrowF32(entry.vel.y + accel_y),
                     };
                     const speed_after = @sqrt(@as(f64, entry.vel.x) * @as(f64, entry.vel.x) + @as(f64, entry.vel.y) * @as(f64, entry.vel.y));
                     if (speed_after > 350.0) {
-                        const heading: f64 = @as(f64, entry.angle) - @as(f64, half_pi);
                         entry.vel = .{
-                            .x = @floatCast(@as(f64, entry.vel.x) - @cos(heading) * accel_scale),
-                            .y = @floatCast(@as(f64, entry.vel.y) - @sin(heading) * accel_scale),
+                            .x = narrowF32(entry.vel.x - accel_x),
+                            .y = narrowF32(entry.vel.y - accel_y),
                         };
                     }
                 }
@@ -362,8 +366,11 @@ pub const SecondaryProjectilePool = struct {
                     }
                 }
 
-                const hit_type = @intFromEnum(entry.type_id);
-                const det_scale: f32 = switch (entry.type_id) {
+                // Native preserves the incoming type in a local before the
+                // entry becomes a detonation and uses it for every post-hit
+                // type-specific branch.
+                const impact_type = entry.type_id;
+                const det_scale: f32 = switch (impact_type) {
                     SecondaryProjectileTypeId.rocket => 1.0,
                     SecondaryProjectileTypeId.homing_rocket => 0.35,
                     SecondaryProjectileTypeId.rocket_minigun => 0.25,
@@ -371,14 +378,8 @@ pub const SecondaryProjectilePool = struct {
                 };
 
                 if (freeze_active) {
-                    const freeze_angle_caller: rng_callers.Caller = switch (entry.type_id) {
-                        .rocket => rng_callers.secondary_projectile_update_rocket_freeze_shard_angle,
-                        .homing_rocket => rng_callers.secondary_projectile_update_seeker_rocket_freeze_shard_angle,
-                        .rocket_minigun => rng_callers.secondary_projectile_update_rocket_minigun_freeze_shard_angle,
-                        else => rng_callers.secondary_projectile_update_pre_hit_freeze_shard_angle,
-                    };
                     for (0..4) |_| {
-                        const shard_angle = @as(f32, @floatFromInt(state.rng.randTagged(freeze_angle_caller) % 612)) * 0.01;
+                        const shard_angle = @as(f32, @floatFromInt(state.rng.randTagged(rng_callers.secondary_projectile_update_pre_hit_freeze_shard_angle) % 612)) * 0.01;
                         effects.spawnFreezeShard(state, entry.pos, shard_angle, detail_preset);
                     }
                 } else {
@@ -399,16 +400,24 @@ pub const SecondaryProjectilePool = struct {
                     _ = terrain_fx.decals.addRandom(state, state_mod.Vec2.add(creatures.entries[idx].pos, offset_3));
                 }
 
-                if (entry.type_id == SecondaryProjectileTypeId.rocket and detail_preset > 2) {
+                if (impact_type == SecondaryProjectileTypeId.rocket and detail_preset > 2) {
                     effects.spawnExplosionBurst(state, entry.pos, 1.0, detail_preset);
                 }
 
-                const damage: f32 = switch (entry.type_id) {
+                const damage: f32 = switch (impact_type) {
                     SecondaryProjectileTypeId.rocket => narrowF32(entry.speed * 50.0 + 500.0),
                     SecondaryProjectileTypeId.homing_rocket => narrowF32(entry.speed * 20.0 + 80.0),
                     SecondaryProjectileTypeId.rocket_minigun => narrowF32(entry.speed * 20.0 + 40.0),
                     else => 150.0,
                 };
+                // Native chooses the first-hit tune (and consumes its playlist
+                // draw) before lethal damage can enter the death RNG stream.
+                if (!state.demo_mode_active and state.game_mode != .rush and !state.game_tune_started) {
+                    state.game_tune_started = true;
+                    _ = state.rng.randTagged(rng_callers.sfx_play_exclusive_playlist_pick);
+                } else {
+                    state.sfx_queue.append(.explosion_medium);
+                }
                 _ = creatures.applyExplosionDamage(
                     state,
                     players,
@@ -431,25 +440,21 @@ pub const SecondaryProjectilePool = struct {
                 entry.detonation_t = 0.0;
                 entry.detonation_scale = narrowF32(det_scale);
                 entry.trail_timer = 0.0;
-                // Native secondary-rocket hits run the same first-hit game-tune
-                // branch as bullet hits (one playlist rand) outside demo/rush.
-                if (!state.demo_mode_active and state.game_mode != .rush and !state.game_tune_started) {
-                    state.game_tune_started = true;
-                    _ = state.rng.randTagged(rng_callers.sfx_play_exclusive_playlist_pick);
-                } else {
-                    state.sfx_queue.append(.explosion_medium);
-                }
 
                 if (freeze_active) {
-                    const freeze_angle_caller: rng_callers.Caller = switch (entry.type_id) {
+                    const freeze_angle_caller: rng_callers.Caller = switch (impact_type) {
                         .rocket => rng_callers.secondary_projectile_update_rocket_freeze_shard_angle,
                         .homing_rocket => rng_callers.secondary_projectile_update_seeker_rocket_freeze_shard_angle,
                         .rocket_minigun => rng_callers.secondary_projectile_update_rocket_minigun_freeze_shard_angle,
                         else => rng_callers.secondary_projectile_update_pre_hit_freeze_shard_angle,
                     };
+                    const freeze_pos = if (impact_type == .rocket_minigun)
+                        creatures.entries[idx].pos
+                    else
+                        entry.pos;
                     for (0..8) |_| {
                         const shard_angle = @as(f32, @floatFromInt(state.rng.randTagged(freeze_angle_caller) % 612)) * 0.01;
-                        effects.spawnFreezeShard(state, entry.pos, shard_angle, detail_preset);
+                        effects.spawnFreezeShard(state, freeze_pos, shard_angle, detail_preset);
                     }
                 } else {
                     const extra_decals: i32 = if (det_scale == 1.0)
@@ -468,13 +473,13 @@ pub const SecondaryProjectilePool = struct {
                         44
                     else
                         0;
-                    const angle_caller: rng_callers.Caller = switch (entry.type_id) {
+                    const angle_caller: rng_callers.Caller = switch (impact_type) {
                         .rocket => rng_callers.secondary_projectile_update_rocket_decal_angle,
                         .homing_rocket => rng_callers.secondary_projectile_update_seeker_rocket_decal_angle,
                         .rocket_minigun => rng_callers.secondary_projectile_update_rocket_minigun_decal_angle,
                         else => rng_callers.secondary_projectile_update_rocket_decal_angle,
                     };
-                    const radius_caller: rng_callers.Caller = switch (entry.type_id) {
+                    const radius_caller: rng_callers.Caller = switch (impact_type) {
                         .rocket => rng_callers.secondary_projectile_update_rocket_decal_radius,
                         .homing_rocket => rng_callers.secondary_projectile_update_seeker_rocket_decal_radius,
                         .rocket_minigun => rng_callers.secondary_projectile_update_rocket_minigun_decal_radius,
@@ -507,8 +512,6 @@ pub const SecondaryProjectilePool = struct {
                         .{ .r = 1.0, .g = 0.5, .b = 0.2, .a = 0.35 },
                     );
                 }
-
-                _ = hit_type;
             }
 
             // Native's TTL check runs after the hit handling in the same
@@ -529,31 +532,281 @@ pub const SecondaryProjectilePool = struct {
 
 fn directionTo(origin: state_mod.Vec2, target: state_mod.Vec2) state_mod.Vec2 {
     const delta = state_mod.Vec2.sub(target, origin);
-    const len = delta.length();
-    if (!(len > 1e-6)) return .{};
+    const normalized = native_math.normalizeVec2Safe(delta.x, delta.y);
     return .{
-        .x = narrowF32(delta.x / len),
-        .y = narrowF32(delta.y / len),
+        .x = normalized[0],
+        .y = normalized[1],
     };
 }
 
-fn creatureFindNearestAlive(
+test "secondary impulse direction uses native safe normalization" {
+    try std.testing.expectEqual(
+        @as(state_mod.Vec2, .{ .x = 1.0, .y = @bitCast(@as(u32, 0x38d1b717)) }),
+        directionTo(.{}, .{ .x = 1.0, .y = 0.0001 }),
+    );
+}
+
+fn creatureFindNearestSeekerTarget(
     creatures: *const creatures_mod.CreaturePool,
     origin: state_mod.Vec2,
 ) usize {
     var best_idx: usize = 0;
-    // Native seeds best with 1e6 and compares plain distances, so the search
-    // is effectively unbounded on a 1024 map; square it for the squared compare.
-    var best_dist_sq: f32 = 1e12;
+    var best_distance: f32 = 1_000_000.0;
     const limit: usize = @min(creatures.entries.len, 0x180);
     for (creatures.entries[0..limit], 0..) |creature, idx| {
         if (!creature.active) continue;
         if (!creature_lifecycle.isAlive(creature.lifecycle_stage)) continue;
-        const dist_sq = runtime_helpers.distanceSqRoundedF32(origin, creature.pos);
-        if (dist_sq < best_dist_sq) {
-            best_dist_sq = dist_sq;
+        const dx = native_math.pc24Sub(origin.x, creature.pos.x);
+        const dy = native_math.pc24Sub(origin.y, creature.pos.y);
+        const distance = native_math.pc24Hypot(dx, dy);
+        if (distance < best_distance) {
+            best_distance = distance;
             best_idx = idx;
         }
     }
     return best_idx;
+}
+
+test "nearest seeker target compares stored x87 pc24 distances" {
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.entries[0] = .{
+        .active = true,
+        .lifecycle_stage = creature_lifecycle.alive,
+        .pos = .{ .x = -631.7838745117188, .y = -249.09634399414062 },
+    };
+    creatures.entries[1] = .{
+        .active = true,
+        .lifecycle_stage = creature_lifecycle.alive,
+        .pos = .{ .x = -627.4663696289062, .y = -259.78033447265625 },
+    };
+
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        creatureFindNearestSeekerTarget(&creatures, .{}),
+    );
+}
+
+test "homing rocket spawn preserves native trig store order" {
+    var pool: SecondaryProjectilePool = .{};
+    const index = pool.spawn(
+        .{ .x = 152.47727966308594, .y = 941.5100708007812 },
+        -4.161045551300049,
+        .homing_rocket,
+        owner_ref.OwnerRef.fromLocalPlayer(0),
+        2.0,
+        null,
+        null,
+    );
+
+    try std.testing.expectEqual(@as(f32, 161.8461151123047), pool.entries[index].vel.x);
+    try std.testing.expectEqual(@as(f32, 99.52806091308594), pool.entries[index].vel.y);
+}
+
+test "secondary rocket hit consumes tune draw before lethal damage rng" {
+    const HitTrace = struct {
+        const Self = @This();
+
+        draws: [256]spawn_mod.Crand.TraceDraw = undefined,
+        count: usize = 0,
+
+        fn onDraw(ctx: ?*anyopaque, draw: spawn_mod.Crand.TraceDraw) void {
+            const self: *Self = @ptrCast(@alignCast(ctx orelse return));
+            if (self.count < self.draws.len) self.draws[self.count] = draw;
+            self.count += 1;
+        }
+    };
+
+    var state = state_mod.GameplayState.init(1);
+    state.bonus_spawn_guard = true;
+    var trace: HitTrace = .{};
+    state.rng.setTraceSink(&trace, HitTrace.onDraw, true);
+
+    var effects: effects_mod.EffectPool = .{};
+    var sprite_effects: effects_mod.SpriteEffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.effects = &effects;
+    creatures.entries[0] = .{
+        .active = true,
+        .hp = 1.0,
+        .max_hp = 1.0,
+        .size = 16.0,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+    };
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+    };
+    var pool: SecondaryProjectilePool = .{};
+    pool.entries[0] = .{
+        .active = true,
+        .speed = 1.0,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+        .vel = .{},
+        .type_id = .rocket,
+        .owner = owner_ref.OwnerRef.fromLocalPlayer(0),
+    };
+
+    pool.updatePulseGunWithEffects(
+        &state,
+        players[0..],
+        &creatures,
+        &bonuses,
+        &effects,
+        &sprite_effects,
+        &terrain_fx,
+        0.1,
+        1024.0,
+        2,
+    );
+
+    var tune_index: ?usize = null;
+    var death_index: ?usize = null;
+    for (trace.draws[0..@min(trace.count, trace.draws.len)], 0..) |draw, idx| {
+        const caller = draw.caller orelse continue;
+        if (caller == rng_callers.sfx_play_exclusive_playlist_pick and tune_index == null) {
+            tune_index = idx;
+        }
+        if (caller == rng_callers.creature_apply_damage_death_sfx and death_index == null) {
+            death_index = idx;
+        }
+    }
+
+    try std.testing.expect(tune_index != null);
+    try std.testing.expect(death_index != null);
+    try std.testing.expect(tune_index.? < death_index.?);
+    try std.testing.expect(state.game_tune_started);
+    try std.testing.expect(!state.rng.consumeMissingTraceCaller());
+}
+
+test "secondary detonation death keeps native decals during freeze" {
+    var state = state_mod.GameplayState.init(1);
+    state.bonuses.freeze = 1.0;
+    state.bonus_spawn_guard = true;
+    var effects: effects_mod.EffectPool = .{};
+    var sprite_effects: effects_mod.SpriteEffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.effects = &effects;
+    creatures.entries[0] = .{
+        .active = true,
+        .hp = 1.0,
+        .max_hp = 1.0,
+        .size = 16.0,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+    };
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+    };
+    var pool: SecondaryProjectilePool = .{};
+    pool.entries[0] = .{
+        .active = true,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+        .detonation_scale = 1.0,
+        .type_id = .detonation,
+        .owner = owner_ref.OwnerRef.fromLocalPlayer(0),
+    };
+
+    pool.updatePulseGunWithEffects(
+        &state,
+        players[0..],
+        &creatures,
+        &bonuses,
+        &effects,
+        &sprite_effects,
+        &terrain_fx,
+        0.1,
+        1024.0,
+        5,
+    );
+
+    // One decal comes from the Freeze death side effect; the exploding
+    // secondary contributes two more before its death follow-up call.
+    try std.testing.expectEqual(@as(usize, 3), terrain_fx.decals.count);
+    try std.testing.expect(!creatures.entries[0].active);
+}
+
+test "rocket minigun freeze hit preserves subtype callers and target position" {
+    const FreezeTrace = struct {
+        const Self = @This();
+
+        draws: [128]spawn_mod.Crand.TraceDraw = undefined,
+        count: usize = 0,
+
+        fn onDraw(ctx: ?*anyopaque, draw: spawn_mod.Crand.TraceDraw) void {
+            const self: *Self = @ptrCast(@alignCast(ctx orelse return));
+            if (self.count < self.draws.len) self.draws[self.count] = draw;
+            self.count += 1;
+        }
+    };
+
+    var state = state_mod.GameplayState.init(1);
+    state.bonuses.freeze = 1.0;
+    state.bonus_spawn_guard = true;
+    var trace: FreezeTrace = .{};
+    state.rng.setTraceSink(&trace, FreezeTrace.onDraw, true);
+
+    var effects: effects_mod.EffectPool = .{};
+    var sprite_effects: effects_mod.SpriteEffectPool = .{};
+    var terrain_fx: terrain_fx_mod.TerrainFxScratch = .{};
+    var bonuses: bonus_runtime.BonusPool = .{};
+    var creatures: creatures_mod.CreaturePool = .{};
+    creatures.effects = &effects;
+    creatures.entries[0] = .{
+        .active = true,
+        .hp = 1000.0,
+        .max_hp = 1000.0,
+        .size = 16.0,
+        .pos = .{ .x = 104.0, .y = 100.0 },
+    };
+    var players = [_]state_mod.PlayerState{
+        .{ .index = 0, .pos = .{} },
+    };
+    var pool: SecondaryProjectilePool = .{};
+    pool.entries[0] = .{
+        .active = true,
+        .speed = 1.0,
+        .pos = .{ .x = 100.0, .y = 100.0 },
+        .vel = .{},
+        .type_id = .rocket_minigun,
+        .owner = owner_ref.OwnerRef.fromLocalPlayer(0),
+    };
+
+    pool.updatePulseGunWithEffects(
+        &state,
+        players[0..],
+        &creatures,
+        &bonuses,
+        &effects,
+        &sprite_effects,
+        &terrain_fx,
+        0.1,
+        1024.0,
+        5,
+    );
+
+    var pre_hit_angles: usize = 0;
+    var post_hit_angles: usize = 0;
+    for (trace.draws[0..@min(trace.count, trace.draws.len)]) |draw| {
+        const caller = draw.caller orelse continue;
+        if (caller == rng_callers.secondary_projectile_update_pre_hit_freeze_shard_angle) {
+            pre_hit_angles += 1;
+        }
+        if (caller == rng_callers.secondary_projectile_update_rocket_minigun_freeze_shard_angle) {
+            post_hit_angles += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 4), pre_hit_angles);
+    try std.testing.expectEqual(@as(usize, 8), post_hit_angles);
+    try std.testing.expectEqual(effects_mod.effect_pool_size - 12, effects.free_len);
+    for (effects.entries[0..4]) |effect| {
+        try std.testing.expectEqual(@as(f32, 100.0), effect.pos.x);
+        try std.testing.expectEqual(@as(f32, 100.0), effect.pos.y);
+    }
+    for (effects.entries[4..12]) |effect| {
+        try std.testing.expectEqual(@as(f32, 104.0), effect.pos.x);
+        try std.testing.expectEqual(@as(f32, 100.0), effect.pos.y);
+    }
+    try std.testing.expect(!state.rng.consumeMissingTraceCaller());
 }

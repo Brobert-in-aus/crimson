@@ -17,7 +17,6 @@ def build_weapon_availability(
     *,
     status: GameStatus | None,
     game_mode: GameMode,
-    demo_mode_active: bool,
 ) -> list[bool]:
     available = [False] * WEAPON_AVAILABLE_COUNT
     unlock_index = 0
@@ -42,7 +41,7 @@ def build_weapon_availability(
             if 0 <= weapon_id < len(available):
                 available[weapon_id] = True
 
-    if (not demo_mode_active) and unlock_index_full >= 0x28:
+    if unlock_index_full >= 0x28:
         splitter_id = WeaponId.SPLITTER_GUN
         if 0 <= splitter_id < len(available):
             available[splitter_id] = True
@@ -54,7 +53,6 @@ def prepare_weapon_availability(state: GameplayState) -> None:
     state.weapon_available[:] = build_weapon_availability(
         status=state.status,
         game_mode=state.game_mode,
-        demo_mode_active=state.demo_mode_active,
     )
 
 
@@ -65,18 +63,27 @@ def weapon_pick_random_available(state: GameplayState) -> WeaponId:
     """
 
     status = state.status
+    suppress_ion_cannon = state.game_mode == GameMode.QUESTS and state.quest_level == QuestLevel(5, 10)
+    has_eligible_weapon = any(
+        weapon_id < len(state.weapon_available)
+        and state.weapon_available[weapon_id]
+        and not (suppress_ion_cannon and weapon_id == WeaponId.ION_CANNON)
+        for weapon_id in range(1, WEAPON_DROP_ID_COUNT + 1)
+    )
+    if not has_eligible_weapon:
+        raise RuntimeError("weapon availability has no eligible drop; call prepare_weapon_availability()")
 
-    for _ in range(1000):
+    while True:
         base_rand = state.rng.rand_tagged(RngCallerStatic.WEAPON_PICK_RANDOM_AVAILABLE_PICK)
         weapon_id = WeaponId(base_rand % WEAPON_DROP_ID_COUNT + 1)
 
         # Bias: used weapons have a 50% chance to reroll once.
         if status is not None:
             usage_slot = weapon_usage_slot_for_weapon_id(weapon_id)
-            if usage_slot is not None and status.weapon_usage_count_slot(usage_slot) != 0:
-                if (
-                    state.rng.rand_tagged(RngCallerStatic.WEAPON_PICK_RANDOM_AVAILABLE_REROLL_GATE) & 1
-                ) == 0:
+            if (  # noqa: SIM102 - preserve the native reroll gate and RNG draw shape
+                usage_slot is not None and status.weapon_usage_count_slot(usage_slot) != 0
+            ):
+                if (state.rng.rand_tagged(RngCallerStatic.WEAPON_PICK_RANDOM_AVAILABLE_REROLL_GATE) & 1) == 0:
                     base_rand = state.rng.rand_tagged(RngCallerStatic.WEAPON_PICK_RANDOM_AVAILABLE_REROLL_PICK)
                     weapon_id = WeaponId(base_rand % WEAPON_DROP_ID_COUNT + 1)
 
@@ -86,13 +93,7 @@ def weapon_pick_random_available(state: GameplayState) -> WeaponId:
             continue
 
         # Quest 5-10 special-case: suppress Ion Cannon.
-        if (
-            state.game_mode == GameMode.QUESTS
-            and state.quest_level == QuestLevel(5, 10)
-            and weapon_id == WeaponId.ION_CANNON
-        ):
+        if suppress_ion_cannon and weapon_id == WeaponId.ION_CANNON:
             continue
 
         return weapon_id
-
-    return WeaponId.PISTOL
