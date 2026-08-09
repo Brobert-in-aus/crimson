@@ -638,12 +638,23 @@ public sealed partial class Diorama : Node3D
     // creation rather than looked up later: these hang off several different
     // MultiMeshInstances and there is no single node to walk.
     private readonly System.Collections.Generic.List<ShaderMaterial> _mrCompositeMats = new();
+    private readonly System.Collections.Generic.List<(GeometryInstance3D Node, Material Vr, Material Mr)> _mrMaterialSwaps = new();
     private bool _mrComposite;
 
     private void TrackMrComposite(ShaderMaterial mat)
     {
         _mrCompositeMats.Add(mat);
         mat.SetShaderParameter("mr_composite", _mrComposite ? 1.0f : 0.0f);
+    }
+
+    /// <summary>Register a geometry pass whose blend mode must change in MR.
+    /// Additive blending writes opaque alpha into the transparent projection
+    /// layer, so it needs a straight-alpha, premultiplied-contribution material
+    /// when passthrough is active.</summary>
+    private void TrackMrMaterialSwap(GeometryInstance3D node, Material vr, Material mr)
+    {
+        _mrMaterialSwaps.Add((node, vr, mr));
+        node.MaterialOverride = _mrComposite ? mr : vr;
     }
 
     /// <summary>Tell the effect materials whether they are drawing over the real
@@ -656,7 +667,33 @@ public sealed partial class Diorama : Node3D
         {
             mat.SetShaderParameter("mr_composite", mixedReality ? 1.0f : 0.0f);
         }
+        foreach ((GeometryInstance3D node, Material vr, Material mr) in _mrMaterialSwaps)
+        {
+            node.MaterialOverride = mixedReality ? mr : vr;
+        }
+        ApplyPlagueBlend();
     }
+
+    /// <summary>Point the Plague Spreader darken pass at whichever blend can
+    /// actually reach its destination. A uniform cannot do this: render_mode is
+    /// fixed at shader compile time, so the two blends have to be two materials.
+    /// </summary>
+    private void ApplyPlagueBlend()
+    {
+        if (_plagueInstance == null)
+        {
+            return;
+        }
+        ShaderMaterial? mat = _mrComposite ? _plagueMatMr : _plagueMatVr;
+        if (mat != null)
+        {
+            _plagueInstance.MaterialOverride = mat;
+        }
+    }
+
+    private MultiMeshInstance3D? _plagueInstance;
+    private ShaderMaterial? _plagueMatVr;
+    private ShaderMaterial? _plagueMatMr;
 
     private Shader? _particleShader;
     private Shader ParticleShader => _particleShader ??= new Shader
@@ -683,10 +720,20 @@ public sealed partial class Diorama : Node3D
                 vec2 cell = UV * inst.z + inst.xy;
                 vec4 c = texture(sheet, cell);
                 vec3 s = c.rgb * col.rgb;      // display-referred source color
-                ALBEDO = pow(s, vec3(2.2));
                 float a = clamp(c.a * col.a, 0.0, 1.0);
                 float lum = dot(min(s, vec3(1.0)), vec3(0.299, 0.587, 0.114));
-                ALPHA = mix(pow(a, mix(0.6, 1.6, lum)), a, mr_composite);
+                if (mr_composite > 0.5) {
+                    // Store a premultiplied coloured contribution plus only the
+                    // coverage needed to carry it. Dark atlas pixels therefore
+                    // become transparent instead of masking passthrough black.
+                    vec3 contribution = clamp(s * a, vec3(0.0), vec3(1.0));
+                    float coverage = max(contribution.r, max(contribution.g, contribution.b));
+                    ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
+                    ALPHA = coverage;
+                } else {
+                    ALBEDO = pow(s, vec3(2.2));
+                    ALPHA = pow(a, mix(0.6, 1.6, lum));
+                }
             }
             """,
     };
@@ -722,6 +769,32 @@ public sealed partial class Diorama : Node3D
                 vec3 s = c.rgb * col.rgb * (c.a * col.a); // native additive term
                 ALBEDO = pow(s, vec3(1.1));
                 ALPHA = 1.0;
+            }
+            """,
+    };
+
+    // Passthrough companion to ParticleShaderAdd. The additive VR pass writes
+    // alpha 1 over the whole quad; that is harmless against an opaque scene but
+    // masks the real room black. Convert the additive RGB contribution into a
+    // premultiplied colour + minimal coverage for the OpenXR alpha layer.
+    private Shader? _particleShaderAddMr;
+    private Shader ParticleShaderAddMr => _particleShaderAddMr ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                vec3 source = c.rgb * col.rgb * (c.a * col.a);
+                vec3 contribution = clamp(pow(source, vec3(1.1)), vec3(0.0), vec3(1.0));
+                float coverage = max(contribution.r, max(contribution.g, contribution.b));
+                ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
+                ALPHA = coverage;
             }
             """,
     };
@@ -768,6 +841,8 @@ public sealed partial class Diorama : Node3D
         // RenderPriority above the alpha smoke so the flash reads on top.
         var addMaterial = new ShaderMaterial { Shader = ParticleShaderAdd, RenderPriority = 26 };
         addMaterial.SetShaderParameter("sheet", tex);
+        var addMaterialMr = new ShaderMaterial { Shader = ParticleShaderAddMr, RenderPriority = 26 };
+        addMaterialMr.SetShaderParameter("sheet", tex);
         _particlesAdd = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
@@ -779,6 +854,7 @@ public sealed partial class Diorama : Node3D
         };
         _particleAddNode = new MultiMeshInstance3D { Multimesh = _particlesAdd, MaterialOverride = addMaterial };
         AddChild(_particleAddNode);
+        TrackMrMaterialSwap(_particleAddNode, addMaterial, addMaterialMr);
 
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
@@ -817,6 +893,8 @@ public sealed partial class Diorama : Node3D
         // it reads on top of the additive effect flashes (26).
         var glowMat = new ShaderMaterial { Shader = ParticleShaderAdd, RenderPriority = 27 };
         glowMat.SetShaderParameter("sheet", tex);
+        var glowMatMr = new ShaderMaterial { Shader = ParticleShaderAddMr, RenderPriority = 27 };
+        glowMatMr.SetShaderParameter("sheet", tex);
         _glowMesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
@@ -828,6 +906,7 @@ public sealed partial class Diorama : Node3D
         };
         _glowNode = new MultiMeshInstance3D { Multimesh = _glowMesh, MaterialOverride = glowMat };
         AddChild(_glowNode);
+        TrackMrMaterialSwap(_glowNode, glowMat, glowMatMr);
     }
 
     /// <summary>Draw the per-creature aura overlays (draw_creature_overlays):
@@ -1555,6 +1634,8 @@ public sealed partial class Diorama : Node3D
     {
         _decalCursor = _decalCount = 0;
         _corpseCursor = _corpseCount = 0;
+        _projectileVisualTracks.Clear();
+        _lastProjectileElapsedMs = -1.0f;
         if (_decals != null)
         {
             _decals.VisibleInstanceCount = 0;

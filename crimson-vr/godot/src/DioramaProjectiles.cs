@@ -185,6 +185,27 @@ public sealed partial class Diorama
     private int _spriteFxN;
     private int _playerAuraN;
 
+    // The parity simulation stops updating a projectile once it is 64 game
+    // units beyond the original screen. On a tabletop that offscreen band is
+    // physically visible, so presentation continues the last measured velocity
+    // to the diorama edge. This never feeds back into simulation or replays.
+    private sealed class ProjectileVisualTrack
+    {
+        public Sim.ProjectileSnap Snap;
+        public Vector2 PreviousPosition;
+        public Vector2 Velocity;
+        public Vector2 GhostPosition;
+        public float LastElapsedMs;
+        public bool HasPrevious;
+        public bool Ghosting;
+        public bool Finished;
+    }
+
+    private readonly System.Collections.Generic.Dictionary<int, ProjectileVisualTrack> _projectileVisualTracks = new();
+    private readonly System.Collections.Generic.HashSet<int> _projectileVisualSeen = new();
+    private readonly System.Collections.Generic.List<int> _projectileVisualRemove = new();
+    private float _lastProjectileElapsedMs = -1.0f;
+
     // Trail shader: quad stretched tail->head (local +Y = head end). Instance
     // COLOR = head rgba; CUSTOM.x = tail alpha. Alpha ramps tail->head over the
     // quad and samples the bulletTrail gradient (native maps head at v=0.5,
@@ -211,6 +232,29 @@ public sealed partial class Diorama
             """,
     };
 
+    private Shader? _trailShaderMr;
+    private Shader TrailShaderMr => _trailShaderMr ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 col;
+            varying float tail_a;
+            void vertex() { col = COLOR; tail_a = INSTANCE_CUSTOM.x; }
+            void fragment() {
+                float g = 1.0 - UV.y;
+                vec4 c = texture(sheet, vec2(UV.x, (1.0 - UV.y) * 0.5));
+                float a = mix(tail_a, col.a, g);
+                vec3 source = c.rgb * col.rgb * (c.a * a);
+                vec3 contribution = clamp(pow(source, vec3(1.1)), vec3(0.0), vec3(1.0));
+                float coverage = max(contribution.r, max(contribution.g, contribution.b));
+                ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
+                ALPHA = coverage;
+            }
+            """,
+    };
+
     // Ion chain strip: native samples a constant u=0.625 line of projs.png with
     // v spanning 0..0.25 ACROSS the strip; constant per-instance color.
     private Shader? _ionStripShader;
@@ -231,11 +275,63 @@ public sealed partial class Diorama
             """,
     };
 
+
+    private Shader? _ionStripShaderMr;
+    private Shader IonStripShaderMr => _ionStripShaderMr ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 col;
+            void vertex() { col = COLOR; }
+            void fragment() {
+                vec4 c = texture(sheet, vec2(0.625, UV.x * 0.25));
+                vec3 source = c.rgb * col.rgb * (c.a * col.a);
+                vec3 contribution = clamp(pow(source, vec3(1.1)), vec3(0.0), vec3(1.0));
+                float coverage = max(contribution.r, max(contribution.g, contribution.b));
+                ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
+                ALPHA = coverage;
+            }
+            """,
+    };
+
     // Plague Spreader darken: native blend is SRC=ZERO / DST=INV_SRC_ALPHA, i.e.
     // dst *= (1 - src_alpha). Godot blend_mul multiplies dst by ALBEDO in LINEAR
     // space; a constant factor commutes exactly through the sRGB transfer as
     // factor^2.2, so ALBEDO = pow(1 - a, 2.2) reproduces the native display
     // math EXACTLY (no dst-blind approximation needed for pure multiplies).
+    // MR variant of the darken pass. blend_mul multiplies what is ALREADY in the
+    // framebuffer, and over passthrough that is the transparent void rather than
+    // the room — the compositor blends the app afterwards, so the multiply never
+    // meets the real world and the quad resolves to a flat dark patch instead of
+    // a darkening.
+    //
+    // Alpha blending reaches the room, and reproduces the SAME operation exactly.
+    // Compositing black over dst gives dst*(1-ALPHA); the multiply path gives
+    // dst*(1-a)^2.2 (the linear-space form of the native dst *= 1-src_alpha).
+    // Setting ALPHA = 1 - (1-a)^2.2 makes the two algebraically identical, so
+    // this is a change of blend mode, not of look.
+    private Shader? _plagueShaderMr;
+    private Shader PlagueShaderMr => _plagueShaderMr ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            varying vec4 inst;
+            varying vec4 col;
+            void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            void fragment() {
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                float a = clamp(c.a * col.a, 0.0, 1.0);
+                ALBEDO = vec3(0.0);
+                ALPHA = 1.0 - pow(1.0 - a, 2.2);
+            }
+            """,
+    };
+
     private Shader? _plagueShader;
     private Shader PlagueShader => _plagueShader ??= new Shader
     {
@@ -263,6 +359,10 @@ public sealed partial class Diorama
     }
 
     private MultiMesh BuildProjMesh(Material material, int cap, bool customData = true)
+        => BuildProjMesh(material, cap, customData, out _);
+
+    private MultiMesh BuildProjMesh(
+        Material material, int cap, bool customData, out MultiMeshInstance3D instance)
     {
         var mesh = new MultiMesh
         {
@@ -273,7 +373,18 @@ public sealed partial class Diorama
             InstanceCount = cap,
             VisibleInstanceCount = 0,
         };
-        AddChild(new MultiMeshInstance3D { Multimesh = mesh, MaterialOverride = material });
+        instance = new MultiMeshInstance3D { Multimesh = mesh, MaterialOverride = material };
+        AddChild(instance);
+        return mesh;
+    }
+
+    private MultiMesh BuildMrSwappedProjMesh(Shader vrShader, Shader mrShader,
+        Texture2D sheet, int priority, int cap, bool customData = true)
+    {
+        ShaderMaterial vr = ProjShaderMat(vrShader, sheet, priority);
+        ShaderMaterial mr = ProjShaderMat(mrShader, sheet, priority);
+        MultiMesh mesh = BuildProjMesh(vr, cap, customData, out MultiMeshInstance3D instance);
+        TrackMrMaterialSwap(instance, vr, mr);
         return mesh;
     }
 
@@ -307,7 +418,7 @@ public sealed partial class Diorama
 
         if (trail != null)
         {
-            _trailMesh = BuildProjMesh(ProjShaderMat(TrailShader, trail, priority: 18), TrailCap);
+            _trailMesh = BuildMrSwappedProjMesh(TrailShader, TrailShaderMr, trail, priority: 18, TrailCap);
         }
         if (bullet != null)
         {
@@ -326,7 +437,8 @@ public sealed partial class Diorama
         }
         if (particles != null && _glowUv != Vector3.Zero)
         {
-            _projGlowMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, particles, priority: 20), ProjGlowCap);
+            _projGlowMesh = BuildMrSwappedProjMesh(ParticleShaderAdd, ParticleShaderAddMr,
+                particles, priority: 20, ProjGlowCap);
         }
         if (particles != null && _effectUv.TryGetValue(SpriteFxEffectId, out Vector3 puff))
         {
@@ -337,14 +449,22 @@ public sealed partial class Diorama
         }
         if (particles != null && _effectUv.ContainsKey(PlayerAuraEffectId))
         {
-            _playerAuraMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, particles, priority: 14), PlayerAuraCap);
+            _playerAuraMesh = BuildMrSwappedProjMesh(ParticleShaderAdd, ParticleShaderAddMr,
+                particles, priority: 14, PlayerAuraCap);
         }
         if (projs != null)
         {
-            _projsAtlasAddMesh = BuildProjMesh(ProjShaderMat(ParticleShaderAdd, projs, priority: 20), ProjsAtlasAddCap);
+            _projsAtlasAddMesh = BuildMrSwappedProjMesh(ParticleShaderAdd, ParticleShaderAddMr,
+                projs, priority: 20, ProjsAtlasAddCap);
             _projsAtlasAlphaMesh = BuildProjMesh(ProjShaderMat(ParticleShader, projs, priority: 19), ProjsAtlasAlphaCap);
-            _ionStripMesh = BuildProjMesh(ProjShaderMat(IonStripShader, projs, priority: 20), IonStripCap, customData: false);
-            _plagueMesh = BuildProjMesh(ProjShaderMat(PlagueShader, projs, priority: 21), PlagueCap);
+            _ionStripMesh = BuildMrSwappedProjMesh(IonStripShader, IonStripShaderMr,
+                projs, priority: 20, IonStripCap, customData: false);
+            // Two materials, swapped by MR state: the multiply pass cannot reach
+            // the real world (see PlagueShaderMr).
+            _plagueMatVr = ProjShaderMat(PlagueShader, projs, priority: 21);
+            _plagueMatMr = ProjShaderMat(PlagueShaderMr, projs, priority: 21);
+            _plagueMesh = BuildProjMesh(_plagueMatVr, PlagueCap, true, out _plagueInstance);
+            ApplyPlagueBlend();
         }
     }
 
@@ -506,6 +626,12 @@ public sealed partial class Diorama
         _playerAuraN = 0;
 
         float elapsedMs = view.Header.ElapsedMsSim;
+        if (_lastProjectileElapsedMs >= 0.0f && elapsedMs < _lastProjectileElapsedMs)
+        {
+            _projectileVisualTracks.Clear();
+        }
+        _lastProjectileElapsedMs = elapsedMs;
+        _projectileVisualSeen.Clear();
         bool ionMaster = false;
         if (view.Header.PlayerCount > 0)
         {
@@ -526,8 +652,13 @@ public sealed partial class Diorama
 
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
         {
-            DrawPrimary(pr, elapsedMs, ionMaster, view);
+            _projectileVisualSeen.Add(pr.PoolIndex);
+            if (PrepareVisualProjectile(pr, elapsedMs, out Sim.ProjectileSnap visual))
+            {
+                DrawPrimary(visual, elapsedMs, ionMaster, view);
+            }
         }
+        RenderDepartedProjectiles(elapsedMs, ionMaster, view);
         foreach (Sim.SecondarySnap s in view.Secondaries)
         {
             DrawSecondary(s);
@@ -552,6 +683,134 @@ public sealed partial class Diorama
         Flush(_spriteFxMesh, _spriteFxN);
         Flush(_playerAuraMesh, _playerAuraN);
     }
+
+    private bool PrepareVisualProjectile(in Sim.ProjectileSnap projectile,
+        float elapsedMs, out Sim.ProjectileSnap visual)
+    {
+        visual = projectile;
+        Vector2 position = new(projectile.X, projectile.Y);
+        if (!_projectileVisualTracks.TryGetValue(projectile.PoolIndex, out ProjectileVisualTrack? track))
+        {
+            track = new ProjectileVisualTrack();
+            _projectileVisualTracks[projectile.PoolIndex] = track;
+        }
+
+        // Pool slots are reused. Type + spawn origin identify a new occupant.
+        bool sameOccupant = track.HasPrevious
+            && track.Snap.TypeId == projectile.TypeId
+            && Mathf.IsEqualApprox(track.Snap.OriginX, projectile.OriginX)
+            && Mathf.IsEqualApprox(track.Snap.OriginY, projectile.OriginY)
+            && elapsedMs >= track.LastElapsedMs;
+        if (!sameOccupant)
+        {
+            track.HasPrevious = false;
+            track.Ghosting = false;
+            track.Finished = false;
+            track.Velocity = Vector2.Zero;
+        }
+
+        float dt = track.HasPrevious
+            ? Mathf.Clamp((elapsedMs - track.LastElapsedMs) * 0.001f, 0.0f, 0.1f)
+            : 0.0f;
+        if (track.Finished)
+        {
+            track.Snap = projectile;
+            track.LastElapsedMs = elapsedMs;
+            return false;
+        }
+
+        if (track.Ghosting)
+        {
+            // Once the projectile crosses an arena edge, presentation owns its
+            // position. Do not snap back to the simulation's offscreen linger
+            // position or wait for its life timer to decay.
+            track.GhostPosition += track.Velocity * dt;
+            visual.X = track.GhostPosition.X;
+            visual.Y = track.GhostPosition.Y;
+            visual.LifeTimer = 0.4f;
+            if (OutsideDrawBounds(track.GhostPosition))
+            {
+                track.Ghosting = false;
+                track.Finished = true;
+                track.Snap = projectile;
+                track.LastElapsedMs = elapsedMs;
+                return false;
+            }
+        }
+        else if (projectile.LifeTimer >= 0.4f)
+        {
+            Vector2 delta = position - track.PreviousPosition;
+            if (track.HasPrevious && dt > 1e-5f && delta.LengthSquared() > 1e-6f)
+            {
+                track.Velocity = delta / dt;
+            }
+            track.PreviousPosition = position;
+            track.HasPrevious = true;
+
+            // Inclusive, direction-aware edge detection is deliberate. The sim
+            // can stop a center exactly on the boundary, so a strict outside
+            // test leaves the sprite looking pinned to an invisible wall.
+            if (ReachedArenaExit(position, track.Velocity))
+            {
+                track.GhostPosition = position;
+                track.Ghosting = true;
+            }
+        }
+        else if (track.HasPrevious && ReachedArenaExit(position, track.Velocity))
+        {
+            // The stopping snapshot may be the first one whose center reaches
+            // the boundary. Preserve the last live-flight velocity in that case.
+            track.GhostPosition = position;
+            track.Ghosting = true;
+            visual.LifeTimer = 0.4f;
+        }
+
+        track.Snap = projectile;
+        track.LastElapsedMs = elapsedMs;
+        return true;
+    }
+
+    private void RenderDepartedProjectiles(float elapsedMs, bool ionMaster, in SnapshotView view)
+    {
+        _projectileVisualRemove.Clear();
+        foreach (System.Collections.Generic.KeyValuePair<int, ProjectileVisualTrack> pair in _projectileVisualTracks)
+        {
+            if (_projectileVisualSeen.Contains(pair.Key))
+            {
+                continue;
+            }
+            ProjectileVisualTrack track = pair.Value;
+            if (!track.Ghosting || track.Velocity.LengthSquared() <= 1e-4f)
+            {
+                _projectileVisualRemove.Add(pair.Key);
+                continue;
+            }
+            float dt = Mathf.Clamp((elapsedMs - track.LastElapsedMs) * 0.001f, 0.0f, 0.1f);
+            track.GhostPosition += track.Velocity * dt;
+            track.LastElapsedMs = elapsedMs;
+            if (OutsideDrawBounds(track.GhostPosition))
+            {
+                _projectileVisualRemove.Add(pair.Key);
+                continue;
+            }
+            Sim.ProjectileSnap visual = track.Snap;
+            visual.X = track.GhostPosition.X;
+            visual.Y = track.GhostPosition.Y;
+            visual.LifeTimer = 0.4f;
+            DrawPrimary(visual, elapsedMs, ionMaster, view);
+        }
+        foreach (int key in _projectileVisualRemove)
+        {
+            _projectileVisualTracks.Remove(key);
+        }
+    }
+
+    private bool ReachedArenaExit(Vector2 game, Vector2 velocity)
+        => velocity.LengthSquared() > 1e-4f
+            && ((game.X <= 0.0f && velocity.X < 0.0f)
+                || (game.X >= _worldSize && velocity.X > 0.0f)
+                || (game.Y <= 0.0f && velocity.Y < 0.0f)
+                || (game.Y >= _worldSize && velocity.Y > 0.0f));
 
     /// <summary>Player-anchored effect passes (trooper.py): the Radioactive
     /// green aura under the body and the counter-rotating shield-ring pair
