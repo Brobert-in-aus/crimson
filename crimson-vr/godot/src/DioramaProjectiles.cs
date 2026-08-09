@@ -281,6 +281,13 @@ public sealed partial class Diorama
     {
         var mat = new ShaderMaterial { Shader = shader, RenderPriority = priority };
         mat.SetShaderParameter("sheet", sheet);
+        // Only the alpha-blended shader carries the dst-blind alpha curve that
+        // has to be switched off over passthrough; the additive and multiply
+        // passes have no such uniform.
+        if (shader == ParticleShader)
+        {
+            TrackMrComposite(mat);
+        }
         return mat;
     }
 
@@ -418,10 +425,16 @@ public sealed partial class Diorama
     private void EmitAtlasSprite(MultiMesh? mesh, ref int n, int cap, Vector2 game, float sizeUnits,
         float rotation, Color color, Vector3 uv)
     {
-        // Death-cinematic zoom: magnify into window space first — the existing
+        // Death-cinematic zoom: magnify into window space first — the
         // draw-bounds cull then doubles as the window-edge clip.
         game = ViewGame(game);
-        if (mesh == null || n >= cap || sizeUnits <= 1e-3f || OutsideDrawBounds(game))
+        // ONLY during that zoom. Outside it, projectiles are free to leave the
+        // arena and keep going: the slab edge used to swallow rockets and gauss
+        // rounds mid-flight, which read as them hitting an invisible wall. There
+        // is no fogged ground plane to protect any more, and in MR a round
+        // flying off into the room is the better picture.
+        if (mesh == null || n >= cap || sizeUnits <= 1e-3f
+            || (_viewZoom > 1.0f && OutsideDrawBounds(game)))
         {
             return;
         }
@@ -444,7 +457,14 @@ public sealed partial class Diorama
         startGame = ViewGame(startGame);
         endGame = ViewGame(endGame);
         halfWidthUnits *= _viewZoom;
-        if (mesh == null || n >= cap || !ClampToDrawBounds(ref startGame, ref endGame))
+        if (mesh == null || n >= cap)
+        {
+            return;
+        }
+        // Clipped to the window only while the death cinematic is zoomed; see
+        // EmitAtlasSprite. A trail that leaves the arena now draws its whole
+        // length instead of being cut at the slab.
+        if (_viewZoom > 1.0f && !ClampToDrawBounds(ref startGame, ref endGame))
         {
             return;
         }
@@ -667,7 +687,8 @@ public sealed partial class Diorama
     private void EmitBulletHead(Vector2 game, float sizeUnits, float rotation, Color color)
     {
         game = ViewGame(game);
-        if (_bulletHeadMesh == null || _bulletHeadN >= BulletHeadCap || OutsideDrawBounds(game))
+        if (_bulletHeadMesh == null || _bulletHeadN >= BulletHeadCap
+            || (_viewZoom > 1.0f && OutsideDrawBounds(game)))
         {
             return;
         }

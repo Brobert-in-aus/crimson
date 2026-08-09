@@ -121,9 +121,9 @@ public sealed partial class Hud : Node3D
     public Node3D BonusRoot => _bonusRoot;
 
     /// <summary>Centre of the RIGHT EDGE of the first bonus row, in group-local
-    /// metres. Cabinet anchors this edge to the arena boundary so the panel is
-    /// wholly outboard instead of straddling the playfield. The stack still uses
-    /// the first row vertically because it is the one row that is always live.</summary>
+    /// metres. Cabinet anchors this edge to the outer diorama boundary so the
+    /// panel is wholly outboard. The stack still uses the first row vertically
+    /// because it is the one row that is always live.</summary>
     public Vector3 BonusFirstRowRightEdgeLocal
         => new(LocalX(BonusRowX + 182.0f), LocalY(BonusRowY0 + 15.0f), 0.0f);
 

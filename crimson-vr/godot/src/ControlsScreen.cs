@@ -101,11 +101,11 @@ public sealed partial class ControlsScreen : Node3D
             cabinet ? "Mode: Cabinet  -  hands on the pad, board up ahead"
                     : "Mode: Tabletop  -  hands reach into the arena",
             "",
-            $"{moveHand}  -  hold over {surface}: the trooper chases your ring",
+            $"{moveHand}  -  pinch / trigger over {surface} to move",
             $"{aimHand}  -  aim: the spread ring is the crosshair",
-            "Trigger (aim hand)  -  fire",
-            "Reload  -  automatic when the clip runs dry",
-            "Buttons  -  poke them with either hand sphere",
+            "Pinch / trigger (aim hand)  -  fire",
+            "Reload / swap  -  aim-hand fist / grip; empty clips auto-reload",
+            "Buttons  -  poke with a fingertip or controller top",
             cabinet ? "Pause  -  the flat button beside the pad"
                     : "Pause  -  the flat button beside the arena",
             "",

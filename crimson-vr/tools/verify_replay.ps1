@@ -129,8 +129,12 @@ function Find-DivergenceTick([string]$Path) {
     $lo = 1
     $hi = $count
     while ($lo -lt $hi) {
-        $mid = [int](($lo + $hi) / 2)
+        # FLOOR, not [int]: PowerShell's int cast rounds .5 to even, so at
+        # lo=n, hi=n+1 the midpoint came back as n+1, hi never moved and the
+        # loop span forever on the last step of an otherwise correct bisect.
+        $mid = [int][math]::Floor(($lo + $hi) / 2)
         if ((SimRng $mid) -eq (LiveRng $mid)) { $lo = $mid + 1 } else { $hi = $mid }
+        Write-Host "      narrowing: $lo..$hi" -ForegroundColor DarkGray
     }
     Write-Host "    FIRST DIVERGING TICK = $lo (of $count)" -ForegroundColor Yellow
 }

@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 20u
+#define CRIMSON_HOST_ABI_VERSION 23u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -353,7 +353,7 @@ typedef struct crimson_host_terrain_info {
     uint32_t terrain_seed;  /* rng.state at terrain generation */
     int32_t terrain_size;   /* square terrain side, floor(world_size) */
     float world_size;
-} crimson_host_terrain_info;
+} crimson_host_terrain_info_t;
 
 /* Terrain FX drain payload (ABI v3), packed, in order:
  *   crimson_host_terrain_fx_header
@@ -450,7 +450,7 @@ int32_t crimson_host_audio_events(uint64_t handle, uint8_t *buf, uint32_t *len);
 
 /* Static terrain generation info (ABI v3). Query once after create. */
 int32_t crimson_host_terrain_info(uint64_t handle,
-                                  crimson_host_terrain_info *out_info);
+                                  crimson_host_terrain_info_t *out_info);
 
 /* Terrain FX (blood/scorch splats + corpse stamps) from the last tick.
  * Same buffer protocol as crimson_host_snapshot; drain after every tick. */
@@ -463,24 +463,39 @@ int32_t crimson_host_verify_replay_json(const uint8_t *replay,
                                         uint8_t *out,
                                         uint32_t *out_len);
 
-/* Replay recording (ABI v20).
+/* Replay recording (ABI v23).
  *
  * begin starts (or restarts) capture, discarding anything held so far. The
  * session then records one input row per SIM TICK -- not per call -- so a frame
  * that advances several ticks contributes several rows.
  *
  * finish encodes the run as standard .crd bytes, using the same buffer protocol
- * as crimson_host_snapshot. Claimed stats are not taken from the live run: the
- * bytes are encoded, re-simulated through the same code path the verifier uses,
- * and re-encoded with the result, so the output verifies by construction.
- * Because that re-simulation is a full run, finish is NOT cheap -- call it once
- * at the end of a session, not per frame.
+ * as crimson_host_snapshot. Encoding is proportional to match length, so call
+ * it once at the end of a session, not per frame. A successful size query that
+ * reports zero bytes means the capture was started but the session never ticked.
  *
  * finish fails if begin was never called, or if capture ran out of memory:
  * emitting a truncated replay would produce a file that fails verification for
- * a reason no longer visible at that point. */
+ * a reason no longer visible at that point.
+ *
+ * The v22+ detach path is preferred by interactive hosts. detach moves the
+ * capture into an independently owned recording handle in O(1), allowing the
+ * session to be restarted or destroyed immediately. recording_encode may then
+ * run on a background thread. Every nonzero recording handle must eventually be
+ * passed to recording_destroy, including after an encode failure.
+ *
+ * recording_rng (v23) returns one raw little-endian uint32_t RNG sample per
+ * recorded tick. It is diagnostic sidecar data and is not part of the .crd. */
 int32_t crimson_host_replay_begin(uint64_t handle);
 int32_t crimson_host_replay_finish(uint64_t handle, uint8_t *buf, uint32_t *len);
+int32_t crimson_host_replay_detach(uint64_t handle, uint64_t *out_recording);
+int32_t crimson_host_recording_encode(uint64_t recording,
+                                      uint8_t *buf,
+                                      uint32_t *len);
+int32_t crimson_host_recording_rng(uint64_t recording,
+                                   uint8_t *buf,
+                                   uint32_t *len);
+int32_t crimson_host_recording_destroy(uint64_t recording);
 
 #ifdef __cplusplus
 }

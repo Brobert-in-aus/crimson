@@ -633,6 +633,31 @@ public sealed partial class Diorama : Node3D
     // pow 2.2 (exact at full alpha), and approximate sRGB-space compositing by
     // warping alpha with a luminance-dependent exponent (bright sources need
     // less alpha in linear, dark sources more; fitted 1.6/0.6 endpoints).
+    // Every alpha-blended effect material, so the dst-blind alpha curve can be
+    // switched off when the app composites over passthrough. Collected at
+    // creation rather than looked up later: these hang off several different
+    // MultiMeshInstances and there is no single node to walk.
+    private readonly System.Collections.Generic.List<ShaderMaterial> _mrCompositeMats = new();
+    private bool _mrComposite;
+
+    private void TrackMrComposite(ShaderMaterial mat)
+    {
+        _mrCompositeMats.Add(mat);
+        mat.SetShaderParameter("mr_composite", _mrComposite ? 1.0f : 0.0f);
+    }
+
+    /// <summary>Tell the effect materials whether they are drawing over the real
+    /// world. See ParticleShader: its alpha curve assumes an opaque destination
+    /// and paints black haloes without one.</summary>
+    public void SetMixedRealityComposite(bool mixedReality)
+    {
+        _mrComposite = mixedReality;
+        foreach (ShaderMaterial mat in _mrCompositeMats)
+        {
+            mat.SetShaderParameter("mr_composite", mixedReality ? 1.0f : 0.0f);
+        }
+    }
+
     private Shader? _particleShader;
     private Shader ParticleShader => _particleShader ??= new Shader
     {
@@ -643,6 +668,15 @@ public sealed partial class Diorama : Node3D
             varying vec4 inst;
             varying vec4 col;
             void vertex() { inst = INSTANCE_CUSTOM; col = COLOR; }
+            // 1.0 while compositing over passthrough. The alpha curve below is a
+            // DST-BLIND approximation: it lifts the alpha of dark pixels so they
+            // darken the arena floor the way native blending does. That assumes
+            // an opaque, arena-toned destination. In MR there is none, so those
+            // lifted dark pixels land on the player's real room as black haloes
+            // around every effect — the exploding freeze ring worst of all.
+            // Straight alpha is the honest answer there: transparent stays
+            // transparent, and the effect tints the room instead of masking it.
+            uniform float mr_composite = 0.0;
             void fragment() {
                 // Manifest UV rect = native sample window (cell corner, cell-2px
                 // right/bottom clamp) — no shader-side inset.
@@ -652,7 +686,7 @@ public sealed partial class Diorama : Node3D
                 ALBEDO = pow(s, vec3(2.2));
                 float a = clamp(c.a * col.a, 0.0, 1.0);
                 float lum = dot(min(s, vec3(1.0)), vec3(0.299, 0.587, 0.114));
-                ALPHA = pow(a, mix(0.6, 1.6, lum));
+                ALPHA = mix(pow(a, mix(0.6, 1.6, lum)), a, mr_composite);
             }
             """,
     };
@@ -716,6 +750,7 @@ public sealed partial class Diorama : Node3D
         }
 
         var material = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 23 };
+        TrackMrComposite(material);
         material.SetShaderParameter("sheet", tex);
         _particles = new MultiMesh
         {
@@ -748,6 +783,7 @@ public sealed partial class Diorama : Node3D
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
         var freezeMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 24 };
+        TrackMrComposite(freezeMat);
         freezeMat.SetShaderParameter("sheet", tex);
         _freezeMesh = new MultiMesh
         {
@@ -764,6 +800,7 @@ public sealed partial class Diorama : Node3D
         // they sit under the creature sprites (creatures start at priority 6) but
         // over the ground/decals.
         var overlayMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 4 };
+        TrackMrComposite(overlayMat);
         overlayMat.SetShaderParameter("sheet", tex);
         _overlays = new MultiMesh
         {
@@ -1316,6 +1353,7 @@ public sealed partial class Diorama : Node3D
             return;
         }
         var material = new ShaderMaterial { Shader = ParticleShader, RenderPriority = -3 };
+        TrackMrComposite(material);
         material.SetShaderParameter("sheet", tex);
         _decals = new MultiMesh
         {
@@ -1481,22 +1519,14 @@ public sealed partial class Diorama : Node3D
             // playfield and walk in, which the flat game's camera cropped
             // entirely.
             //
-            // The ramp spans the WHOLE margin: it used to be a fixed 0.075 uv
-            // against a 0.15 margin, so it hit full darkness exactly half way
-            // out and the outer half sat flat black -- the gradient visibly
-            // stopped short of the board edge. Deriving it from margin_scale
-            // means the fade always ends where the floor does, and cannot drift
-            // if the margin is retuned.
-            //
-            // vignette_span scales that ramp: 1.0 = the full margin, lower =
-            // reach black sooner. vignette_inset pulls the START inward, in uv,
-            // over the playable area -- 0 keeps the play surface undimmed,
-            // which was the original constraint; a small value buys a longer,
-            // softer gradient at the cost of shading the outermost sliver of
-            // the playfield.
-            uniform float vignette_span = 1.0;
+            // Start just inside the playable square, then reach black two thirds
+            // of the way across the margin to the diorama edge. The outer third
+            // stays black, cleanly separating the board from the real room in MR.
+            // Deriving the distance from margin_scale keeps that 2/3 proportion
+            // stable if the floor margin changes.
+            uniform float vignette_span = 0.6666667;
             uniform float vignette_inset = 0.02;
-            uniform float vignette_strength = 0.88;
+            uniform float vignette_strength = 1.0;
             void fragment() {
                 vec2 uv = UV * margin_scale - vec2((margin_scale - 1.0) * 0.5);
                 uv = view_center + (uv - view_center) / view_zoom;

@@ -257,6 +257,13 @@ public partial class Main : Node3D
     private readonly bool[] _prevTrigger = new bool[2];
     private readonly bool[] _prevGrip = new bool[2];
 
+    // Full optical hand tracking is registered separately from the action-map
+    // left_hand/right_hand trackers. The former provides fingertip joints for
+    // direct menu pokes; the latter deliberately remains the gameplay input so
+    // Quest can switch seamlessly between hands and Touch controllers.
+    private const string LeftHandTrackerPath = "/user/hand_tracker/left";
+    private const string RightHandTrackerPath = "/user/hand_tracker/right";
+
     // Haptics (slice 7): fire pulse on the aim hand, a strong both-hand pulse when
     // hit, a tick on reload complete. Deltas tracked tick-to-tick.
     private float _prevHealth;
@@ -1108,6 +1115,11 @@ public partial class Main : Node3D
             _xrActive = true;
             _xrInterface = xr; // BuildEnvironment applies passthrough once the env exists
             GD.Print("CrimsonVR: OpenXR initialized");
+            if (xr is OpenXRInterface oxr)
+            {
+                GD.Print($"CrimsonVR: hand tracking supported={oxr.IsHandTrackingSupported()}, "
+                    + $"hand interaction supported={oxr.IsHandInteractionSupported()}");
+            }
         }
         else
         {
@@ -1233,6 +1245,10 @@ public partial class Main : Node3D
                 _worldFloor.Visible = false;
             }
             _passthroughActive = true;
+            // Effect materials must drop their dst-blind alpha curve here or
+            // every effect paints a black halo on the real room (see
+            // Diorama.ParticleShader).
+            _diorama?.SetMixedRealityComposite(true);
             GD.Print("CrimsonVR: mixed reality enabled (ALPHA_BLEND)");
             return true;
         }
@@ -1247,6 +1263,7 @@ public partial class Main : Node3D
             _worldFloor.Visible = true;
         }
         _passthroughActive = false;
+        _diorama?.SetMixedRealityComposite(false);
         GD.Print("CrimsonVR: opaque VR enabled");
         return true;
     }
@@ -1283,13 +1300,29 @@ public partial class Main : Node3D
             || _questPanel.Active
             || _endNote.Active
             || (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active));
-        if (_handMarkers[0] != null)
+        Update(0, _leftHand);
+        Update(1, _rightHand);
+
+        void Update(int index, XRController3D hand)
         {
-            _handMarkers[0].Visible = pokeUi;
-        }
-        if (_handMarkers[1] != null)
-        {
-            _handMarkers[1].Visible = pokeUi;
+            // Guarded because the array holds nullable refs and is populated in
+            // BuildRig: safe today, but a marker built behind any condition
+            // (skipped in MR, say) would turn a hidden marker into a crash on
+            // the first frame.
+            MeshInstance3D? marker = _handMarkers[index];
+            if (marker == null)
+            {
+                return;
+            }
+            bool visible = pokeUi && HasPokeTracking(hand);
+            marker.Visible = visible;
+            if (visible)
+            {
+                // The marker is parented to the grip node for lifecycle only;
+                // place it globally at the poke point — the optical fingertip
+                // when hands are tracked, else the OpenXR aim pose.
+                marker.GlobalPosition = PokeTip(hand);
+            }
         }
     }
 
@@ -2021,7 +2054,7 @@ public partial class Main : Node3D
 
     private void UpdateMarker(int index, XRController3D hand)
     {
-        bool tracking = hand.GetHasTrackingData();
+        bool tracking = HasPokeTracking(hand);
         _pokeMarkers[index].Visible = tracking;
         if (tracking)
         {
@@ -2190,9 +2223,9 @@ public partial class Main : Node3D
     }
 
     private HandProbe MakeProbe(XRController3D hand)
-        => hand.GetHasTrackingData()
+        => HasPokeTracking(hand)
             ? new HandProbe(true, PokeTip(hand), hand.GetFloat("grip") > GripThreshold,
-                hand.GlobalBasis)
+                PokeBasis(hand))
             : default;
 
     private void SetDebug(bool on)
@@ -2276,10 +2309,66 @@ public partial class Main : Node3D
         _audio.StopMusic();
     }
 
-    // The poke point is the grip position - i.e. the centre of the visible hand
-    // marker sphere, so the sphere the player sees IS the collider (no offset).
-    private static Vector3 PokeTip(XRController3D hand)
-        => hand.GlobalPosition;
+    // Optical hands poke with the actual index fingertip. Touch controllers use
+    // OpenXR's aim pose at the controller top (falling back to grip if omitted).
+    // Keeping both paths here makes every diegetic menu direct-touch only; hand
+    // tracking never silently turns the UI into a laser pointer.
+    private Vector3 PokeTip(XRController3D hand)
+    {
+        if (TryGetOpticalJoint(hand, XRHandTracker.HandJoint.IndexFingerTip,
+                out Transform3D fingertip))
+        {
+            return _origin.GlobalTransform * fingertip.Origin;
+        }
+        if (XRServer.GetTracker(hand.Tracker) is XRPositionalTracker tracker
+            && tracker.HasPose("aim"))
+        {
+            XRPose pose = tracker.GetPose("aim");
+            if (pose.HasTrackingData && hand.GetParent() is Node3D origin)
+            {
+                return origin.GlobalTransform * pose.GetAdjustedTransform().Origin;
+            }
+        }
+        return hand.GlobalPosition;
+    }
+
+    private Basis PokeBasis(XRController3D hand)
+    {
+        if (TryGetOpticalJoint(hand, XRHandTracker.HandJoint.Palm, out Transform3D palm))
+        {
+            return _origin.GlobalBasis * palm.Basis;
+        }
+        return hand.GlobalBasis;
+    }
+
+    private bool HasPokeTracking(XRController3D hand)
+        => hand.GetHasTrackingData()
+            || TryGetOpticalJoint(hand, XRHandTracker.HandJoint.IndexFingerTip, out _);
+
+    private static bool TryGetOpticalJoint(XRController3D hand,
+        XRHandTracker.HandJoint joint, out Transform3D transform)
+    {
+        string trackerPath = hand.GetTrackerHand() == XRPositionalTracker.TrackerHand.Left
+            ? LeftHandTrackerPath
+            : RightHandTrackerPath;
+        if (XRServer.GetTracker(trackerPath) is XRHandTracker tracker
+            && tracker.HasTrackingData
+            // Controller-inferred joints must not replace the carefully aligned
+            // controller poke point. Unknown is accepted because runtimes may
+            // expose optical joints without the data-source extension.
+            && tracker.HandTrackingSource != XRHandTracker.HandTrackingSourceEnum.Controller
+            && tracker.HandTrackingSource != XRHandTracker.HandTrackingSourceEnum.NotTracked)
+        {
+            XRHandTracker.HandJointFlags flags = tracker.GetHandJointFlags(joint);
+            if ((flags & XRHandTracker.HandJointFlags.PositionValid) != 0)
+            {
+                transform = tracker.GetHandJointTransform(joint);
+                return true;
+            }
+        }
+        transform = Transform3D.Identity;
+        return false;
+    }
 
     /// <summary>Shared projection of a controller onto the CONTROL rectangle
     /// (PLAN §4, revised): the hand's position drops onto the small rect the
@@ -2783,11 +2872,10 @@ public partial class Main : Node3D
     }
 
     // Where the FIRST bonus row sits in Cabinet, in playfield-local multiples of
-    // the board's reference half-side. Internal +X is the arena's "right" edge,
+    // the board's reference half-side. Internal +X is the diorama's "right" edge,
     // but it appears on the player's left. The bonus panel's RIGHT edge is
-    // anchored exactly there (factor 1.0), leaving the whole panel outboard and
-    // tangent to the playable square. Forward of centre keeps it low in view;
-    // the remaining rows grow upward.
+    // anchored to the OUTER floor edge, not the smaller playable arena boundary.
+    // Forward of centre keeps it low in view; the remaining rows grow upward.
     private const float BonusForwardFactor = -0.30f;
     private const float BonusLiftFactor = 0.06f;
 
@@ -2810,10 +2898,10 @@ public partial class Main : Node3D
         }
         Node3D bonus = _hud.BonusRoot;
         float half = ArenaSideMeters * 0.5f;
-        // The boundary point where the first row's right edge should land.
-        // Internal +X is visually the arena's left edge from the player's seat.
+        // The outer diorama boundary where the first row's right edge lands.
+        // Internal +X is visually the left edge from the player's seat.
         var anchor = new Vector3(
-            half,
+            half * Diorama.FloorMarginScale,
             half * BonusLiftFactor,
             half * BonusForwardFactor);
 

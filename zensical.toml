@@ -38,6 +38,7 @@ nav = [
     { "Overview" = "rewrite/index.md" },
     { "Architecture" = [
       { "Overview" = "rewrite/architecture/index.md" },
+      { "ABI-driven Godot VR conversion" = "rewrite/architecture/abi-driven-godot-vr-port.md" },
       { "Module map" = "rewrite/module-map.md" },
       { "Mode systems" = "rewrite/mode-systems.md" },
       { "Perks architecture" = "rewrite/perks-architecture.md" },
