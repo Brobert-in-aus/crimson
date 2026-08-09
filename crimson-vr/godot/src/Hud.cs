@@ -222,8 +222,7 @@ public sealed partial class Hud : Node3D
 
     private static Texture2D? Load(string name)
     {
-        string path = $"res://assets/sprites/{name}.png";
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        return AssetStore.LoadTexture(AssetStore.SpritePath($"{name}.png"));
     }
 
     public void Build(float arenaSideMeters)
@@ -533,7 +532,7 @@ public sealed partial class Hud : Node3D
 
     private void LoadWeaponNames()
     {
-        string path = "res://assets/sprites/sprite_manifest.json";
+        string path = AssetStore.SpritePath("sprite_manifest.json");
         if (!Godot.FileAccess.FileExists(path))
         {
             return;

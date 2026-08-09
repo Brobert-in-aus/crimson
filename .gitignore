@@ -36,6 +36,8 @@ __pycache__/
 coverage.xml
 htmlcov/
 screenshots/
+# Locally generated user-owned VR asset bundles must never be committed.
+*.pack
 zig-cache/
 .zig-cache/
 zig-pkg/

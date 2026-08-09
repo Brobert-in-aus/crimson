@@ -20,4 +20,8 @@ $paqs = Get-ChildItem $Project -File -Recurse -Force -ErrorAction SilentlyContin
     Where-Object { $_.Extension -in @('.paq', '.pak') }
 if ($paqs) { throw "Quest CI refuses to package PAQ/PAK files: $($paqs.FullName -join ', ')" }
 
+$packs = Get-ChildItem $Project -File -Recurse -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -eq '.pack' }
+if ($packs) { throw "Quest CI refuses to package user-created asset packs: $($packs.FullName -join ', ')" }
+
 Write-Host 'Asset-free source gate passed (no Godot asset tree or PAQ/PAK files).'

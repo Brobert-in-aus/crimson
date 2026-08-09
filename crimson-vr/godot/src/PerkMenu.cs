@@ -285,7 +285,7 @@ public sealed partial class PerkMenu : Node3D
 
     private void LoadPerkNames()
     {
-        string path = "res://assets/sprites/sprite_manifest.json";
+        string path = AssetStore.SpritePath("sprite_manifest.json");
         if (!Godot.FileAccess.FileExists(path))
         {
             return;

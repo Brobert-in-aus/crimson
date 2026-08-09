@@ -337,6 +337,12 @@ foreach ($e in $required) {
 }
 Write-Host ("    payload OK ({0} required entries present)" -f $required.Count) -ForegroundColor DarkGray
 
+# Public/personal builds must contain only our frontend/native code. Keep this
+# output-level check beside the payload check so local builds cannot bypass the
+# source-tree CI gate merely by exporting from a dirty development checkout.
+& (Join-Path $PSScriptRoot 'assert_asset_free_apk.ps1') -Apk $questApk -Jar $jar
+if ($LASTEXITCODE -ne 0) { throw "asset-free APK verification failed ($LASTEXITCODE)" }
+
 $installed = $false
 if ($Install) {
     $installed = Install-QuestApk $questApk

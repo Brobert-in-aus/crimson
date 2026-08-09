@@ -391,20 +391,16 @@ player set it by hand, which is a weaker form of the same thing.
 
 ## 6. Presentation (2.5D)
 
-> **Known issue — off-arena spawn margin (found in M3 in-headset, 2026-07-08).**
+> **Resolved — off-arena spawn margin (found in M3 in-headset, 2026-07-08).**
 > Survival creatures spawn **40 game units outside** the terrain bounds
 > (`rand_survival_spawn_pos`: edge = `-40` or `terrain+40`) and walk in. The flat
 > game's camera crops that margin so it's never seen; the VR diorama shows the
-> whole world plane, so clusters visibly pop in *outside* the table and run onto
-> it. Needs an elegant arena-edge treatment (e.g. a fade/vignette band or a
-> raised rim that masks the spawn ring, or gently over-sizing the terrain quad
-> past the playfield so the margin reads as "off-table" rather than floating).
-> Presentation-only (no sim change — spawn positions must stay exact for parity).
-> Defer to a later M3 polish pass or M4.
-> **2026-07-10 interim:** a QUICK-FIX playfield border shipped — four thin
-> dim-crimson strips on the playable-zone perimeter (`BuildPlayfieldBorder`)
-> so the edge is visible at all. The elegant fade-band / rim-mask treatment
-> (which should also swallow this spawn-margin pop-in) is still owed.
+> whole world plane, so clusters visibly popped in *outside* the table and ran
+> onto it. **2026-08-09:** creature sprites, shadows, auras, and freeze overlays
+> now use a fragment-level playfield clip. This reproduces the flat viewport crop
+> while retaining exact simulation spawn positions: enemies scroll through the
+> boundary pixel-by-pixel at full opacity, and the temporary alpha fade is gone.
+> The thin playfield border remains as a useful boundary marker.
 
 - **Terrain**: flat quad with the generated terrain texture; decals (blood,
   scorch) painted into a `SubViewport` decal layer composited over it —
@@ -984,14 +980,17 @@ Nothing ships publicly until this milestone is done.
 - **Remove all original-asset acquisition from distributed builds**: no
   bundled PAQs, no automatic download from the upstream project's channel
   (that permission is project-specific and does not extend to this fork).
-- **First-run asset import wizard**: user points the app at their own
-  Crimsonland Classic install (GOG). On Quest (SideQuest-distributed, so
-  developer mode + PC connection are a given): user drops the PAQs into the
-  headset's Download folder via SideQuest's file manager or adb; the app
-  requests all-files access (fine for sideloaded apps), detects them, and
-  imports. No companion desktop app. Extraction/atlas-bake runs locally (§6).
+- **First-run asset import**: a small original-code desktop helper auto-detects
+  (or is pointed at) the user's Crimsonland Classic install, creates one
+  versioned `crimson-assets.pack` locally, and fills the PCVR per-user inbox.
+  Quest uses the same helper to transfer it with ADB (manual ADB transfer
+  remains available); the headset app
+  imports the pack from its app-owned external-files inbox without broad
+  all-files access or an Android plugin. Assets live in `user://assets`, outside
+  the APK. See `notes/asset-import.md` for the
+  pack contract, user flows, implementation status, and recovery behaviour.
   Clear messaging when assets are absent.
-  - **The wizard MUST tell the user how to obtain the right files**, because the
+  - **The import UX MUST tell the user how to obtain the right files**, because the
     default GOG "Crimsonland" is the incompatible HD remake (§6): *buy
     Crimsonland on GOG → GOG Galaxy → the game → **Extras** tab → download &
     install "Crimsonland Classic" → point the wizard at that folder's `.paq`

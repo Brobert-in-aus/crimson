@@ -35,13 +35,13 @@ public sealed class SmallFont
             return _shared;
         }
         _checked = true;
-        const string texPath = "res://assets/sprites/smallWhite.png";
-        const string manifestPath = "res://assets/sprites/sprite_manifest.json";
-        if (!ResourceLoader.Exists(texPath) || !Godot.FileAccess.FileExists(manifestPath))
+        string texPath = AssetStore.SpritePath("smallWhite.png");
+        string manifestPath = AssetStore.SpritePath("sprite_manifest.json");
+        if (!Godot.FileAccess.FileExists(manifestPath))
         {
             return null;
         }
-        if (ResourceLoader.Load<Texture2D>(texPath) is not Texture2D tex)
+        if (AssetStore.LoadTexture(texPath) is not Texture2D tex)
         {
             return null;
         }
@@ -232,8 +232,8 @@ public static class ClassicTitle
     /// <summary>Add an ui_itemTexts row quad centred at (0, y, z).</summary>
     public static void BuildRow(Node3D parent, float widthMeters, int row, float y, float z = 0.0f)
     {
-        const string path = "res://assets/sprites/ui_itemTexts.png";
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        string path = AssetStore.SpritePath("ui_itemTexts.png");
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             return;
         }
@@ -260,8 +260,8 @@ public static class ClassicTitle
     /// ui_textReaper) centred at (0, y, z), sized by width with the art's aspect.</summary>
     public static MeshInstance3D? BuildBanner(Node3D parent, string file, float widthMeters, float y, float z = 0.0f)
     {
-        string path = "res://assets/sprites/" + file;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        string path = AssetStore.SpritePath(file);
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             return null;
         }
@@ -316,8 +316,8 @@ public static class ClassicPanel
     /// local z (the antenna trim extends beyond to the left/top like the art).</summary>
     public static void Build(Node3D parent, float widthMeters, float heightMeters, float z)
     {
-        const string path = "res://assets/sprites/ui_menuPanel.png";
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        string path = AssetStore.SpritePath("ui_menuPanel.png");
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             return;
         }

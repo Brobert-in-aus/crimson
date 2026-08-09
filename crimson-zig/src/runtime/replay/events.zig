@@ -106,10 +106,17 @@ pub fn applyReplayEvent(
                 state.time_scale_active,
                 dt_frame,
             );
-            const applied = perks.perkSelectionPickPreparedWithContext(
+            // Use the SAME path as LiveRunner.pickPerk. That path applies the
+            // selected perk and immediately refreshes the cached offer, which
+            // consumes RNG even when no further pick is pending. Skipping that
+            // refresh made real recordings diverge on the first perk pick.
+            const applied = perks.perkSelectionPickWithContext(
                 state,
                 players,
                 pick.choice_index,
+                options.game_mode,
+                options.player_count,
+                options.quest_unlock_index,
                 .{
                     .creatures = creatures,
                     .dt_frame = dt_pick,
@@ -400,7 +407,7 @@ test "lifeline 50-50 replay perk effect deactivates every other eligible creatur
     try std.testing.expect(before_rng != state.rng.state);
 }
 
-test "perk pick event applies immediate creature perk effects through shared path" {
+test "perk pick event applies effects and refreshes offer through live path" {
     var state = state_mod.GameplayState.init(1);
     var creatures: creatures_mod.CreaturePool = .{};
     var players = [_]state_mod.PlayerState{
@@ -437,6 +444,7 @@ test "perk pick event applies immediate creature perk effects through shared pat
 
     try std.testing.expectEqual(@as(usize, 1), outcome.perk_pick_count_delta);
     try std.testing.expectApproxEqAbs(@as(f32, 4.925), creatures.entries[0].lifecycle_stage, 1e-6);
-    try std.testing.expect(state.perk_selection.choices_dirty);
-    try std.testing.expectEqual(rng_before_pick, state.rng.state);
+    try std.testing.expect(!state.perk_selection.choices_dirty);
+    try std.testing.expectEqual(@as(usize, replay_codec.perk_choice_slot_count), state.perk_selection.choice_count);
+    try std.testing.expect(rng_before_pick != state.rng.state);
 }

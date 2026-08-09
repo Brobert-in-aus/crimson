@@ -179,7 +179,7 @@ public sealed partial class Diorama
             return null;
         }
         string path = SpriteDir + file;
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        return AssetStore.LoadTexture(path);
     }
 
     /// <summary>One decal/corpse stamp queued for a permanent bake into the

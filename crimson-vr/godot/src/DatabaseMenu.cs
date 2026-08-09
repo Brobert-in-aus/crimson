@@ -105,8 +105,7 @@ public sealed partial class DatabaseMenu : Node3D
 
         // Weapon icon: ui_wicons 8x8 grid, frame = icon_index*2 spanning two
         // cells (2:1 aspect) — same layout the HUD/score card use.
-        if (ResourceLoader.Exists("res://assets/sprites/ui_wicons.png")
-            && ResourceLoader.Load<Texture2D>("res://assets/sprites/ui_wicons.png") is Texture2D wicons)
+        if (AssetStore.LoadTexture(AssetStore.SpritePath("ui_wicons.png")) is Texture2D wicons)
         {
             _weaponIconMat = new StandardMaterial3D
             {
@@ -446,7 +445,7 @@ public sealed partial class DatabaseMenu : Node3D
 
     private void LoadTables()
     {
-        const string path = "res://assets/sprites/sprite_manifest.json";
+        string path = AssetStore.SpritePath("sprite_manifest.json");
         if (!Godot.FileAccess.FileExists(path))
         {
             return;

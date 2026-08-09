@@ -867,7 +867,8 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
 /// The replay runner needs BOTH halves. `perk_menu_open` is what makes it draw
 /// the same three choices as the live run (the selection comes off the RNG, so
 /// missing the open means a different offer entirely), and `perk_pick` applies
-/// the one taken. Without them a recording still decodes and runs, and diverges
+/// the one taken and refreshes the cached offer exactly as live play does.
+/// Without them a recording still decodes and runs, and diverges
 /// from the player's first level-up onward — tick count intact, every other stat
 /// wrong, which is exactly how the omission was found.
 ///
@@ -888,11 +889,8 @@ fn notePerkInput(box: *SessionBox, inputs: []const CrimsonHostInput) void {
     const input = inputs[0];
 
     // Roll whenever the menu is up, a pick is owed, and no offer is prepared --
-    // NOT merely on the rising edge. Levelling up twice before opening the menu
-    // leaves two picks owed, and taking the first dirties the offer without
-    // closing the menu, so an edge-triggered roll left the player staring at a
-    // blank menu unable to spend the rest. A real 13640-tick run came back with
-    // five level-ups and three picks because of it.
+    // NOT merely on the rising edge. This covers the initial open and any state
+    // transition that invalidates the cached offer while the menu remains up.
     //
     // "No prepared offer" is exactly the condition preparedPerkChoices reports
     // by returning empty, so the roll and the read cannot disagree about
@@ -913,8 +911,9 @@ fn notePerkInput(box: *SessionBox, inputs: []const CrimsonHostInput) void {
 /// Perk traffic seen but not yet stamped with a tick.
 ///
 /// A QUEUE, not one slot each. The menu pauses the sim, so a whole
-/// open-pick-open-pick sequence can happen across frames that advance zero
-/// ticks; single slots silently kept only the last of each and dropped the rest.
+/// open-pick sequence can happen across frames that advance zero ticks, and
+/// several picks can follow when multiple picks are owed; single slots silently
+/// kept only the last event and dropped the rest.
 /// They all belong to the same tick anyway -- the one the sim next runs -- and
 /// the replay applies several events on a tick in order, which is exactly what
 /// the live path did.
@@ -936,8 +935,7 @@ fn recordPerkEvent(box: *SessionBox, event: PendingPerkEvent) void {
 /// tick the recording contains and the replay will therefore reach. The queue
 /// is emitted IN ORDER: an open must precede the pick it offered, because
 /// opening is what makes the re-simulation draw the list the index selects
-/// from, and with several picks owed the sequence can be open, pick, open, pick
-/// all before a single tick runs.
+/// from, and every pick refreshes the next cached offer just as it does live.
 fn flushPerkEvents(box: *SessionBox, tick_index: u64) void {
     if (box.record_overflow) return;
 

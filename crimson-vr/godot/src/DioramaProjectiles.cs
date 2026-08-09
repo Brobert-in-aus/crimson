@@ -188,7 +188,8 @@ public sealed partial class Diorama
     // The parity simulation stops updating a projectile once it is 64 game
     // units beyond the original screen. On a tabletop that offscreen band is
     // physically visible, so presentation continues the last measured velocity
-    // to the diorama edge. This never feeds back into simulation or replays.
+    // until the authoritative projectile naturally despawns. This never feeds
+    // back into simulation or replays.
     private sealed class ProjectileVisualTrack
     {
         public Sim.ProjectileSnap Snap;
@@ -198,7 +199,6 @@ public sealed partial class Diorama
         public float LastElapsedMs;
         public bool HasPrevious;
         public bool Ghosting;
-        public bool Finished;
     }
 
     private readonly System.Collections.Generic.Dictionary<int, ProjectileVisualTrack> _projectileVisualTracks = new();
@@ -354,8 +354,7 @@ public sealed partial class Diorama
 
     private static Texture2D? LoadSprite(string name)
     {
-        string path = $"res://assets/sprites/{name}.png";
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        return AssetStore.LoadTexture(AssetStore.SpritePath($"{name}.png"));
     }
 
     private MultiMesh BuildProjMesh(Material material, int cap, bool customData = true)
@@ -372,6 +371,13 @@ public sealed partial class Diorama
             Mesh = new QuadMesh { Size = new Vector2(1.0f, 1.0f) },
             InstanceCount = cap,
             VisibleInstanceCount = 0,
+            // Projectile instances deliberately travel well beyond the tabletop.
+            // Keep the renderer's visibility bounds from becoming a second,
+            // invisible diorama edge; the camera and natural lifetime remain the
+            // only presentation limits.
+            CustomAabb = new Aabb(
+                new Vector3(-_arenaSideMeters * 64.0f, -2.0f, -_arenaSideMeters * 64.0f),
+                new Vector3(_arenaSideMeters * 128.0f, 4.0f, _arenaSideMeters * 128.0f)),
         };
         instance = new MultiMeshInstance3D { Multimesh = mesh, MaterialOverride = material };
         AddChild(instance);
@@ -476,10 +482,9 @@ public sealed partial class Diorama
         return new Vector3(frame % grid * inv, frame / grid * inv, inv);
     }
 
-    // Native clips projectile draws to the screen. The diorama has no screen
-    // edge, so anything that outlives its on-arena flight (rockets, piercing
-    // gauss rounds) would keep drawing bright glows and huge stretched trails
-    // out on the fogged ground plane. Clip to the visible floor slab instead.
+    // The death cinematic still presents the arena through a fixed tabletop
+    // window. These bounds are only used to clip that zoomed view; ordinary
+    // projectile flight is intentionally unbounded.
     private float DrawBoundsMargin => _worldSize * (FloorMarginScale - 1.0f) * 0.5f;
 
     private bool OutsideDrawBounds(Vector2 game)
@@ -658,7 +663,7 @@ public sealed partial class Diorama
                 DrawPrimary(visual, elapsedMs, ionMaster, view);
             }
         }
-        RenderDepartedProjectiles(elapsedMs, ionMaster, view);
+        PruneDepartedProjectiles();
         foreach (Sim.SecondarySnap s in view.Secondaries)
         {
             DrawSecondary(s);
@@ -705,20 +710,12 @@ public sealed partial class Diorama
         {
             track.HasPrevious = false;
             track.Ghosting = false;
-            track.Finished = false;
             track.Velocity = Vector2.Zero;
         }
 
         float dt = track.HasPrevious
             ? Mathf.Clamp((elapsedMs - track.LastElapsedMs) * 0.001f, 0.0f, 0.1f)
             : 0.0f;
-        if (track.Finished)
-        {
-            track.Snap = projectile;
-            track.LastElapsedMs = elapsedMs;
-            return false;
-        }
-
         if (track.Ghosting)
         {
             // Once the projectile crosses an arena edge, presentation owns its
@@ -728,14 +725,6 @@ public sealed partial class Diorama
             visual.X = track.GhostPosition.X;
             visual.Y = track.GhostPosition.Y;
             visual.LifeTimer = 0.4f;
-            if (OutsideDrawBounds(track.GhostPosition))
-            {
-                track.Ghosting = false;
-                track.Finished = true;
-                track.Snap = projectile;
-                track.LastElapsedMs = elapsedMs;
-                return false;
-            }
         }
         else if (projectile.LifeTimer >= 0.4f)
         {
@@ -770,34 +759,18 @@ public sealed partial class Diorama
         return true;
     }
 
-    private void RenderDepartedProjectiles(float elapsedMs, bool ionMaster, in SnapshotView view)
+    /// <summary>Discard visual extrapolation when the authoritative pool says
+    /// the projectile has naturally despawned. Until then, PrepareVisualProjectile
+    /// keeps it moving even after the parity simulation freezes its position.</summary>
+    private void PruneDepartedProjectiles()
     {
         _projectileVisualRemove.Clear();
         foreach (System.Collections.Generic.KeyValuePair<int, ProjectileVisualTrack> pair in _projectileVisualTracks)
         {
-            if (_projectileVisualSeen.Contains(pair.Key))
-            {
-                continue;
-            }
-            ProjectileVisualTrack track = pair.Value;
-            if (!track.Ghosting || track.Velocity.LengthSquared() <= 1e-4f)
+            if (!_projectileVisualSeen.Contains(pair.Key))
             {
                 _projectileVisualRemove.Add(pair.Key);
-                continue;
             }
-            float dt = Mathf.Clamp((elapsedMs - track.LastElapsedMs) * 0.001f, 0.0f, 0.1f);
-            track.GhostPosition += track.Velocity * dt;
-            track.LastElapsedMs = elapsedMs;
-            if (OutsideDrawBounds(track.GhostPosition))
-            {
-                _projectileVisualRemove.Add(pair.Key);
-                continue;
-            }
-            Sim.ProjectileSnap visual = track.Snap;
-            visual.X = track.GhostPosition.X;
-            visual.Y = track.GhostPosition.Y;
-            visual.LifeTimer = 0.4f;
-            DrawPrimary(visual, elapsedMs, ionMaster, view);
         }
         foreach (int key in _projectileVisualRemove)
         {

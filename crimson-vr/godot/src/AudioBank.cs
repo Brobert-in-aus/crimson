@@ -28,7 +28,7 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class AudioBank : Node3D
 {
-    private const string AudioDir = "res://assets/audio/";
+    private static string AudioDir => AssetStore.AudioDir;
     private const int PoolSize = 24;
 
     private float _arenaSideMeters;
@@ -101,11 +101,8 @@ public sealed partial class AudioBank : Node3D
         }
 
         // UI level-up cue, loaded by name (robust to sfx-id ordering).
-        const string levelUpPath = AudioDir + "ui_levelUp.ogg";
-        if (ResourceLoader.Exists(levelUpPath))
-        {
-            _levelUpStream = ResourceLoader.Load<AudioStream>(levelUpPath);
-        }
+        string levelUpPath = AudioDir + "ui_levelUp.ogg";
+        _levelUpStream = AssetStore.LoadAudio(levelUpPath);
 
         // UI poke cues, loaded by name (mirrors the desktop menu/keyboard sfx).
         _buttonClickStream = LoadUi("ui_buttonClick.ogg");
@@ -140,7 +137,7 @@ public sealed partial class AudioBank : Node3D
             if (!byName.TryGetValue(name, out AudioStream? stream))
             {
                 string path = AudioDir + name;
-                stream = ResourceLoader.Exists(path) ? ResourceLoader.Load<AudioStream>(path) : null;
+                stream = AssetStore.LoadAudio(path);
                 if (stream == null)
                 {
                     GD.PushWarning($"CrimsonVR: audio sample missing ({path})");
@@ -368,7 +365,7 @@ public sealed partial class AudioBank : Node3D
     private void StartTrack(string track, float fadeFrom)
     {
         if (!_musicTracks.TryGetValue(track, out string? path)
-            || ResourceLoader.Load<AudioStream>(AudioDir + path) is not AudioStream stream)
+            || AssetStore.LoadAudio(AudioDir + path) is not AudioStream stream)
         {
             return;
         }
@@ -435,7 +432,7 @@ public sealed partial class AudioBank : Node3D
     private static AudioStream? LoadUi(string name)
     {
         string path = AudioDir + name;
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<AudioStream>(path) : null;
+        return AssetStore.LoadAudio(path);
     }
 
     /// <summary>UI poke cue kinds (matches VrButton.ClickSound).</summary>

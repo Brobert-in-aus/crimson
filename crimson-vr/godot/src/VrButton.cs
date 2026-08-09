@@ -93,8 +93,7 @@ public sealed partial class VrButton : Node3D
         if (!_plateChecked)
         {
             _plateChecked = true;
-            const string path = "res://assets/sprites/ui_menuItem.png";
-            _sharedPlate = ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+            _sharedPlate = AssetStore.LoadTexture(AssetStore.SpritePath("ui_menuItem.png"));
         }
         return _sharedPlate;
     }
@@ -125,10 +124,8 @@ public sealed partial class VrButton : Node3D
             return;
         }
         _classicChecked = true;
-        const string sm = "res://assets/sprites/ui_button_64x32.png";
-        const string md = "res://assets/sprites/ui_button_128x32.png";
-        _plateSm = ResourceLoader.Exists(sm) ? ResourceLoader.Load<Texture2D>(sm) : null;
-        _plateMd = ResourceLoader.Exists(md) ? ResourceLoader.Load<Texture2D>(md) : null;
+        _plateSm = AssetStore.LoadTexture(AssetStore.SpritePath("ui_button_64x32.png"));
+        _plateMd = AssetStore.LoadTexture(AssetStore.SpritePath("ui_button_128x32.png"));
     }
 
     /// <summary>Build as a bare textured icon (e.g. the quest stage numerals):

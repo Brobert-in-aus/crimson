@@ -294,6 +294,45 @@ public partial class Main : Node3D
 
     public override void _Ready()
     {
+        string? assetImportError = null;
+        if (AssetStore.ImportPendingPack() is { } inboxResult)
+        {
+            if (inboxResult.Success)
+            {
+                GD.Print($"CrimsonVR: {inboxResult.Message}");
+            }
+            else
+            {
+                GD.PushError($"CrimsonVR: {inboxResult.Message}");
+                assetImportError = inboxResult.Message;
+            }
+        }
+
+        // The desktop helper can hand the app a completed pack. Import happens
+        // before resource caches are populated, so the same launch uses it.
+        foreach (string argument in OS.GetCmdlineUserArgs())
+        {
+            const string prefix = "--asset-pack=";
+            if (!argument.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            string pack = argument[prefix.Length..].Trim('"');
+            AssetPackInstaller.Result result = AssetPackInstaller.Install(
+                pack, ProjectSettings.GlobalizePath("user://"));
+            if (result.Success)
+            {
+                GD.Print($"CrimsonVR: {result.Message}");
+            }
+            else
+            {
+                GD.PushError($"CrimsonVR: {result.Message}");
+            }
+        }
+
+        // Resolve user-imported assets before any menu, renderer, or audio bank
+        // caches a resource. Development builds retain res://assets fallback.
+        AssetStore.Initialize();
         Engine.PhysicsTicksPerSecond = SimTicksPerSecond;
 
         InitializeXr();
@@ -302,18 +341,74 @@ public partial class Main : Node3D
         BuildArena();
         BuildReticles();
         BuildStatusLabel();
+
+        // Desktop import must happen before StartSession: several UI classes
+        // cache textures statically, so building the fallback UI first would
+        // leave those caches empty even after a scene reload.
+        if (!AssetStore.HasCompleteAssets && OS.GetName() != "Android")
+        {
+            _status.Text = assetImportError
+                ?? "GAME ASSETS REQUIRED | select crimson-assets.pack on the desktop";
+            _status.Visible = true;
+            SetProcess(false);
+            SetPhysicsProcess(false);
+            ShowMissingAssetsBootstrap();
+            return;
+        }
         StartSession();
+
+        if (!AssetStore.HasCompleteAssets)
+        {
+            ShowMissingAssetsBootstrap();
+        }
 
         // Surface the REAL failure in-headset: the old fixed "native lib
         // missing" line hid version-guard and config errors behind one message.
-        _status.Text = _sim != null
+        _status.Text = !AssetStore.HasCompleteAssets
+            ? assetImportError ?? "GAME ASSETS REQUIRED | run prepare_assets.ps1 -Quest"
+            : _sim != null
             ? $"CrimsonVR | sim abi v{TryQueryAbiVersion()}"
             : $"sim unavailable: {_simError ?? "native lib missing"}";
         // The healthy build-stamp line is a dev readout and stays behind the
         // debug gate so it is out of recorded footage. A FAILURE line always
         // shows regardless: diagnostics must remain visible in-headset when the
         // native side did not come up, which is the whole point of the label.
-        _status.Visible = _sim == null || _settings.Debug;
+        _status.Visible = !AssetStore.HasCompleteAssets || _sim == null || _settings.Debug;
+    }
+
+    private void ShowMissingAssetsBootstrap()
+    {
+        GD.PushWarning("CrimsonVR: no complete game assets. See notes/asset-import.md.");
+        if (OS.GetName() == "Android")
+        {
+            // The preparation helper normally fills the app-owned ADB inbox
+            // before launch. Keep this diagnostic visible if no pack arrived.
+            return;
+        }
+
+        var dialog = new FileDialog
+        {
+            Title = "Import CrimsonVR Asset Pack",
+            FileMode = FileDialog.FileModeEnum.OpenFile,
+            Access = FileDialog.AccessEnum.Filesystem,
+            UseNativeDialog = true,
+            Filters = new[] { "*.pack ; CrimsonVR Asset Pack" },
+        };
+        dialog.FileSelected += path =>
+        {
+            AssetPackInstaller.Result result = AssetPackInstaller.Install(
+                path, ProjectSettings.GlobalizePath("user://"));
+            if (!result.Success)
+            {
+                GD.PushError($"CrimsonVR: {result.Message}");
+                _status.Text = result.Message;
+                return;
+            }
+            GD.Print($"CrimsonVR: {result.Message}");
+            GetTree().ReloadCurrentScene();
+        };
+        AddChild(dialog);
+        dialog.PopupCenteredRatio(0.75f);
     }
 
     public override void _ExitTree()
@@ -1624,8 +1719,7 @@ public partial class Main : Node3D
 
     private static Texture2D? LoadReticleTex(string name)
     {
-        string path = "res://assets/sprites/" + name;
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        return AssetStore.LoadTexture(AssetStore.SpritePath(name));
     }
 
     // Reticle = a flat textured quad on the play plane (the torus ring was

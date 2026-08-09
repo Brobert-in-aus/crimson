@@ -64,9 +64,8 @@ public sealed partial class QuestSelectMenu : Node3D
             int stage = i + 1;
             var b = new VrButton();
             AddChild(b);
-            string iconPath = $"res://assets/sprites/ui_num{stage}.png";
-            if (ResourceLoader.Exists(iconPath)
-                && ResourceLoader.Load<Texture2D>(iconPath) is Texture2D icon)
+            string iconPath = AssetStore.SpritePath($"ui_num{stage}.png");
+            if (AssetStore.LoadTexture(iconPath) is Texture2D icon)
             {
                 b.BuildIcon(tabW, icon);
             }
@@ -106,12 +105,13 @@ public sealed partial class QuestSelectMenu : Node3D
 
         // Hardcore checkbox (native quest_views/shared: appears at unlock >= 40,
         // ui_checkOn/ui_checkOff art). Sits beside Back; visibility per Open().
-        string onPath = "res://assets/sprites/ui_checkOn.png";
-        string offPath = "res://assets/sprites/ui_checkOff.png";
-        if (ResourceLoader.Exists(onPath) && ResourceLoader.Exists(offPath))
+        string onPath = AssetStore.SpritePath("ui_checkOn.png");
+        string offPath = AssetStore.SpritePath("ui_checkOff.png");
+        if (AssetStore.LoadTexture(onPath) is Texture2D checkOn
+            && AssetStore.LoadTexture(offPath) is Texture2D checkOff)
         {
-            _checkOn = ResourceLoader.Load<Texture2D>(onPath);
-            _checkOff = ResourceLoader.Load<Texture2D>(offPath);
+            _checkOn = checkOn;
+            _checkOff = checkOff;
             _hardcoreToggle = new VrButton();
             AddChild(_hardcoreToggle);
             _hardcoreToggle.BuildIcon(s * 0.075f, _checkOff!);
@@ -294,7 +294,7 @@ public sealed partial class QuestSelectMenu : Node3D
     private void LoadQuestTable()
     {
         _quests.Clear();
-        string path = "res://assets/sprites/sprite_manifest.json";
+        string path = AssetStore.SpritePath("sprite_manifest.json");
         if (!Godot.FileAccess.FileExists(path))
         {
             return;

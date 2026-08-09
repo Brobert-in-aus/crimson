@@ -23,7 +23,7 @@ namespace CrimsonVR;
 /// particle stream) draw from particles.png over the world (slice 6b).
 ///
 /// Sprites/manifest are produced by crimson-vr/tools/bake_assets.py into
-/// res://assets/sprites/ (gitignored). If they're absent the renderer falls
+/// the active AssetStore sprite directory (gitignored). If absent the renderer falls
 /// back to colored quads, so the project still runs without user assets.
 ///
 /// This node is a child of ArenaRoot, so instance transforms are arena-local
@@ -130,7 +130,7 @@ public sealed partial class Diorama : Node3D
 
     private const int EffectDrawFlag = 0x40; // draw_effect_pool gate (flags & 0x40)
 
-    private const string SpriteDir = "res://assets/sprites/";
+    private static string SpriteDir => AssetStore.SpriteDir;
 
     // Sim heading convention (math_parity.heading_to_direction_f32): a heading
     // theta points in game direction (sin theta, -cos theta). Each sheet's
@@ -420,7 +420,8 @@ public sealed partial class Diorama : Node3D
             }
         }
         // Fallback for unmapped creature types (e.g. bosses) so nothing vanishes.
-        _creatureFallback = BuildColorLayer(CreatureCapPerType, new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
+        _creatureFallback = BuildArenaClippedColorLayer(CreatureCapPerType,
+            new Color(0.85f, 0.2f, 0.2f), lift: 0.008f, sizeScale: 1.0f, renderPriority: 8);
         _creatureFallback.ClampRefSize = true;
         _creatureFallback.HasStableIdentity = true;
 
@@ -475,6 +476,18 @@ public sealed partial class Diorama : Node3D
         return BuildLayer(capacity, material, lift, sizeScale);
     }
 
+    /// <summary>Fallback creature layer with the same playfield clipping as the
+    /// textured creature shader. This is used only when a creature sheet is
+    /// absent, but it must not reintroduce whole-quad pop-in at the boundary.</summary>
+    private Layer BuildArenaClippedColorLayer(int capacity, Color color, float lift,
+        float sizeScale, int renderPriority)
+    {
+        var material = new ShaderMaterial { Shader = ArenaClippedColorShader, RenderPriority = renderPriority };
+        material.SetShaderParameter("albedo", color);
+        TrackArenaClip(material);
+        return BuildLayer(capacity, material, lift, sizeScale);
+    }
+
     /// <summary>Textured layer showing one static frame of a sheet. Falls back
     /// to a colored layer if the texture can't be loaded (assets not baked).</summary>
     // VR-readability deviation (native = 1.0): the leg art is a ~11px blob in
@@ -488,7 +501,7 @@ public sealed partial class Diorama : Node3D
     private Layer BuildPlayerLayer(SpriteDesc desc, float lift, float sizeScale)
     {
         string path = SpriteDir + desc.sheet;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
             return BuildColorLayer(PlayerCap, new Color(0.95f, 0.95f, 0.95f), lift, sizeScale, renderPriority: 15);
@@ -505,7 +518,7 @@ public sealed partial class Diorama : Node3D
     private Layer BuildSpriteLayer(int capacity, SpriteDesc desc, Color fallback, float lift, float sizeScale)
     {
         string path = SpriteDir + desc.sheet;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
             return BuildColorLayer(capacity, fallback, lift, sizeScale);
@@ -540,7 +553,7 @@ public sealed partial class Diorama : Node3D
     private Layer BuildAnimatedSpriteLayer(int capacity, SpriteDesc desc, Color fallback, float lift, float sizeScale)
     {
         string path = SpriteDir + desc.sheet;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: sprite sheet missing ({path}); using colored quad");
             return BuildColorLayer(capacity, fallback, lift, sizeScale);
@@ -549,8 +562,9 @@ public sealed partial class Diorama : Node3D
         // TintedSpriteShader (not SpriteShader) so the per-instance energizer +
         // lifecycle tint (MultiMesh COLOR) modulates the sprite; instances default
         // to white (no tint) when neither effect is active.
-        var material = new ShaderMaterial { Shader = TintedSpriteShader, RenderPriority = desc.priority };
+        var material = new ShaderMaterial { Shader = ArenaClippedTintedSpriteShader, RenderPriority = desc.priority };
         material.SetShaderParameter("sheet", tex);
+        TrackArenaClip(material);
         Layer layer = BuildLayer(capacity, material, lift, sizeScale, useCustomData: true, useColors: true);
         layer.HeadingOffset = Mathf.DegToRad(desc.offsetDeg);
         layer.Animated = true;
@@ -639,7 +653,28 @@ public sealed partial class Diorama : Node3D
     // MultiMeshInstances and there is no single node to walk.
     private readonly System.Collections.Generic.List<ShaderMaterial> _mrCompositeMats = new();
     private readonly System.Collections.Generic.List<(GeometryInstance3D Node, Material Vr, Material Mr)> _mrMaterialSwaps = new();
+    private readonly System.Collections.Generic.List<ShaderMaterial> _arenaClipMats = new();
     private bool _mrComposite;
+
+    /// <summary>Register a material that reproduces the original viewport's
+    /// hard playfield clip. Its fragment position is transformed back into this
+    /// Diorama's local space, so clipping remains correct while ArenaRoot is
+    /// scaled, tilted, yawed, or recentered.</summary>
+    private void TrackArenaClip(ShaderMaterial mat)
+    {
+        _arenaClipMats.Add(mat);
+        mat.SetShaderParameter("playfield_half", _arenaSideMeters * 0.5f);
+        mat.SetShaderParameter("world_to_arena", GlobalTransform.AffineInverse());
+    }
+
+    private void UpdateArenaClipMaterials()
+    {
+        Transform3D worldToArena = GlobalTransform.AffineInverse();
+        foreach (ShaderMaterial mat in _arenaClipMats)
+        {
+            mat.SetShaderParameter("world_to_arena", worldToArena);
+        }
+    }
 
     private void TrackMrComposite(ShaderMaterial mat)
     {
@@ -738,6 +773,48 @@ public sealed partial class Diorama : Node3D
             """,
     };
 
+    // Creature-bound particle overlays use the same blend treatment as
+    // ParticleShader, plus the playfield crop that the original viewport
+    // applied while an enemy crossed in from its offscreen spawn position.
+    private Shader? _arenaClippedParticleShader;
+    private Shader ArenaClippedParticleShader => _arenaClippedParticleShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never, fog_disabled;
+            uniform sampler2D sheet : filter_linear;
+            uniform float mr_composite = 0.0;
+            uniform mat4 world_to_arena;
+            uniform float playfield_half;
+            varying vec4 inst;
+            varying vec4 col;
+            varying vec2 arena_xz;
+            void vertex() {
+                inst = INSTANCE_CUSTOM;
+                col = COLOR;
+                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
+            }
+            void fragment() {
+                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                vec3 s = c.rgb * col.rgb;
+                float a = clamp(c.a * col.a, 0.0, 1.0);
+                float lum = dot(min(s, vec3(1.0)), vec3(0.299, 0.587, 0.114));
+                if (mr_composite > 0.5) {
+                    vec3 contribution = clamp(s * a, vec3(0.0), vec3(1.0));
+                    float coverage = max(contribution.r, max(contribution.g, contribution.b));
+                    ALBEDO = coverage > 0.0001 ? contribution / coverage : vec3(0.0);
+                    ALPHA = coverage;
+                } else {
+                    ALBEDO = pow(s, vec3(2.2));
+                    ALPHA = pow(a, mix(0.6, 1.6, lum));
+                }
+            }
+            """,
+    };
+
     // Additive variant for the non-alpha effect pass (flags & 0x40 == 0): the
     // explosion ring, bright flash and shockwave bursts, which draw_effect_pool
     // renders with BLEND_ADDITIVE (GL_SRC_ALPHA, GL_ONE). Same blend-space note
@@ -809,7 +886,7 @@ public sealed partial class Diorama : Node3D
             return;
         }
         string path = SpriteDir + sheetName;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: effects sheet missing ({path}); no particles");
             return;
@@ -858,8 +935,9 @@ public sealed partial class Diorama : Node3D
 
         // Freeze-shatter overlay shares particles.png (same UV table); RenderPriority
         // 24 sits just over the particle layer.
-        var freezeMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 24 };
+        var freezeMat = new ShaderMaterial { Shader = ArenaClippedParticleShader, RenderPriority = 24 };
         TrackMrComposite(freezeMat);
+        TrackArenaClip(freezeMat);
         freezeMat.SetShaderParameter("sheet", tex);
         _freezeMesh = new MultiMesh
         {
@@ -875,8 +953,9 @@ public sealed partial class Diorama : Node3D
         // Creature auras (draw_creature_overlays): alpha-blended, priority 4 so
         // they sit under the creature sprites (creatures start at priority 6) but
         // over the ground/decals.
-        var overlayMat = new ShaderMaterial { Shader = ParticleShader, RenderPriority = 4 };
+        var overlayMat = new ShaderMaterial { Shader = ArenaClippedParticleShader, RenderPriority = 4 };
         TrackMrComposite(overlayMat);
+        TrackArenaClip(overlayMat);
         overlayMat.SetShaderParameter("sheet", tex);
         _overlays = new MultiMesh
         {
@@ -957,12 +1036,6 @@ public sealed partial class Diorama : Node3D
                 continue;
             }
             var game = new Vector2(c.X, c.Y);
-            // Off-terrain spawns are edge-faded to invisible; their auras
-            // must not give them away outside the arena.
-            if (EdgeFadeAlpha(game) <= 0.01f)
-            {
-                continue;
-            }
             if (monsterVision)
             {
                 Emit(game, 90.0f, new Color(1.0f, 1.0f, 0.0f, fade));
@@ -1097,12 +1170,6 @@ public sealed partial class Diorama : Node3D
                 idx++;
                 continue;
             }
-            // Edge-faded off-terrain spawns keep their ice block hidden too.
-            if (EdgeFadeAlpha(new Vector2(c.X, c.Y)) <= 0.01f)
-            {
-                idx++;
-                continue;
-            }
             float size = Mathf.Max(c.Size * k, 0.001f);
             float rot = idx * 0.01f + c.Heading; // matches draw_freeze_overlay
             Vector3 pos = Mapper.GameToArenaLocal(viewGame, _arenaSideMeters, _worldSize)
@@ -1188,7 +1255,7 @@ public sealed partial class Diorama : Node3D
             return BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 25);
         }
         string path = SpriteDir + bd.sheet;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             return BuildColorLayer(BonusCap, new Color(0.3f, 0.85f, 0.95f), lift, sizeScale: 1.0f, renderPriority: 25);
         }
@@ -1375,8 +1442,7 @@ public sealed partial class Diorama : Node3D
             _floor.MaterialOverride = _floorMaterial; // fallback path below
         }
         if (_terrainSlots.TryGetValue(info.Slot0, out string? file)
-            && ResourceLoader.Exists(SpriteDir + file)
-            && ResourceLoader.Load<Texture2D>(SpriteDir + file) is Texture2D tex)
+            && AssetStore.LoadTexture(SpriteDir + file) is Texture2D tex)
         {
             // Fallback: tile the base slot (pre-generator behavior).
             _floorMaterial.AlbedoTexture = tex;
@@ -1390,6 +1456,59 @@ public sealed partial class Diorama : Node3D
             GD.PushWarning("CrimsonVR: terrain sheets missing; grey floor");
         }
     }
+
+    // Reproduce the original flat viewport crop in world space. Survival
+    // creatures spawn outside the playfield, so their quads must be clipped at
+    // the boundary as they walk in rather than appearing as whole atlas tiles.
+    private Shader? _arenaClippedColorShader;
+    private Shader ArenaClippedColorShader => _arenaClippedColorShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform vec4 albedo : source_color = vec4(1.0);
+            uniform mat4 world_to_arena;
+            uniform float playfield_half;
+            varying vec2 arena_xz;
+            void vertex() {
+                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
+            }
+            void fragment() {
+                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
+                ALBEDO = albedo.rgb;
+                ALPHA = albedo.a;
+            }
+            """,
+    };
+
+    private Shader? _arenaClippedTintedSpriteShader;
+    private Shader ArenaClippedTintedSpriteShader => _arenaClippedTintedSpriteShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform sampler2D sheet : source_color, filter_nearest;
+            uniform mat4 world_to_arena;
+            uniform float playfield_half;
+            varying vec4 inst;
+            varying vec4 col;
+            varying vec2 arena_xz;
+            void vertex() {
+                inst = INSTANCE_CUSTOM;
+                col = COLOR;
+                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
+            }
+            void fragment() {
+                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
+                vec2 cell = UV * inst.z + inst.xy;
+                vec4 c = texture(sheet, cell);
+                ALBEDO = c.rgb * col.rgb + vec3(inst.w) * c.a;
+                ALPHA = c.a * col.a;
+            }
+            """,
+    };
 
     // Tinted sprite shader (corpses): per-instance UV cell (INSTANCE_CUSTOM) and
     // per-instance rgba tint (COLOR), nearest-filtered (bodyset frames have no
@@ -1427,7 +1546,7 @@ public sealed partial class Diorama : Node3D
             return; // BuildParticles ran first and found no particles.png
         }
         string path = SpriteDir + sheetName;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             return;
         }
@@ -1456,7 +1575,7 @@ public sealed partial class Diorama : Node3D
             return;
         }
         string path = SpriteDir + cd.sheet;
-        if (!ResourceLoader.Exists(path) || ResourceLoader.Load<Texture2D>(path) is not Texture2D tex)
+        if (AssetStore.LoadTexture(path) is not Texture2D tex)
         {
             GD.PushWarning($"CrimsonVR: corpse sheet missing ({path}); no corpses");
             return;
@@ -1671,18 +1790,33 @@ public sealed partial class Diorama : Node3D
     /// <summary>One shared MultiMesh of soft round blobs drawn flat on the plane
     /// under the creature/player sprites to ground them (PLAN §6). Drawn first
     /// (lowest RenderPriority) so every sprite sits on top.</summary>
+    private Shader? _arenaClippedShadowShader;
+    private Shader ArenaClippedShadowShader => _arenaClippedShadowShader ??= new Shader
+    {
+        Code = """
+            shader_type spatial;
+            render_mode unshaded, cull_disabled, depth_draw_never;
+            uniform sampler2D sheet : source_color, filter_linear;
+            uniform mat4 world_to_arena;
+            uniform float playfield_half;
+            varying vec2 arena_xz;
+            void vertex() {
+                vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+                arena_xz = (world_to_arena * vec4(world, 1.0)).xz;
+            }
+            void fragment() {
+                if (any(greaterThan(abs(arena_xz), vec2(playfield_half)))) discard;
+                ALBEDO = vec3(0.0);
+                ALPHA = texture(sheet, UV).a * 0.55;
+            }
+            """,
+    };
+
     private void BuildShadows()
     {
-        var material = new StandardMaterial3D
-        {
-            AlbedoColor = new Color(0.0f, 0.0f, 0.0f, 0.55f),
-            AlbedoTexture = MakeSoftCircleTexture(64),
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
-            RenderPriority = 1, // under all sprite layers (creatures start at 6)
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
+        var material = new ShaderMaterial { Shader = ArenaClippedShadowShader, RenderPriority = 1 };
+        material.SetShaderParameter("sheet", MakeSoftCircleTexture(64));
+        TrackArenaClip(material);
         _shadows = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
@@ -1916,6 +2050,7 @@ public sealed partial class Diorama : Node3D
     public void Interpolate(float frac)
     {
         frac = Mathf.Clamp(frac, 0.0f, 1.0f);
+        UpdateArenaClipMaterials();
         _needleCount = 0;
         _shadowCount = 0;
         // Legs cast the ground shadow (they're the part standing on it); the
@@ -2019,14 +2154,9 @@ public sealed partial class Diorama : Node3D
                 : sizeGame;
             float meters = Mathf.Max(sizeUnits * k * layer.SizeScale, 0.002f);
 
-            // Edge fade applies to creature layers only (players/bonuses never
-            // leave the terrain): shadows shrink with it, sprites fade via the
-            // tint alpha below.
-            float edgeFade = layer.HasStableIdentity ? EdgeFadeAlpha(game) : 1.0f;
-
             if (castShadow)
             {
-                AddShadow(arena, meters * edgeFade);
+                AddShadow(arena, meters);
             }
 
             Basis basis;
@@ -2116,7 +2246,6 @@ public sealed partial class Diorama : Node3D
             if (layer.Tinted)
             {
                 Color tint = CreatureTint(cur);
-                tint.A *= edgeFade;
                 layer.Mesh.SetInstanceColor(i, tint);
             }
 
@@ -2126,43 +2255,6 @@ public sealed partial class Diorama : Node3D
             }
         }
         layer.Mesh.VisibleInstanceCount = layer.CurrCount;
-    }
-
-    // ---- Arena-edge spawn treatment (PLAN §6, presentation-only) ----
-    // Survival creatures spawn up to 40 game units OUTSIDE the terrain and walk
-    // in (rand_survival_spawn_pos: -40 / size+40). The flat game's camera crops
-    // that, but the diorama shows the whole plane, so they popped into
-    // existence standing on the margin band. Fade them in across a short band
-    // inside the bounds instead; fully outside = invisible. Spawn positions
-    // are exact sim state — only the presentation fades.
-    /// <summary>How far outside the playfield survival creatures are spawned
-    /// (`rand_survival_spawn_pos`: edge = -40 or terrain+40). The flat game's
-    /// camera crops this margin entirely; the diorama shows the whole plane.</summary>
-    private const float SpawnMarginGame = 40.0f;
-
-    private const float EdgeFadeBandGame = SpawnMarginGame;
-
-    /// <summary>Creature opacity near the arena edge: 0 at the spawn line,
-    /// ramping to 1 by the time they reach the playfield.
-    ///
-    /// The band deliberately sits ENTIRELY OUTSIDE the playfield. It used to
-    /// ramp from the playfield edge inward, which hid the spawn itself but then
-    /// played the whole materialisation in plain view a few units onto the
-    /// board — you watched creatures assemble out of nothing mid-arena. Running
-    /// it across the spawn margin instead means they finish fading before they
-    /// arrive, which is the behaviour the original got for free by cropping the
-    /// margin off-screen.
-    ///
-    /// Still an interim treatment: PLAN section 6 owes a rim mask / vignette so
-    /// the margin reads as off-stage rather than as visible floor. This only
-    /// moves where the fade happens; it does not hide the margin.</summary>
-    private float EdgeFadeAlpha(Vector2 game)
-    {
-        // Signed distance inside the playfield; negative out in the margin.
-        float edge = Mathf.Min(
-            Mathf.Min(game.X, _worldSize - game.X),
-            Mathf.Min(game.Y, _worldSize - game.Y));
-        return Mathf.Clamp((edge + SpawnMarginGame) / EdgeFadeBandGame, 0.0f, 1.0f);
     }
 
     /// <summary>Per-creature draw tint (draw.py draw_creatures): the spawn-template

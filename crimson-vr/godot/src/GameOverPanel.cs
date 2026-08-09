@@ -237,8 +237,7 @@ public sealed partial class GameOverPanel : Node3D
 
     private static Texture2D? Load(string name)
     {
-        string path = $"res://assets/sprites/{name}.png";
-        return ResourceLoader.Exists(path) ? ResourceLoader.Load<Texture2D>(path) : null;
+        return AssetStore.LoadTexture(AssetStore.SpritePath($"{name}.png"));
     }
 
     // Depth-tested by default: overlap with the keyboard/world must resolve
@@ -302,7 +301,7 @@ public sealed partial class GameOverPanel : Node3D
 
     private void LoadWeaponTable()
     {
-        string path = "res://assets/sprites/sprite_manifest.json";
+        string path = AssetStore.SpritePath("sprite_manifest.json");
         if (!Godot.FileAccess.FileExists(path))
         {
             return;

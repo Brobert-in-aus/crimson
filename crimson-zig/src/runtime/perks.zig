@@ -329,10 +329,9 @@ pub fn perkSelectionPickWithContext(
     return perk_id;
 }
 
-/// Apply a replayed pick from the choices prepared by an earlier menu-open.
-///
-/// Native capture order matters: picking marks the cache dirty, but does not
-/// generate the next offer. A later explicit menu-open owns that RNG work.
+/// Apply a prepared pick without refreshing the next offer. Most gameplay and
+/// replay callers should use perkSelectionPickWithContext so their RNG behavior
+/// stays identical; this narrower helper is for explicitly staged workflows.
 pub fn perkSelectionPickPreparedWithContext(
     state: *state_mod.GameplayState,
     players: []state_mod.PlayerState,

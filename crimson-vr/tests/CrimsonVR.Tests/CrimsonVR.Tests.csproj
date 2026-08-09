@@ -28,5 +28,7 @@
     <Compile Include="..\..\godot\src\SimSession.cs" />
     <Compile Include="..\..\godot\src\CreatureAnim.cs" />
     <Compile Include="..\..\godot\src\TerrainGen.cs" />
+    <Compile Include="..\..\godot\src\AssetStore.cs" />
+    <Compile Include="..\..\godot\src\AssetPackInstaller.cs" />
   </ItemGroup>
 </Project>
