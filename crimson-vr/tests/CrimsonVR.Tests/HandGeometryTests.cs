@@ -84,4 +84,15 @@ public class HandGeometryTests
         float reversed = HandGeometry.TwistAngle(delta, -axis);
         Assert.Equal(forward, -reversed, 3);
     }
+
+    [Theory]
+    [InlineData(25.0f)]
+    [InlineData(-40.0f)]
+    public void DirectManipulationTwist_FollowsPlayerFacingWidgetPitch(float degrees)
+    {
+        var axis = Vector3.Right;
+        var delta = new Basis(axis, Mathf.DegToRad(degrees));
+        Assert.Equal(-Mathf.DegToRad(degrees),
+            HandGeometry.DirectManipulationTwistAngle(delta, axis), 3);
+    }
 }

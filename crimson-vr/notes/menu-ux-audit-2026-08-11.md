@@ -159,6 +159,29 @@ Implemented:
 - The description backing and copy own explicit UI render priorities, preventing
   layout-edit creature previews from drawing through the reading surface.
 
+### 8. Layout preview obscured the editor canvas — severity 3
+
+The maximum seven-card preview was useful for clearance testing but remained a
+large permanent blocker while editing the arena. Tabletop also exposed Cabinet
+placement dimensions, and held-button pitch moved opposite the controllers.
+
+Implemented 2026-08-13:
+
+- The normal Confirm location becomes Show/Hide Perk Menu Preview during editing;
+  the toggle remains reachable when the cards and description are hidden. A
+  2026-08-13 follow-up made layout-preview state authoritative during snapshot
+  refresh, which had been re-showing the cards immediately after every hide.
+- Tabletop hides and enforces flat/reachable tilt and distance, and one button
+  cycles Small (0.75x), Medium (1.0x), and Large (1.25x); Cabinet keeps its
+  detailed placement range. This enforcement also prevents a persisted Cabinet
+  pitch from making Tabletop vertical on startup.
+- Cabinet's clean Pause and Level-Up defaults now reuse the current Tabletop
+  transforms, while saved per-mode overrides still win until reset.
+- Player-facing widget pitch now follows controller forward/back rotation rather
+  than applying the controller twist with the opposite visual sign.
+- Arena height now reads floor-up instead of exposing the internal downward-drop
+  value: 0 m is floor, 1 m is one metre above, and the clean default is 0.5 m.
+
 ## Scenario re-check
 
 - First run: guide → Continue → Main Menu, or guide → Adjust Reach → normal Back
@@ -185,6 +208,8 @@ Implemented:
 4. Trigger relay unavailable, invalid IPv4, connection failure, and reconnect
    failure; verify all three recovery controls are reachable and unambiguous.
 5. Reset and undo customized layouts in both Cabinet and Tabletop modes.
+   Verify Tabletop's named sizes, the perk-preview toggle, matching Cabinet button
+   defaults, and direct controller-to-widget pitch while doing so.
 6. Compare seven perks, switch selection between cards, then confirm; with
    accumulated picks, verify the confirming hand does not contact the next offer.
 7. Re-check expanded/localized text and the smallest supported render scale.

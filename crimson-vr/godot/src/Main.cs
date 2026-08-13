@@ -71,7 +71,7 @@ public partial class Main : Node3D
     private const float PlayfieldScale = 3.75f;
     private const float PlayfieldPitchDegrees = 55.0f;
     private const float PlayfieldNearEdgeMeters = 1.40f;
-    private const float PlayfieldNearDropMeters = 0.95f;
+    private const float PlayfieldNearDropMeters = 0.50f;
 
     // Live values behind the Layout panel's sliders; seeded from the constants
     // above. Placement is recomputed against the LAST RECENTER pose rather than
@@ -739,7 +739,8 @@ public partial class Main : Node3D
             _playfieldScale, v => { _playfieldScale = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
             _playfieldPitch, v => { _playfieldPitch = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
             _playfieldNearEdge, v => { _playfieldNearEdge = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
-            _playfieldNearDrop, v => { _playfieldNearDrop = v; ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
+            ArenaLayoutValues.HeightFromDrop(_playfieldNearDrop),
+                v => { _playfieldNearDrop = ArenaLayoutValues.DropFromHeight(v); ApplyPlayfieldPlacement(); SaveArenaPlacement(); },
             _spriteHeightScale, v => { _spriteHeightScale = v; _diorama.SetHeightScale(v); },
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _arenaLayout.OnBack += CloseArenaLayout;
@@ -756,13 +757,18 @@ public partial class Main : Node3D
             _playfieldPitch = _settings.ArenaPitch;
             _playfieldNearEdge = _settings.ArenaDistance;
             _playfieldNearDrop = _settings.ArenaDrop;
-            _arenaLayout.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+            ConstrainPlacementForControlMode();
+            _arenaLayout.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge,
+                ArenaLayoutValues.HeightFromDrop(_playfieldNearDrop));
             ApplyPlayfieldPlacement();
+            SaveArenaPlacement();
         }
         BuildUiEditables();
         SetLogButtonsVisible(_settings.Debug);
 
-        // Debug poke-tip markers (world-space); shown only in debug mode.
+        // Poke-tip markers (world-space). Clean profiles default them on so the
+        // otherwise invisible contact point is discoverable; the player-facing
+        // toggle can hide them, while Debug still forces them visible.
         for (int i = 0; i < _pokeMarkers.Length; i++)
         {
             _pokeMarkers[i] = new MeshInstance3D
@@ -2960,7 +2966,7 @@ public partial class Main : Node3D
         // Perk cards only while a pick is pending AND the pause menu isn't up (they
         // share the space; the pause panel takes precedence). While paused the sim
         // is frozen so Update won't run — hide the cards explicitly.
-        if (_perkMenu.Active && _pauseMenu.IsPaused)
+        if (_perkMenu.Active && _pauseMenu.IsPaused && !_uiEditMode)
         {
             _perkMenu.Visible = false;
         }
@@ -3308,6 +3314,7 @@ public partial class Main : Node3D
         _controlMode = mode;
         _settings.ControlMode = (int)mode;
         _settings.Save();
+        _arenaLayout?.SetControlMode(mode);
 
         if (loadDefaults)
         {
@@ -3315,11 +3322,10 @@ public partial class Main : Node3D
             // placement at 1x and FLAT; Cabinet takes the large, distant, tilted
             // board. Tilt is reset per mode rather than carried across: the two
             // placements sit at very different distances, and a tilt that reads
-            // fine on a board 0.6 m away rears up through the menus on one 0.1 m
+            // fine on a distant board rears up through the menus on one 0.1 m
             // from the player's face. (Carrying it was the original choice and
-            // it did exactly that on the first mode switch.) The full 0-90 range
-            // stays available in both — dial it from the slider, where the board
-            // moves under your eye instead of jumping there.
+            // it did exactly that on the first mode switch.) Cabinet retains the
+            // full placement controls; Tabletop enforces flat/reachable geometry.
             if (mode == ControlMode.Tabletop)
             {
                 _playfieldScale = 1.0f;
@@ -3334,7 +3340,9 @@ public partial class Main : Node3D
                 _playfieldNearEdge = PlayfieldNearEdgeMeters;
                 _playfieldNearDrop = PlayfieldNearDropMeters;
             }
-            _arenaLayout?.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge, _playfieldNearDrop);
+            ConstrainPlacementForControlMode();
+            _arenaLayout?.SyncPlacement(_playfieldScale, _playfieldPitch, _playfieldNearEdge,
+                ArenaLayoutValues.HeightFromDrop(_playfieldNearDrop));
             SaveArenaPlacement();
         }
 
@@ -3361,6 +3369,20 @@ public partial class Main : Node3D
         {
             ApplyUiLayoutForMode();
         }
+    }
+
+    /// <summary>Tabletop is the hand-control plane, not a free-standing display.
+    /// Enforce that physical contract even when a shared persisted placement was
+    /// last written by Cabinet mode.</summary>
+    private void ConstrainPlacementForControlMode()
+    {
+        if (_controlMode != ControlMode.Tabletop)
+        {
+            return;
+        }
+        _playfieldScale = ArenaLayoutValues.SnapTabletopScale(_playfieldScale);
+        _playfieldPitch = 0.0f;
+        _playfieldNearEdge = ArenaNearEdgeMeters;
     }
 
     // ---- UI edit mode ----
@@ -3392,10 +3414,10 @@ public partial class Main : Node3D
         {
             value = id switch
             {
-                "pause" => Button(new Vector3(0.278f, 0.003f, -0.003f),
-                    new Vector3(-90.0f, -155.0f, 0.0f), 1.70f),
-                "levelup" => Button(new Vector3(-0.278f, 0.003f, -0.003f),
-                    new Vector3(-90.0f, 155.0f, 0.0f), 1.70f),
+                "pause" => Button(new Vector3(0.325f, 0.087f, -0.067f),
+                    new Vector3(-40.0f, -135.0f, -7.5f), 1.30f),
+                "levelup" => Button(new Vector3(-0.325f, 0.087f, -0.067f),
+                    new Vector3(-40.0f, 135.0f, 7.5f), 1.30f),
                 "controlrect" => new Transform3D(
                     Basis.FromEuler(new Vector3(Mathf.DegToRad(-10.0f), 0.0f, 0.0f))
                         .Scaled(Vector3.One * 0.65f),

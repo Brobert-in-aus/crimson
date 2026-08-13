@@ -26,6 +26,7 @@
     <Compile Include="..\..\godot\src\VrInput.cs" />
     <Compile Include="..\..\godot\src\TypoShooter.cs" />
     <Compile Include="..\..\godot\src\RecenterHold.cs" />
+    <Compile Include="..\..\godot\src\ArenaLayoutValues.cs" />
     <Compile Include="..\..\godot\src\Sim.cs" />
     <Compile Include="..\..\godot\src\SimSession.cs" />
     <Compile Include="..\..\godot\src\NetworkSimSession.cs" />

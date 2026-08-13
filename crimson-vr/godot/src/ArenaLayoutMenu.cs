@@ -37,6 +37,11 @@ public sealed partial class ArenaLayoutMenu : Node3D
     private Row[] _rows = Array.Empty<Row>();
     private VrButton _reset = null!;
     private VrButton _back = null!;
+    private Label3D _hint = null!;
+    private VrButton _tabletopSize = null!;
+    private Action<float>? _applyTabletopSize;
+    private int _tabletopSizeIndex = 1;
+    private float _arenaSide;
     private ResetState _resetState;
     private enum ResetState { Idle, Confirm, Undo }
 
@@ -49,11 +54,13 @@ public sealed partial class ArenaLayoutMenu : Node3D
         float scale, Action<float> onScale,
         float pitch, Action<float> onPitch,
         float distance, Action<float> onDistance,
-        float drop, Action<float> onDrop,
+        float height, Action<float> onHeight,
         float spriteHeight, Action<float> onSpriteHeight,
         Texture2D? rectOn, Texture2D? rectOff)
     {
         float s = arenaSideMeters;
+        _arenaSide = s;
+        _applyTabletopSize = onScale;
         // Edit controls live on the left wall, leaving the centre clear for the
         // fixed perk-card preview and the mirrored action buttons being placed.
         Position = new Vector3(-s * 1.25f, s * 0.9f, 0.0f);
@@ -68,10 +75,10 @@ public sealed partial class ArenaLayoutMenu : Node3D
             new Row { Name = "Arena size", Steps = 20, Min = 0.5f, Step = 0.25f, Unit = "x", Apply = onScale },
             new Row { Name = "Arena tilt", Steps = 18, Min = 0.0f, Step = 5.0f, Unit = "deg", Apply = onPitch },
             new Row { Name = "Arena distance", Steps = 20, Min = 0.2f, Step = 0.1f, Unit = "m", Apply = onDistance },
-            new Row { Name = "Arena height", Steps = 20, Min = 0.0f, Step = 0.05f, Unit = "m", Apply = onDrop },
+            new Row { Name = "Arena height", Steps = 20, Min = 0.0f, Step = 0.05f, Unit = "m", Apply = onHeight },
             new Row { Name = "Sprite height", Steps = 20, Min = 0.0f, Step = 0.1f, Unit = "x", Apply = onSpriteHeight },
         };
-        float[] current = { scale, pitch, distance, drop, spriteHeight };
+        float[] current = { scale, pitch, distance, height, spriteHeight };
 
         for (int i = 0; i < _rows.Length; i++)
         {
@@ -104,7 +111,15 @@ public sealed partial class ArenaLayoutMenu : Node3D
             y -= s * 0.18f;
         }
 
-        var hint = new Label3D
+        _tabletopSize = new VrButton();
+        AddChild(_tabletopSize);
+        _tabletopSize.Build(s * 0.64f, s * 0.11f, TabletopSizeText(),
+            new Color(0.42f, 0.55f, 0.72f), plate: true);
+        _tabletopSize.ConfigureLabel(s * 0.00034f, s * 0.58f);
+        _tabletopSize.OnPress += CycleTabletopSize;
+        _tabletopSize.Visible = false;
+
+        _hint = new Label3D
         {
             Text = "Grab a corner to move  •  two corners to size",
             FontSize = 52,
@@ -115,7 +130,7 @@ public sealed partial class ArenaLayoutMenu : Node3D
             Position = new Vector3(0.0f, y, 0.002f),
             NoDepthTest = true,
         };
-        AddChild(hint);
+        AddChild(_hint);
         y -= s * 0.12f;
 
         _reset = new VrButton();
@@ -131,6 +146,7 @@ public sealed partial class ArenaLayoutMenu : Node3D
         _back.Position = new Vector3(0.0f, y, 0.0f);
         _back.OnPress += () => OnBack?.Invoke();
 
+        SetControlMode(ControlMode.Cabinet);
         Visible = false;
     }
 
@@ -160,11 +176,56 @@ public sealed partial class ArenaLayoutMenu : Node3D
         };
     }
 
-    /// <summary>Push values in from outside (a control-mode switch replaces all
-    /// four at once) without firing the Apply callbacks back at the caller.</summary>
-    public void SyncPlacement(float scale, float pitch, float distance, float drop)
+    /// <summary>Expose only controls meaningful to the current interaction
+    /// model. Tabletop is reachable by definition, so distance and tilt are
+    /// hidden and scale becomes the three supported named sizes.</summary>
+    public void SetControlMode(ControlMode mode)
     {
-        float[] values = { scale, pitch, distance, drop };
+        if (_rows.Length == 0)
+        {
+            return;
+        }
+
+        bool tabletop = mode == ControlMode.Tabletop;
+        _tabletopSize.Visible = tabletop;
+        _rows[0].Label.Visible = _rows[0].Slider.Visible = !tabletop;
+        _rows[1].Label.Visible = _rows[1].Slider.Visible = !tabletop;
+        _rows[2].Label.Visible = _rows[2].Slider.Visible = !tabletop;
+        Reflow();
+    }
+
+    private void Reflow()
+    {
+        float y = _arenaSide * 0.35f;
+        if (_tabletopSize.Visible)
+        {
+            _tabletopSize.Position = new Vector3(0.0f, y, 0.0f);
+            y -= _arenaSide * 0.18f;
+        }
+        foreach (Row row in _rows)
+        {
+            if (!row.Label.Visible)
+            {
+                continue;
+            }
+            row.Label.Position = new Vector3(0.0f, y + _arenaSide * 0.06f, 0.002f);
+            row.Slider.Position = new Vector3(0.0f, y, 0.0f);
+            y -= _arenaSide * 0.18f;
+        }
+        _hint.Position = new Vector3(0.0f, y, 0.002f);
+        y -= _arenaSide * 0.12f;
+        _reset.Position = new Vector3(0.0f, y, 0.0f);
+        y -= _arenaSide * 0.13f;
+        _back.Position = new Vector3(0.0f, y, 0.0f);
+    }
+
+    /// <summary>Push values in from outside (a control-mode switch replaces all
+    /// placement values at once) without firing Apply callbacks back at the caller.</summary>
+    public void SyncPlacement(float scale, float pitch, float distance, float height)
+    {
+        _tabletopSizeIndex = TabletopSizeIndex(scale);
+        _tabletopSize.SetText(TabletopSizeText());
+        float[] values = { scale, pitch, distance, height };
         for (int i = 0; i < values.Length && i < _rows.Length; i++)
         {
             Row row = _rows[i];
@@ -185,6 +246,7 @@ public sealed partial class ArenaLayoutMenu : Node3D
         {
             r.Slider.ResetPress();
         }
+        _tabletopSize.ResetPress();
         _reset.ResetPress();
         _back.ResetPress();
     }
@@ -197,11 +259,37 @@ public sealed partial class ArenaLayoutMenu : Node3D
         }
         foreach (Row r in _rows)
         {
-            r.Slider.PollPoke(probes);
+            if (r.Slider.Visible)
+            {
+                r.Slider.PollPoke(probes);
+            }
+        }
+        if (_tabletopSize.Visible)
+        {
+            _tabletopSize.PollPoke(probes);
         }
         _reset.PollPoke(probes);
         _back.PollPoke(probes);
     }
+
+    private void CycleTabletopSize()
+    {
+        _tabletopSizeIndex = (_tabletopSizeIndex + 1) % 3;
+        _tabletopSize.SetText(TabletopSizeText());
+        _tabletopSize.ResetPress();
+        _applyTabletopSize?.Invoke(TabletopSizeValue(_tabletopSizeIndex));
+    }
+
+    private string TabletopSizeText()
+    {
+        string name = _tabletopSizeIndex switch { 0 => "Small", 1 => "Medium", _ => "Large" };
+        return $"Arena size: {name} ({TabletopSizeValue(_tabletopSizeIndex):0.00}x)";
+    }
+
+    private static int TabletopSizeIndex(float scale)
+        => scale < 0.875f ? 0 : scale < 1.125f ? 1 : 2;
+
+    private static float TabletopSizeValue(int index) => 0.75f + Mathf.Clamp(index, 0, 2) * 0.25f;
 
     private void PressReset()
     {

@@ -315,19 +315,21 @@ Notes:
 
 ## 5. Arena placement and scaling
 
-**REVISED 2026-08-08.** Most of the reach-driven constraints below apply to
+**REVISED 2026-08-13.** Most of the reach-driven constraints below apply to
 **Tabletop** mode only. In **Cabinet** the board is not touched, so its size and
 distance are limited by comfortable *viewing* rather than reach, and the seated
-reach envelope constrains the control rectangle instead. First-pass Cabinet
-default is a 1.2 m board (3x the 0.4 m reference square) tilted 40 degrees, near
-edge 0.6 m out and 0.45 m below the head — which puts the board's centre near
-eye level instead of the ~59 degrees down the tabletop required.
+reach envelope constrains the control rectangle instead. The headset-authored
+Cabinet default is a 1.5 m board (3.75x the 0.4 m reference square) tilted 55
+degrees, with its near edge 1.40 m out. Player-facing arena height is floor-up
+(0 m = floor, 1 m = one metre above) and defaults to 0.5 m in both modes.
 
-**The arena-size adjustment UI is BUILT** (VR Settings -> Arena & Layout): size,
-tilt, distance and height sliders, persisted, plus a corner-grab UI edit mode for
-the control rectangle and the action buttons. This retires the "deferred slice"
-note below. Seated reach *calibration* is still not built — the sliders let the
-player set it by hand, which is a weaker form of the same thing.
+**The arena-size adjustment UI is BUILT** (VR Settings -> Arena & Layout).
+Cabinet exposes size, tilt, distance and height; Tabletop enforces flat/reachable
+geometry and one button cycles Small/Medium/Large (0.75x/1.0x/1.25x). The
+corner-grab editor covers the control rectangle and action buttons, while a
+toggle at the perk-confirm location hides/restores the seven-card clearance
+preview. Seated reach *calibration* is still not built — manual controls are a
+weaker form of the same thing.
 
 - **Uniform scale only.** Arena side length `L` in meters:
   - Minimum: **0.4 m**.
@@ -956,6 +958,9 @@ screen-space overlays:
     render priority 58 and top-level UI copy owns 68. The perk-description
     backing joins that band, keeping live layout-preview sprites behind both its
     plate and text. Release build installed; visual headset re-check remains.
+12. **Poke-point discoverability — BUILT (2026-08-13).** Clean profiles default
+    controller/hand poke-tip markers on; the existing VR Settings toggle remains
+    available for players who prefer an unmarked view.
 
 **M4 in-headset validation backlog (remaining checks after slices 1-11):**
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
@@ -1253,10 +1258,13 @@ document rather than treating successful compilation as readiness.
 
 1. **Finish validating the control-mode work.** The headset-authored Cabinet
    layout is now the clean-profile default (3.75x, 55 degrees, 1.40 m distance,
-   0.95 m drop). Both logged Pause/Level Up layouts are baked as exact rounded
+   0.5 m displayed height). Both logged Pause/Level Up layouts are baked as exact rounded
    mirror pairs; Cabinet's logged hand rectangle defaults to a 10-degree pitch,
    0.65x scale and its measured offset. Edit mode shows moving real sprites, a
-   fixed perk offer and an x3 badge for clearance.
+   fixed perk offer and an x3 badge for clearance. The 2026-08-13 editor pass
+   makes Cabinet's Pause/Level Up defaults match Tabletop, gives Tabletop only
+   three named arena sizes, lets players hide the perk preview, and corrects
+   controller-forward/back widget rotation.
 2. **Finish clean-install validation.** The private-copy CI build contract was
    reproduced locally on 2026-08-11; its fresh-key Release APK was clean-installed
    on Quest, the known-good pack was staged, and the app was left stopped. Validate

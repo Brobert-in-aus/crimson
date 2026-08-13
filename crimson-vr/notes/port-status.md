@@ -118,16 +118,24 @@ release approval.
   changed behavior receives fresh persistence keys.
 - **Controller and optical-hand input**: menus use fingertip poke rather than a
   laser; left hand moves, right hand aims/fires with pinch, and the weapon-swap
-  perk has a reload gesture. Controller poke markers sit at the controller tip.
-- **Arena & Layout editor**: Tabletop/Cabinet placement, arena scale/tilt/
-  distance/drop, sprite height, aim-line length, and grab-editable Pause,
+  perk has a reload gesture. Controller poke markers sit at the controller tip
+  and default on for clean profiles; VR Settings can hide them.
+- **Arena & Layout editor**: Cabinet placement exposes arena scale/tilt/
+  distance/drop; Tabletop enforces flat/reachable geometry and uses one cycling
+  Small/Medium/Large button (0.75x/1.0x/1.25x). Both expose sprite height,
+  floor-up arena height (0 m floor, 1 m above, default 0.5 m), aim-line length,
+  and grab-editable Pause,
   Level-Up and hand-control rectangle. Edit mode previews moving real creature
   sprites, the maximum seven perk cards and an x3 level-up badge. Layout dumps
   are durable and ADB-readable; the 2026-08-09 headset layout is baked into clean
   profile defaults with exactly mirrored action buttons. "Reset buttons & pad"
   now requires confirmation and offers an in-place undo for the current mode.
   Preview sprites render below the perk-description backing and text rather than
-  puncturing its reading surface.
+  puncturing its reading surface. A button in the normal Confirm location toggles
+  the full perk preview so the arena remains visible while editing; snapshot
+  refresh no longer re-shows it on the following tick. Cabinet's
+  built-in Pause/Level-Up positions now match Tabletop's, and two-hand controller
+  pitch maps directly rather than rotating the held button backwards.
 
 **Presentation (diorama)**
 - Creatures (animated sheets, per-type tint, energizer/freeze/hit-flash, death →

@@ -23,6 +23,7 @@ public sealed partial class PerkMenu : Node3D
     private readonly VrButton[] _cards = new VrButton[7];
     private readonly int[] _cardPerk = new int[7];       // perk id per visible card
     private VrButton _confirm = null!;
+    private VrButton _previewToggle = null!;
     private int _count;
     private float _cardW;
     private float _cardGap;
@@ -46,6 +47,7 @@ public sealed partial class PerkMenu : Node3D
 
     private bool _opened; // cards revealed (via the level-up button)
     private bool _layoutPreview;
+    private bool _layoutPreviewVisible;
 
     // Cross-fade: each new candidate set (first open, or the next accumulated pick)
     // eases in over FadeMs so the swap reads clearly instead of popping.
@@ -67,7 +69,7 @@ public sealed partial class PerkMenu : Node3D
         ClearFocus();
     }
 
-    /// <summary>Show a representative, inert three-card offer while UI Edit is
+    /// <summary>Show a representative, inert seven-card offer while UI Edit is
     /// open. The perk menu is deliberately not an editable target: it is the
     /// clearance envelope the movable Pause/Level Up controls must respect.</summary>
     public void SetLayoutPreview(bool visible)
@@ -76,6 +78,9 @@ public sealed partial class PerkMenu : Node3D
         ClearFocus();
         if (!visible)
         {
+            _layoutPreviewVisible = false;
+            _previewToggle.Visible = false;
+            _previewToggle.ResetPress();
             Visible = Pending && _opened;
             if (!Visible)
             {
@@ -90,6 +95,7 @@ public sealed partial class PerkMenu : Node3D
             return;
         }
 
+        _layoutPreviewVisible = true;
         // Maximum live offer: base 5, Perk Expert 6, Perk Master 7. Use seven
         // realistic labels so Edit mode exposes the true worst-case width.
         string[] names =
@@ -117,10 +123,15 @@ public sealed partial class PerkMenu : Node3D
         // confirmation envelope without suggesting Confirm exists before selection.
         _focused = 0;
         _cards[0].SetColor(CardFocused);
-        _descLabel.Text = "Selected perk details\n\nConfirm below to choose this perk.";
+        _descLabel.Text = "Perk menu preview\n\nUse the toggle below to hide this preview.";
         _descPanel.Visible = true;
-        _confirm.Visible = true;
-        _confirm.SetFade(1.0f);
+        // In edit mode the real Confirm location becomes the preview-visibility
+        // control. The mock offer is inert and never exposes a fake commit action.
+        _confirm.Visible = false;
+        _previewToggle.Visible = true;
+        _previewToggle.SetText("Hide Perk Menu Preview");
+        _previewToggle.SetFade(1.0f);
+        _previewToggle.ResetPress();
         Visible = true;
     }
 
@@ -145,6 +156,8 @@ public sealed partial class PerkMenu : Node3D
         }
         _confirm.Visible = false;
         _confirm.ResetPress();
+        _previewToggle.Visible = false;
+        _previewToggle.ResetPress();
     }
 
     public void Build(float arenaSideMeters)
@@ -191,6 +204,16 @@ public sealed partial class PerkMenu : Node3D
         _confirm.OnPress += ConfirmSelection;
         _confirm.Visible = false;
         _confirm.PrewarmFade();
+
+        _previewToggle = new VrButton();
+        AddChild(_previewToggle);
+        _previewToggle.Build(confirmW, arenaSideMeters * 0.13f, "Hide Perk Menu Preview",
+            new Color(0.34f, 0.40f, 0.52f));
+        _previewToggle.ConfigureLabel(arenaSideMeters * 0.00031f, confirmW * 0.90f);
+        _previewToggle.Position = _confirm.Position;
+        _previewToggle.OnPress += ToggleLayoutPreview;
+        _previewToggle.Visible = false;
+        _previewToggle.PrewarmFade();
 
         BuildDescPanel(arenaSideMeters);
         Visible = false;
@@ -239,6 +262,15 @@ public sealed partial class PerkMenu : Node3D
     /// when perks are pending, else hide. Call each tick with the snapshot.</summary>
     public void Update(in SnapshotView snap)
     {
+        // Layout preview owns its own visibility state. Snapshot refreshes keep
+        // running behind menus; allowing the runtime offer path below to execute
+        // would re-show every card one tick after the player hid the preview.
+        if (_layoutPreview)
+        {
+            Visible = true; // the Show/Hide toggle remains reachable either way
+            return;
+        }
+
         int count = Mathf.Min((int)snap.Header.PerkChoiceCount, _cards.Length);
         // Pending tracks the PICK being owed, not the cards existing. Those are
         // now two different moments: the offer is rolled when the menu opens,
@@ -320,6 +352,12 @@ public sealed partial class PerkMenu : Node3D
     /// cards each rendered frame.</summary>
     public void PollPoke(ReadOnlySpan<HandProbe> probes)
     {
+        if (_layoutPreview)
+        {
+            _previewToggle.PollPoke(probes);
+            return;
+        }
+
         if (!Active || _layoutPreview)
         {
             return;
@@ -338,6 +376,24 @@ public sealed partial class PerkMenu : Node3D
             _confirm.PollPoke(probes);
             _confirm.SetFade(fade);
         }
+    }
+
+    private void ToggleLayoutPreview()
+    {
+        if (!_layoutPreview)
+        {
+            return;
+        }
+        _layoutPreviewVisible = !_layoutPreviewVisible;
+        for (int i = 0; i < _cards.Length; i++)
+        {
+            _cards[i].Visible = _layoutPreviewVisible && i < _count;
+        }
+        _descPanel.Visible = _layoutPreviewVisible;
+        _previewToggle.SetText(_layoutPreviewVisible
+            ? "Hide Perk Menu Preview"
+            : "Show Perk Menu Preview");
+        _previewToggle.ResetPress();
     }
 
     private void PressCard(int index)

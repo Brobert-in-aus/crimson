@@ -64,7 +64,7 @@ public sealed class UserSettings
     /// the tips sit over the control surface instead, so they no longer cover
     /// anything and are worth having as a standalone aid. Debug still forces them
     /// on as part of showing every dev overlay.</summary>
-    public bool PokeMarkers;
+    public bool PokeMarkers = true;
 
     /// <summary>Which <see cref="CrimsonVR.ControlMode"/> the hands act in.
     /// Stored as an int so an unknown future value degrades to a number rather

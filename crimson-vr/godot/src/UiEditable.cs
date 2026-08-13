@@ -245,7 +245,8 @@ public sealed partial class UiEditable : Node3D
             {
                 continue;
             }
-            total += HandGeometry.TwistAngle(_handRot[i] * _grabRot[i].Inverse(), axis);
+            total += HandGeometry.DirectManipulationTwistAngle(
+                _handRot[i] * _grabRot[i].Inverse(), axis);
             n++;
         }
         return n > 0 ? total / n : 0.0f;

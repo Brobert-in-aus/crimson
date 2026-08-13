@@ -50,4 +50,11 @@ public static class HandGeometry
         rotated = rotated.Normalized();
         return Mathf.Atan2(axis.Dot(perp.Cross(rotated)), perp.Dot(rotated));
     }
+
+    /// <summary>Map controller roll to the page rotation used by a grabbed
+    /// diegetic widget. The widget faces back toward the player, so its visual
+    /// forward/back pitch has the opposite right-handed sign to the controller
+    /// delta around the left-to-right hand axis.</summary>
+    public static float DirectManipulationTwistAngle(Basis delta, Vector3 axis)
+        => -TwistAngle(delta, axis);
 }
