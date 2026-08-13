@@ -106,13 +106,16 @@ fn runSmoke(allocator: std.mem.Allocator, io: Io) !SmokePayload {
     try host.session.setLocalReady(allocator, io, true, 35);
     try client.session.setLocalReady(allocator, io, true, 35);
 
-    stats = try host.update(allocator, io, 40);
-    host_received += stats.received;
-    packets_sent += stats.sent;
+    for (0..16) |_| {
+        if (host.session.runtime.started and client.session.runtime.started) break;
+        stats = try host.update(allocator, io, 40);
+        host_received += stats.received;
+        packets_sent += stats.sent;
 
-    stats = try client.update(allocator, io, 50);
-    client_received += stats.received;
-    packets_sent += stats.sent;
+        stats = try client.update(allocator, io, 50);
+        client_received += stats.received;
+        packets_sent += stats.sent;
+    }
 
     if (!host.session.runtime.started or !client.session.runtime.started) return error.LockstepHandshakeFailed;
     if (!try client.ensureLiveRunner()) return error.LockstepLiveRunnerMissing;

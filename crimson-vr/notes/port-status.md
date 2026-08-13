@@ -53,7 +53,9 @@ release approval.
 
 **Flow / screens**
 - First launch opens a short **direct-touch guide** with Continue and Adjust
-  Reach; returning players boot straight into the **main menu** (custom, using the original `ui_signCrimson`
+  Reach. Its bounded copy and explicit UI render priority keep the text inside
+  and in front of the ClassicPanel backing; returning players boot straight into
+  the **main menu** (custom, using the original `ui_signCrimson`
   logo + `ui_menuItem` neon-bar plates): Play Game, Options, Statistics,
   Quit. **[audit]** Fidelity caveats: the base menu items slide-in/rotate on a
   staggered timeline with hover-fade alpha ramps and an additive "ready" glow
@@ -124,6 +126,8 @@ release approval.
   are durable and ADB-readable; the 2026-08-09 headset layout is baked into clean
   profile defaults with exactly mirrored action buttons. "Reset buttons & pad"
   now requires confirmation and offers an in-place undo for the current mode.
+  Preview sprites render below the perk-description backing and text rather than
+  puncturing its reading surface.
 
 **Presentation (diorama)**
 - Creatures (animated sheets, per-type tint, energizer/freeze/hit-flash, death →

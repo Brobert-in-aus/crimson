@@ -411,9 +411,27 @@ fn runSmoke(allocator: std.mem.Allocator, io: Io, impairment: Impairment) !Smoke
         .guest_double_reconnect_bidirectional_jitter_burst => unreachable,
         .guest_triple_reconnect_bidirectional_jitter_burst => unreachable,
     }
-    packets_sent += try pumpRelayService(allocator, io, server, &service, final_exchange_ms, &packet_impairment);
-    try guest.update(allocator, io, final_exchange_ms);
-    const guest_step = try stepFramesAfterUpdateRetry(allocator, io, &guest, final_exchange_ms + 1);
+    for (0..8) |attempt| {
+        if (host_step.last_input_flags[0] == expected_host_flags and host_step.last_input_flags[1] == expected_guest_flags) break;
+        const now_ms = final_exchange_ms + @as(i64, @intCast(attempt)) * 3;
+        packets_sent += try pumpRelayService(allocator, io, server, &service, now_ms, &packet_impairment);
+        try host.update(allocator, io, now_ms + 1);
+        const catchup_step = try host.stepFrames(allocator);
+        if (catchup_step.frames_advanced != 0) host_step = catchup_step;
+        final_exchange_ms = now_ms + 2;
+    }
+    const guest_catchup = try driveGuestUntilInputFlags(
+        allocator,
+        io,
+        server,
+        &service,
+        &guest,
+        final_exchange_ms,
+        expected_host_flags,
+        expected_guest_flags,
+    );
+    packets_sent += guest_catchup.packets_sent;
+    const guest_step = guest_catchup.step;
 
     if (host_step.frames_advanced == 0) return error.RollbackHostFrameMissing;
     if (guest_step.frames_advanced == 0) return error.RollbackGuestFrameMissing;

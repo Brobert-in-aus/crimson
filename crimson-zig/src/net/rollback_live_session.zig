@@ -368,6 +368,28 @@ fn driveRollbackPairUntilStarted(
     return error.ExpectedRoomStart;
 }
 
+fn driveRollbackPairUntilPredictionMismatch(
+    allocator: std.mem.Allocator,
+    io: Io,
+    server: relay_transport.UdpTransport,
+    service: *relay_service.RelayService,
+    host: *LiveSession,
+    guest: *LiveSession,
+    start_ms: i64,
+) !void {
+    for (0..16) |step| {
+        const host_runtime = &(host.session.runtime orelse return error.ExpectedRuntime);
+        const guest_runtime = &(guest.session.runtime orelse return error.ExpectedRuntime);
+        if (host_runtime.prediction_mismatches == 1 and guest_runtime.prediction_mismatches == 1) return;
+
+        const now_ms = start_ms + @as(i64, @intCast(step));
+        _ = try pumpRelayService(allocator, io, server, service, now_ms);
+        try host.update(allocator, io, now_ms + 1);
+        try guest.update(allocator, io, now_ms + 1);
+    }
+    return error.ExpectedPredictionMismatch;
+}
+
 test "rollback live session sends hello to relay endpoint" {
     const allocator = std.testing.allocator;
     const io = std.Io.Threaded.global_single_threaded.io();
@@ -748,9 +770,7 @@ test "rollback live sessions handshake and exchange input through relay service"
     try guest.queueLocalInput(allocator, io, .{ .flags = 2 }, 1100);
     _ = guest.popFrame();
 
-    _ = try pumpRelayService(allocator, io, server, &service, 1101);
-    try host.update(allocator, io, 1102);
-    try guest.update(allocator, io, 1102);
+    try driveRollbackPairUntilPredictionMismatch(allocator, io, server, &service, &host, &guest, 1101);
 
     const host_runtime = &(host.session.runtime orelse return error.ExpectedRuntime);
     const guest_runtime = &(guest.session.runtime orelse return error.ExpectedRuntime);

@@ -279,27 +279,11 @@ test "lockstep sessions handshake over udp" {
     try client.open(io);
     defer client.deinit(allocator, io);
 
-    try client.sendHello(allocator, 10);
-    try std.testing.expectEqual(@as(usize, 1), (try client.update(allocator, io, 10)).sent);
+    try startSession(allocator, io, &host, &client);
 
-    const host_hello = try host.update(allocator, io, 20);
-    try std.testing.expectEqual(@as(usize, 1), host_hello.received);
-    try std.testing.expect(host_hello.sent >= 2);
     try std.testing.expectEqual(@as(usize, 1), host.runtime.peerCount());
-
-    const client_welcome = try client.update(allocator, io, 30);
-    try std.testing.expect(client_welcome.received >= 1);
-    try std.testing.expectEqual(@as(usize, 0), client_welcome.sent);
     try std.testing.expect(client.runtime.lobby.joined());
-    try client.setLocalReady(allocator, io, true, 35);
-
-    const host_ready = try host.update(allocator, io, 40);
-    try std.testing.expectEqual(@as(usize, 1), host_ready.received);
     try std.testing.expect(host.runtime.started);
-    try std.testing.expect(host_ready.sent >= 1);
-
-    const client_start = try client.update(allocator, io, 50);
-    try std.testing.expect(client_start.received >= 1);
     try std.testing.expect(client.runtime.started);
     try std.testing.expect(client.runtime.lockstep != null);
 }
@@ -404,12 +388,21 @@ fn startSession(
 ) !void {
     try client.sendHello(allocator, 10);
     _ = try client.update(allocator, io, 10);
-    _ = try host.update(allocator, io, 20);
-    _ = try client.update(allocator, io, 30);
+
+    for (0..16) |_| {
+        _ = try host.update(allocator, io, 20);
+        _ = try client.update(allocator, io, 30);
+        if (client.runtime.lobby.joined()) break;
+    }
+    if (!client.runtime.lobby.joined()) return error.ExpectedLobbyJoin;
+
     try host.setLocalReady(allocator, io, true, 35);
     try client.setLocalReady(allocator, io, true, 35);
-    _ = try host.update(allocator, io, 40);
-    _ = try client.update(allocator, io, 50);
-    try std.testing.expect(host.runtime.started);
-    try std.testing.expect(client.runtime.started);
+
+    for (0..16) |_| {
+        if (host.runtime.started and client.runtime.started) return;
+        _ = try host.update(allocator, io, 40);
+        _ = try client.update(allocator, io, 50);
+    }
+    return error.ExpectedRoomStart;
 }

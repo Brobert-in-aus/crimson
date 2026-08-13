@@ -25,6 +25,16 @@ and persistent bonus hints now state the pickup requirement, and the sidecar
 uses the same recenter-stable, world-upright seat-facing yaw as Cabinet power-up
 information.
 
+Follow-up 2026-08-13: headset screenshots exposed two transparent-layer ordering
+failures. The first-run ClassicPanel rendered after its default-priority labels,
+erasing the text over the plate while leaving its overflow visible outside. The
+layout editor's real creature previews likewise rendered after the perk detail
+label. Classic panel backdrops and UI labels now use an explicit shared render
+band (backdrop 58, text 68); the perk detail backing also owns the backdrop band.
+First-run copy has a bounded smart-wrap width and shorter controller wording, so
+expanded text remains inside the panel. The corrected Release APK is installed;
+an in-headset before/after visual re-check remains required.
+
 ## UX decision brief
 
 - Job: enter VR, understand the control model, choose a mode, adjust comfort
@@ -146,6 +156,8 @@ Implemented:
   hidden until one of their own cards is selected. Because confirmation is also
   spatially below the card row, the confirming hand cannot begin the next offer
   inside either a commit control or one of its freshly spawned cards.
+- The description backing and copy own explicit UI render priorities, preventing
+  layout-edit creature previews from drawing through the reading surface.
 
 ## Scenario re-check
 
@@ -164,7 +176,9 @@ Implemented:
 
 ## Remaining headset validation
 
-1. Confirm onboarding copy and buttons fit in both eyes at default placement.
+1. Re-capture the installed first-run guide and layout-edit perk preview; confirm
+   the bounded onboarding copy and both buttons fit in both eyes, and no creature
+   sprite draws over perk text.
 2. Verify the 700 ms recenter hold is long enough to prevent accidents but not
    tiring; confirm completion text remains readable after the world moves.
 3. Exercise pause confirmation with both controller and optical-hand jitter.

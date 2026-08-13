@@ -900,10 +900,12 @@ screen-space overlays:
    probes are a fixed `[left,right]` `HandProbe` span (tip + grip) so a grab keeps
    stable hand identity. Arena scale/height are their own deferred slices; not
    persisted yet (slice 9). Headless-verified; grab feel + layout need eyes.
-5. **First run — BUILT (updated 2026-08-11).** `StartPrompt` teaches direct-touch
+5. **First run — BUILT (updated 2026-08-13).** `StartPrompt` teaches direct-touch
    poke and hold-to-recenter before Main Menu. Continue persists completion;
    Adjust Reach enters the normal Arena & Layout navigation stack. Returning
-   players skip it. Measured seated calibration remains a later slice.
+   players skip it. The guide copy is bounded and smart-wrapped, with explicit UI
+   render priority so the ClassicPanel cannot draw over its text. Measured seated
+   calibration remains a later slice.
 6. **Highscore name entry — BUILT (2026-07-09).** `VirtualKeyboard` (A-Z + Space/
    Del/Enter poke keys) on death; Enter submits the name (empty = skip) and
    restarts. Score = player_experience for now.
@@ -950,8 +952,12 @@ screen-space overlays:
     recentered seat using the same stable upright-yaw rule as Cabinet power-up
     information. Practice-round copy now states both advance conditions: clear
     each wave and collect its dropped power-up.
+11. **Transparent UI hierarchy — BUILT (2026-08-13).** Classic backdrops own
+    render priority 58 and top-level UI copy owns 68. The perk-description
+    backing joins that band, keeping live layout-preview sprites behind both its
+    plate and text. Release build installed; visual headset re-check remains.
 
-**M4 in-headset validation backlog (all slices 1-9 are headless-verified only):**
+**M4 in-headset validation backlog (remaining checks after slices 1-11):**
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
 virtual keyboard), the grab-drag slider, haptic feel, and menu placement/reach.
 

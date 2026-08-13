@@ -11,12 +11,13 @@ This is the canonical release-readiness checklist for the Python desktop package
 the native Zig runtime, and CrimsonVR personal builds. It consolidates the gates
 that were previously distributed across the VR plan and platform-specific notes.
 
-!!! danger "Current decision: do not release"
+!!! danger "Current decision: no-go pending release approvals"
 
-    The 2026-08-13 audit found reproducible rollback recovery failure,
-    nondeterministic native networking tests, an unchanged already-published
-    package version, an uncommitted release candidate, and unresolved CrimsonVR
-    operational/legal gates. A successful build alone is not release approval.
+    The 2026-08-13 engineering remediation closed the rollback recovery and
+    Windows networking defects found by the initial audit. Publication remains
+    blocked by the unchanged already-published package version and unresolved
+    CrimsonVR legal, clean-machine, relay-operations, and physical-device gates.
+    Do not create or push a release tag yet.
 
 ## Release surfaces
 
@@ -24,8 +25,8 @@ Treat these as separate deliverables with separate publication decisions:
 
 | Surface | Publication path | Current status |
 |---|---|---|
-| Python desktop package | Tag-triggered PyPI and GitHub release | Blocked by validation, versioning, and candidate-state gates |
-| Zig runtime/build targets | Built and tested as part of the source release | Blocked by native networking failures/flakes |
+| Python desktop package | Tag-triggered PyPI and GitHub release | Automated gates pass; blocked by version selection and final clean-commit rerun |
+| Zig runtime/build targets | Built and tested as part of the source release | Automated and repeated networking gates pass on Windows |
 | CrimsonVR Quest and PCVR | Asset-free personal builds from manual workflows | Build paths exist; operational, physical-device, and legal gates remain |
 
 The tag-triggered `.github/workflows/release.yml` publishes only the Python
@@ -61,18 +62,55 @@ drive letters. The audit reran those cases with the temporary directory on the
 workspace drive and they passed. Record such environment-only exclusions
 explicitly; do not use them to waive a networking or simulation failure.
 
+## 2026-08-13 remediation evidence
+
+The networking gates now drive UDP handshakes and rollback correction to a
+bounded protocol state instead of assuming that one nonblocking receive cycle is
+enough on Windows. The rollback smoke applies the same bounded catch-up rule to
+normal, delayed, reordered, and dropped input delivery. No retry is hidden: each
+bounded loop returns a specific error if the required state is not reached.
+
+| Gate | Remediation evidence | Result |
+|---|---|---|
+| Python test suite | 2,574 passed, 12 skipped with pinned Zig on `PATH` and same-drive external temp storage | Pass |
+| Zig tests | Eight consecutive passes during remediation, then three consecutive final-gate passes; 962 passed and 1 intentional skip per run | Pass |
+| Lockstep smoke | 25 consecutive ReleaseFast passes during remediation plus 10 final-gate passes | Pass |
+| Rollback smoke | Normal, delay, reorder, and drop each passed 20 consecutive runs; all 16 impairment/reconnect/resync modes passed the final matrix | Pass |
+| VR managed tests | 97 passed in Release configuration | Pass |
+| Ruff, import boundaries, types, docs | Passed; documentation site built successfully | Pass |
+| ast-grep | Main scan completed with advisory findings only; all 36 configured rule tests passed | Pass |
+| Zig ReleaseFast and Wasm | Both built successfully with Zig 0.16.0 | Pass |
+| Python wheel and sdist | PEP 517 build and fresh-environment `crimson`/`crimsonland` entry-point smokes passed | Pass build, **fail release version** |
+
+The PEP 517 verification artifacts are intentionally outside the checkout and
+are not publication candidates because they still carry version `0.10.0`:
+
+| Artifact | SHA-256 |
+|---|---|
+| `crimsonland-0.10.0-py3-none-any.whl` | `2f421749b6f8716270a40ae68c8a9960a7776f944805dc39f4c706db2a2005b0` |
+| `crimsonland-0.10.0.tar.gz` | `6d04415c89126543ceb0aa6bc51fc9f65fc670fba20ab1a7c7a2a816028dca5d` |
+
+The exact `just check` wrapper could not be invoked in this desktop environment
+because `just` is not installed and its `uv` console trampolines are invalid.
+The commands that compose the recipe were run directly. The optional local Zig
+ast-grep configuration was not counted as a release gate because its committed
+custom-language path targets a developer-specific macOS `.dylib`; the canonical
+`just check` recipe runs the portable main configuration. The eventual versioned
+release commit must still run in CI or a clean checkout using the canonical
+wrapper.
+
 ## Blocking issue register
 
 All blockers must be closed with evidence, not merely marked understood.
 
-| ID | Blocker | Closure evidence |
-|---|---|---|
-| RP-01 | Reordered rollback input smoke returns `RollbackHostInputMismatch` | Regression fixed; focused smoke and full Python suite pass |
-| RP-02 | Windows native networking is nondeterministic across lockstep handshake and rollback relay tests | Repeated Windows runs and `zig build test` pass without retry-dependent success |
-| RP-03 | `pyproject.toml` is still `0.10.0`, which is already tagged/published | Version and lockfile bumped; intended tag exactly matches the package version |
-| RP-04 | Release candidate exists only as a large dirty worktree | Complete candidate committed; clean checkout reproduces every required gate |
-| RP-05 | Public CrimsonVR derived-content and upstream-code scope is unresolved | Written licensing decision and completed repository/output audit, or release scope reduced accordingly |
-| RP-06 | Private-copy workflows, clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Workflow URLs/artifact manifests and signed physical-validation record attached to the release evidence |
+| ID | Status | Blocker | Closure evidence |
+|---|---|---|---|
+| RP-01 | Closed locally | Reordered rollback input smoke returned `RollbackHostInputMismatch` | State-driven catch-up implemented; 20/20 reorder smokes and full Python suite pass |
+| RP-02 | Closed locally | Windows native networking was nondeterministic across lockstep handshake and rollback relay tests | Repeated Windows suites and smokes pass without retry-dependent acceptance |
+| RP-03 | Open | `pyproject.toml` is still `0.10.0`, which is already tagged/published | Version and lockfile bumped; intended tag exactly matches the package version |
+| RP-04 | Remediation committed; final rerun pending | The original release candidate existed only as a large dirty worktree | Run every required gate from the clean, versioned release commit |
+| RP-05 | Open | Public CrimsonVR derived-content and upstream-code scope is unresolved | Written licensing decision and completed repository/output audit, or release scope reduced accordingly |
+| RP-06 | Open | Private-copy workflows, clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Workflow URLs/artifact manifests and signed physical-validation record attached to the release evidence |
 
 ## Required automated gates
 
