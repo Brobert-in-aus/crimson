@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const lockstep_protocol = @import("lockstep_protocol.zig");
 const packed_input = @import("packed_input.zig");
 const relay_protocol = @import("relay_protocol.zig");
 const rollback = @import("rollback.zig");
@@ -7,6 +8,7 @@ const rollback_resync_v5 = @import("rollback_resync_v5.zig");
 
 const max_players: usize = @intCast(relay_protocol.max_players);
 const snapshot_keep_ticks: i32 = 64;
+const max_commands_per_tick: usize = 8;
 
 pub const Role = enum {
     host,
@@ -26,10 +28,17 @@ pub const TickFrame = struct {
     tick_index: i32,
     player_count: usize,
     frame_inputs: [max_players]packed_input.PackedPlayerInput = [_]packed_input.PackedPlayerInput{.{}} ** max_players,
+    commands: [max_commands_per_tick]lockstep_protocol.GameCommand = undefined,
+    command_count: usize = 0,
 
     pub fn input(self: TickFrame, slot_index: usize) packed_input.PackedPlayerInput {
         return self.frame_inputs[slot_index];
     }
+};
+
+const ScheduledCommand = struct {
+    tick_index: i32,
+    command: lockstep_protocol.GameCommand,
 };
 
 pub const OutgoingMessage = struct {
@@ -67,6 +76,7 @@ pub const RuntimeCore = struct {
     active_resync_request_id: []const u8 = "",
     handled_resync_request_ids: std.StringHashMap(void),
     remote_seen_slots: [max_players]bool = [_]bool{false} ** max_players,
+    scheduled_commands: std.ArrayList(ScheduledCommand) = .empty,
 
     paused_for_resync: bool = false,
     paused_for_reconnect: bool = false,
@@ -111,6 +121,8 @@ pub const RuntimeCore = struct {
         while (it.next()) |key| self.allocator.free(key.*);
         self.handled_resync_request_ids.deinit();
         if (self.error_reason.len != 0) self.allocator.free(self.error_reason);
+        for (self.scheduled_commands.items) |entry| lockstep_protocol.deinitGameCommand(self.allocator, entry.command);
+        self.scheduled_commands.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -121,6 +133,16 @@ pub const RuntimeCore = struct {
         try self.send(.{ .rb_input_sample = batch }, false);
         try self.drainFrames();
         try self.drainRollbackSignals(now_ms);
+    }
+
+    pub fn submitLocalCommand(self: *RuntimeCore, command: lockstep_protocol.GameCommand) !void {
+        const local_slot: i32 = @intCast(self.controller.local_slot_index);
+        if (lockstep_protocol.commandPlayerIndex(command) != local_slot) return error.InvalidCommandPlayer;
+        if (self.role == .host) {
+            try self.scheduleAuthoritativeCommand(command);
+        } else {
+            try self.send(.{ .rb_command_request = .{ .command = command } }, true);
+        }
     }
 
     pub fn primeInitialDelay(self: *RuntimeCore) !void {
@@ -148,6 +170,19 @@ pub const RuntimeCore = struct {
                     self.syncMetrics();
                     try self.drainRollbackSignals(now_ms);
                     try self.drainFrames();
+                }
+            },
+            .rb_command_request => |request| {
+                if (self.role != .host) return;
+                const player = lockstep_protocol.commandPlayerIndex(request.command);
+                if (player <= 0 or player >= @as(i32, @intCast(self.controller.player_count))) return;
+                try self.scheduleAuthoritativeCommand(request.command);
+            },
+            .rb_canonical_command => |canonical| {
+                if (self.role == .host) return;
+                try self.appendScheduled(canonical.tick_index, canonical.command);
+                if (canonical.tick_index < self.controller.next_emit_tick) {
+                    self.pending_rollback_from = minOptionalTick(self.pending_rollback_from, canonical.tick_index);
                 }
             },
             .rb_resync_request => |request| try self.handleResyncRequest(request, now_ms),
@@ -185,7 +220,10 @@ pub const RuntimeCore = struct {
     }
 
     pub fn markLocalRollbackSnapshot(self: *RuntimeCore, tick_index_raw: i32) !void {
-        const tick_index = @max(0, tick_index_raw);
+        // -1 represents the pristine runner state before tick zero. Without
+        // this marker, a late correction for the first predicted frame asks
+        // the host for a resync before either peer has a wire snapshot.
+        const tick_index = @max(-1, tick_index_raw);
         for (self.rollback_snapshot_ticks.items) |existing| {
             if (existing == tick_index) return;
         }
@@ -259,7 +297,29 @@ pub const RuntimeCore = struct {
                 .player_count = frame.player_count,
             };
             for (0..frame.player_count) |slot| tick_frame.frame_inputs[slot] = frame.frame_inputs[slot];
+            self.attachCommands(&tick_frame);
             try self.frame_queue.append(self.allocator, tick_frame);
+        }
+    }
+
+    fn scheduleAuthoritativeCommand(self: *RuntimeCore, command: lockstep_protocol.GameCommand) !void {
+        const tick_index = self.controller.capture_tick + self.controller.max_rollback_ticks + 2;
+        try self.appendScheduled(tick_index, command);
+        try self.send(.{ .rb_canonical_command = .{ .tick_index = tick_index, .command = command } }, true);
+    }
+
+    fn appendScheduled(self: *RuntimeCore, tick_index: i32, command: lockstep_protocol.GameCommand) !void {
+        try self.scheduled_commands.append(self.allocator, .{
+            .tick_index = tick_index,
+            .command = try lockstep_protocol.cloneGameCommand(self.allocator, command),
+        });
+    }
+
+    fn attachCommands(self: *const RuntimeCore, frame: *TickFrame) void {
+        for (self.scheduled_commands.items) |entry| {
+            if (entry.tick_index != frame.tick_index or frame.command_count >= frame.commands.len) continue;
+            frame.commands[frame.command_count] = entry.command;
+            frame.command_count += 1;
         }
     }
 
@@ -279,10 +339,10 @@ pub const RuntimeCore = struct {
     }
 
     fn applyRollbackFrom(self: *RuntimeCore, from_tick_raw: i32, now_ms: i64) !void {
-        const from_tick = @max(0, from_tick_raw);
+        const from_tick: i32 = @max(0, from_tick_raw);
         self.pending_rollback_from = minOptionalTick(self.pending_rollback_from, from_tick);
 
-        if (from_tick == 0 or !self.hasRollbackSnapshotAtOrBefore(from_tick - 1)) {
+        if (!self.hasRollbackSnapshotAtOrBefore(from_tick - 1)) {
             try self.sendResyncRequest(from_tick, "rollback_snapshot_missing", now_ms);
             return;
         }
@@ -302,6 +362,7 @@ pub const RuntimeCore = struct {
                 .player_count = frame.player_count,
             };
             for (0..frame.player_count) |slot| tick_frame.frame_inputs[slot] = frame.frame_inputs[slot];
+            self.attachCommands(&tick_frame);
             try replacement.append(self.allocator, tick_frame);
         }
         self.frame_queue.deinit(self.allocator);
@@ -314,6 +375,19 @@ pub const RuntimeCore = struct {
         self.next_resync_id += 1;
 
         self.resync_count += 1;
+        if (self.role == .host) {
+            // The host owns authoritative state, so an overflow is recovered
+            // by pushing its latest snapshot rather than requesting guest
+            // state (which the relay correctly rejects).
+            try self.handleResyncRequest(.{
+                .request_id = request_id,
+                .from_tick = @max(0, from_tick_raw),
+                .reason = reason,
+                .requested_by_slot = @intCast(self.controller.local_slot_index),
+            }, now_ms);
+            return;
+        }
+
         self.paused_for_resync = true;
         self.resync_deadline_ms = now_ms + self.reconnect_timeout_ms;
         try self.setActiveRequestId(request_id);
@@ -509,7 +583,7 @@ test "rollback runtime queues local input and emitted frame" {
     try std.testing.expectEqual(@as(u32, 7), frame.input(0).flags);
 }
 
-test "rollback runtime sends resync request when rollback snapshot is missing" {
+test "rollback host pushes authoritative resync when rollback snapshot is missing" {
     var runtime = RuntimeCore.init(std.testing.allocator, .{
         .role = .host,
         .player_count = 2,
@@ -521,19 +595,17 @@ test "rollback runtime sends resync request when rollback snapshot is missing" {
 
     try runtime.queueLocalInput(.{}, 10);
     _ = runtime.popFrame();
+    try runtime.storeLocalSnapshot(0, "snapshot-zero");
     try runtime.handleMessage(.{ .rb_input_sample = .{
         .slot_index = 1,
         .samples = &[_]relay_protocol.RbInputSample{.{ .tick_index = 0, .packed_input = .{ .flags = 3 } }},
     } }, 20);
 
     try std.testing.expectEqual(@as(i32, 1), runtime.resync_count);
+    try std.testing.expect(!runtime.paused_for_resync);
     switch (runtime.outbox.items[runtime.outbox.items.len - 1].message) {
-        .rb_resync_request => |request| {
-            try std.testing.expectEqualStrings("rq1", request.request_id);
-            try std.testing.expectEqualStrings("rollback_snapshot_missing", request.reason);
-            try std.testing.expectEqual(@as(i32, 0), request.from_tick);
-        },
-        else => return error.ExpectedResyncRequest,
+        .rb_resync_commit => |commit| try std.testing.expectEqualStrings("rq1", commit.request_id),
+        else => return error.ExpectedResyncCommit,
     }
 }
 

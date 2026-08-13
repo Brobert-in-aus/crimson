@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-import string
 import time
 import uuid
 
@@ -26,6 +25,8 @@ from .relay_protocol import (
     PeerDisconnect,
     Ping,
     Pong,
+    RbCanonicalCommand,
+    RbCommandRequest,
     RbInputBatch,
     RbResyncBegin,
     RbResyncChunk,
@@ -54,7 +55,9 @@ def _now_ms() -> int:
 
 
 def _room_code(rand: random.Random) -> RoomCode:
-    alphabet = string.ascii_lowercase + string.digits
+    # Upper-case display characters selected to avoid common visual collisions:
+    # I/L/1, O/0/Q, B/8, S/5, Z/2, G/6, and U/V.
+    alphabet = "acdefhjkmnprtvwxy347"
     return "".join(rand.choice(alphabet) for _ in range(int(ROOM_CODE_LENGTH)))
 
 
@@ -117,6 +120,9 @@ class _Room(msgspec.Struct):
 
 
 _FORWARD_RELIABLE_TYPES = (
+    RelayError,
+    RbCommandRequest,
+    RbCanonicalCommand,
     RbResyncRequest,
     RbResyncBegin,
     RbResyncChunk,
@@ -309,7 +315,15 @@ class RelayServer:
                 self._handle_room_ready(peer=peer, message=message, now_ms=int(now_ms))
                 return
 
-            case RbInputBatch() | RbResyncRequest() | RbResyncBegin() | RbResyncChunk() | RbResyncCommit():
+            case RelayError():
+                # A host can report that an authoritative recovery snapshot is
+                # unavailable. Forward that failure so guests leave their
+                # resync wait and show an error instead of freezing forever.
+                if int(peer.slot_index) == 0:
+                    self._forward_room_message(peer=peer, message=message, now_ms=int(now_ms))
+                return
+
+            case RbInputBatch() | RbCommandRequest() | RbCanonicalCommand() | RbResyncRequest() | RbResyncBegin() | RbResyncChunk() | RbResyncCommit():
                 self._forward_room_message(peer=peer, message=message, now_ms=int(now_ms))
                 return
 
@@ -368,7 +382,7 @@ class RelayServer:
         host_slot = slots[0]
         host_slot.peer_id = str(peer.peer_id)
         host_slot.peer_name = str(peer.peer_name)
-        host_slot.ready = True
+        host_slot.ready = False
         host_slot.reconnect_token = uuid.uuid4().hex
 
         room = _Room(
@@ -588,6 +602,8 @@ class RelayServer:
             return
 
         request_id = ""
+        if isinstance(message, RelayError) and int(sender_slot) != int(host_slot):
+            return
         if isinstance(message, RbResyncRequest):
             request_id = str(message.request_id or "")
             if int(sender_slot) == int(host_slot):
@@ -676,7 +692,8 @@ class RelayServer:
             if peer is None:
                 continue
             connected += 1
-            self._send_peer(peer, state, reliable=True, now_ms=int(now_ms))
+            peer_state = msgspec.structs.replace(state, local_slot_index=int(slot.slot_index))
+            self._send_peer(peer, peer_state, reliable=True, now_ms=int(now_ms))
         self.log.debug(
             "relay_room_state_broadcast",
             room_code=str(room.room_code),

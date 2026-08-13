@@ -294,6 +294,12 @@ public static class ClassicTitle
 /// </summary>
 public static class ClassicPanel
 {
+    // Shared transparent-UI band. World/HUD presentation stays below this;
+    // panel art draws first and labels draw last so a transparent panel can
+    // never erase its own copy (or let preview sprites punch through it).
+    public const int BackdropRenderPriority = 58;
+    public const int TextRenderPriority = 68;
+
     private const float SrcSliceY1 = 130.0f;
     private const float SrcSliceY2 = 150.0f;
     private const float DstTopH = 138.0f;
@@ -359,7 +365,7 @@ public static class ClassicPanel
                 // Panels must draw OVER the HUD (40-44): all diegetic UI is
                 // transparent with depth-write off, so priority is the only
                 // layering — the panel stack owns 58..67.
-                RenderPriority = 58,
+                RenderPriority = BackdropRenderPriority,
             };
             parent.AddChild(new MeshInstance3D
             {

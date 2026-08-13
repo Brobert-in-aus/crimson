@@ -127,12 +127,6 @@ pub const Session = struct {
             sent_control = true;
         }
 
-        if (self.saw_room_state and !self.sent_ready) {
-            try self.send(allocator, .{ .room_ready = .{ .slot_index = self.local_slot_index, .ready = true } }, true, now_ms);
-            self.sent_ready = true;
-            sent_control = true;
-        }
-
         if (self.runtime) |*runtime| try runtime.checkReconnectTimeout(now_ms);
         try self.flushRuntimeOutbox(allocator, now_ms);
         try self.checkLinkTimeout(allocator, now_ms);
@@ -161,6 +155,26 @@ pub const Session = struct {
         try self.flushRuntimeOutbox(allocator, now_ms);
     }
 
+    pub fn setLocalReady(self: *Session, allocator: std.mem.Allocator, ready: bool, now_ms: i64) !void {
+        if (!self.saw_room_state or self.started) return error.NotReady;
+        try self.send(allocator, .{ .room_ready = .{
+            .slot_index = self.local_slot_index,
+            .ready = ready,
+        } }, true, now_ms);
+        self.sent_ready = ready;
+    }
+
+    pub fn submitLocalCommand(
+        self: *Session,
+        allocator: std.mem.Allocator,
+        command: @import("lockstep_protocol.zig").GameCommand,
+        now_ms: i64,
+    ) !void {
+        const runtime = if (self.runtime) |*runtime| runtime else return;
+        try runtime.submitLocalCommand(command);
+        try self.flushRuntimeOutbox(allocator, now_ms);
+    }
+
     pub fn popFrame(self: *Session) ?rollback_runtime.TickFrame {
         const runtime = if (self.runtime) |*runtime| runtime else return null;
         return runtime.popFrame();
@@ -176,6 +190,11 @@ pub const Session = struct {
         self.outbox = .{};
     }
 
+    pub fn forceReconnect(self: *Session, allocator: std.mem.Allocator, now_ms: i64) !void {
+        if (!self.started or self.reconnect_token.len == 0) return;
+        try self.startSelfReconnect(allocator, now_ms);
+    }
+
     fn handleMessage(self: *Session, allocator: std.mem.Allocator, message: relay_protocol.NetMessage, now_ms: i64) !void {
         switch (message) {
             .client_welcome => |welcome| {
@@ -185,6 +204,7 @@ pub const Session = struct {
             },
             .room_state => |state| {
                 self.saw_room_state = true;
+                if (state.local_slot_index >= 0) self.local_slot_index = state.local_slot_index;
                 self.room_code_latest = state.room_code;
                 try self.storeRoomState(allocator, state);
                 if (self.runtime) |*runtime| {
@@ -204,6 +224,8 @@ pub const Session = struct {
                 }
             },
             .rb_input_sample,
+            .rb_command_request,
+            .rb_canonical_command,
             .rb_resync_request,
             .rb_resync_begin,
             .rb_resync_chunk,
@@ -405,8 +427,9 @@ test "rollback session handshakes host room and starts runtime" {
         .room_code = code,
         .session_id = "s1",
         .player_count = 2,
+        .local_slot_index = 0,
     } }, true, 1003), 1003);
-    try session.update(allocator, 1004);
+    try session.setLocalReady(allocator, true, 1004);
     switch (session.outbox.items.items[0].message) {
         .room_ready => |ready| try std.testing.expect(ready.ready),
         else => return error.ExpectedRoomReady,
@@ -445,6 +468,7 @@ test "rollback session retains latest room state for lobby status" {
         .room_code = code,
         .session_id = "s1",
         .player_count = 2,
+        .local_slot_index = 1,
         .slots = &[_]relay_protocol.RelaySlot{
             .{ .slot_index = 0, .connected = true, .ready = true, .is_host = true, .peer_name = "host" },
             .{ .slot_index = 1, .connected = true, .ready = false, .is_host = false, .peer_name = "guest" },
@@ -455,6 +479,7 @@ test "rollback session retains latest room state for lobby status" {
     try std.testing.expectEqualStrings("s1", state.session_id);
     try std.testing.expectEqual(@as(usize, 2), state.slots.len);
     try std.testing.expectEqualStrings("guest", state.slots[1].peer_name);
+    try std.testing.expectEqual(@as(i32, 1), session.local_slot_index);
     try std.testing.expectEqualStrings("abcd", room_code.roomCodeSlice(&state.room_code));
 }
 
@@ -702,7 +727,12 @@ test "rollback session routes remote input into runtime core" {
     const runtime = &session.runtime.?;
     try std.testing.expectEqual(@as(i32, 1), runtime.prediction_mismatches);
     try std.testing.expectEqual(@as(i32, 1), runtime.resync_count);
-    try std.testing.expect(runtime.paused_for_resync);
+    try std.testing.expect(!runtime.paused_for_resync);
+    try std.testing.expectEqual(@as(usize, 1), session.outbox.items.items.len);
+    switch (session.outbox.items.items[0].message) {
+        .relay_error => |err| try std.testing.expectEqualStrings("resync_snapshot_unavailable", err.reason),
+        else => return error.ExpectedRelayError,
+    }
 }
 
 test "rollback session primes initial delay frames at room start" {

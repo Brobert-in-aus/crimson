@@ -168,6 +168,10 @@ pub const Disconnect = struct {
     reason: []const u8 = "",
 };
 
+pub const GameCommandRequest = struct {
+    command: GameCommand,
+};
+
 pub const NetMessage = union(enum) {
     hello: Hello,
     welcome: Welcome,
@@ -183,6 +187,9 @@ pub const NetMessage = union(enum) {
     resync_commit: ResyncCommit,
     disconnect: Disconnect,
     input_batch: InputBatch,
+    /// Reliable client-to-host request. The host validates the requesting
+    /// player's slot and places the command on a canonical TickFrame.
+    game_command: GameCommandRequest,
 
     pub fn msgpackFormat() msgpack.UnionFormat {
         return .{ .as_tagged = .{
@@ -277,6 +284,9 @@ pub fn cloneMessage(allocator: std.mem.Allocator, message: NetMessage) !NetMessa
             .slot_index = batch.slot_index,
             .samples = try dupeInputSamples(allocator, batch.samples),
         } },
+        .game_command => |request| .{ .game_command = .{
+            .command = try cloneGameCommand(allocator, request.command),
+        } },
     };
 }
 
@@ -304,8 +314,35 @@ pub fn deinitMessage(allocator: std.mem.Allocator, message: *NetMessage) void {
         .resync_commit => |commit| freeBytes(allocator, commit.stream_id),
         .disconnect => |disconnect| freeBytes(allocator, disconnect.reason),
         .input_batch => |batch| freeInputSamples(allocator, batch.samples),
+        .game_command => |request| deinitGameCommand(allocator, request.command),
     }
     message.* = undefined;
+}
+
+pub fn commandPlayerIndex(command: GameCommand) i32 {
+    return switch (command) {
+        inline else => |payload| payload.player_index,
+    };
+}
+
+pub fn cloneGameCommand(allocator: std.mem.Allocator, command: GameCommand) !GameCommand {
+    return switch (command) {
+        .perk_menu_open => |value| .{ .perk_menu_open = value },
+        .perk_pick => |value| .{ .perk_pick = value },
+        .typo_char => |value| .{ .typo_char = .{
+            .player_index = value.player_index,
+            .ch = try dupeBytes(allocator, value.ch),
+        } },
+        .typo_backspace => |value| .{ .typo_backspace = value },
+        .typo_submit => |value| .{ .typo_submit = value },
+    };
+}
+
+pub fn deinitGameCommand(allocator: std.mem.Allocator, command: GameCommand) void {
+    switch (command) {
+        .typo_char => |value| freeBytes(allocator, value.ch),
+        else => {},
+    }
 }
 
 pub fn buildPublicVersion(buf: []u8, build_id: []const u8) ?[]const u8 {
@@ -784,6 +821,26 @@ test "lockstep packet encodes and decodes tagged tick frame" {
             }
         },
         else => return error.TestExpectedEqual,
+    }
+}
+
+test "lockstep reliable game command request round trips player slot" {
+    const packet: LockstepPacket = .{ .reliable = true, .message = .{ .game_command = .{
+        .command = .{ .perk_pick = .{ .player_index = 2, .choice_index = 4 } },
+    } } };
+    const bytes = try encodePacket(std.testing.allocator, packet);
+    defer std.testing.allocator.free(bytes);
+    const decoded = try decodePacket(std.testing.allocator, bytes);
+    defer decoded.deinit();
+    switch (decoded.value.message) {
+        .game_command => |request| switch (request.command) {
+            .perk_pick => |pick| {
+                try std.testing.expectEqual(@as(i32, 2), pick.player_index);
+                try std.testing.expectEqual(@as(i32, 4), pick.choice_index);
+            },
+            else => return error.ExpectedPerkPick,
+        },
+        else => return error.ExpectedGameCommand,
     }
 }
 

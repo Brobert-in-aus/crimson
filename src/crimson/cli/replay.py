@@ -747,7 +747,7 @@ def _build_replay_list_row(
     load_replay_fn: Callable[[bytes], Replay],
     current_version: str,
 ) -> tuple[_ReplayListRow, str | None]:
-    rel = str(replay_path.relative_to(replays_dir))
+    rel = replay_path.relative_to(replays_dir).as_posix()
     modified_text = "?"
     modified_ts = 0.0
     try:
@@ -915,7 +915,7 @@ def cmd_replay_list(
     replays_dir = Path(base_dir) / "replays"
     replay_files = sorted(
         (path for path in replays_dir.rglob("*.crd") if path.is_file()),
-        key=lambda path: str(path.relative_to(replays_dir)),
+        key=lambda path: path.relative_to(replays_dir).as_posix(),
     )
     if not replay_files:
         typer.echo(f"no replay files found under {replays_dir}")

@@ -9,7 +9,8 @@ namespace CrimsonVR;
 /// M4 slice 2: the level-up perk pick as poke buttons (PLAN M4 UI model). When
 /// the sim reports perks pending (snapshot header perk_pending_count /
 /// perk_choices[]), the candidate perks float above the arena as cards the player
-/// pokes to choose. The choice feeds back as CrimsonHostInput.perk_choice_index
+/// pokes to select and inspect, then confirms with a separate button below the
+/// row. The confirmed choice feeds back as CrimsonHostInput.perk_choice_index
 /// (Main drives the pause via perk_menu_active).
 ///
 /// A child of ArenaRoot, so the cards sit above the tabletop in arena-local space
@@ -20,21 +21,27 @@ namespace CrimsonVR;
 public sealed partial class PerkMenu : Node3D
 {
     private readonly VrButton[] _cards = new VrButton[7];
-    private readonly VrButton[] _help = new VrButton[7]; // "?" press-and-hold per card
     private readonly int[] _cardPerk = new int[7];       // perk id per visible card
+    private VrButton _confirm = null!;
     private int _count;
     private float _cardW;
     private float _cardGap;
     private float _arenaSide;
     private readonly Dictionary<int, string> _perkNames = new();
     private readonly Dictionary<int, string> _perkDescs = new();
+    private int _focused = -1;
+    private static readonly Color CardIdle = new(0.22f, 0.24f, 0.30f);
+    private static readonly Color CardFocused = new(0.42f, 0.50f, 0.68f);
 
-    // Description popup above the card row, shown while a "?" is held.
+    // Description popup above the card row. It stays pinned after a card poke so
+    // the player can review the selection before committing with the separate
+    // confirmation button below the cards.
     private Node3D _descPanel = null!;
     private Label3D _descLabel = null!;
 
-    /// <summary>Chosen choice-index (0..count-1) when a card is poked; Main reads
-    /// it into the next tick's perk_choice_index and clears it. -1 = nothing.</summary>
+    /// <summary>Chosen choice-index (0..count-1) after explicit confirmation;
+    /// Main reads it into the next tick's perk_choice_index and clears it.
+    /// -1 = nothing.</summary>
     public int Chosen = -1;
 
     private bool _opened; // cards revealed (via the level-up button)
@@ -54,7 +61,11 @@ public sealed partial class PerkMenu : Node3D
     public bool Active => _layoutPreview || (Pending && _opened);
 
     /// <summary>Reveal the cards (from the level-up button).</summary>
-    public void Open() => _opened = true;
+    public void Open()
+    {
+        _opened = true;
+        ClearFocus();
+    }
 
     /// <summary>Show a representative, inert three-card offer while UI Edit is
     /// open. The perk menu is deliberately not an editable target: it is the
@@ -62,7 +73,7 @@ public sealed partial class PerkMenu : Node3D
     public void SetLayoutPreview(bool visible)
     {
         _layoutPreview = visible;
-        _descPanel.Visible = false;
+        ClearFocus();
         if (!visible)
         {
             Visible = Pending && _opened;
@@ -71,10 +82,10 @@ public sealed partial class PerkMenu : Node3D
                 for (int i = 0; i < _cards.Length; i++)
                 {
                     _cards[i].Visible = false;
-                    _help[i].Visible = false;
                     _cards[i].ResetPress();
-                    _help[i].ResetPress();
                 }
+                _confirm.Visible = false;
+                _confirm.ResetPress();
             }
             return;
         }
@@ -89,12 +100,10 @@ public sealed partial class PerkMenu : Node3D
         _count = names.Length;
         float total = _count * _cardW + (_count - 1) * _cardGap;
         float x0 = -total * 0.5f + _cardW * 0.5f;
-        float cardH = _arenaSide * 0.34f;
         for (int i = 0; i < _cards.Length; i++)
         {
             bool shown = i < _count;
             _cards[i].Visible = shown;
-            _help[i].Visible = shown;
             if (!shown)
             {
                 continue;
@@ -103,9 +112,15 @@ public sealed partial class PerkMenu : Node3D
             _cards[i].Position = new Vector3(x, 0.0f, 0.0f);
             _cards[i].SetText(names[i]);
             _cards[i].SetFade(1.0f);
-            _help[i].Position = new Vector3(x, -(cardH * 0.5f + _arenaSide * 0.12f), 0.0f);
-            _help[i].SetFade(1.0f);
         }
+        // Preview the selected state so UI Edit includes the true description +
+        // confirmation envelope without suggesting Confirm exists before selection.
+        _focused = 0;
+        _cards[0].SetColor(CardFocused);
+        _descLabel.Text = "Selected perk details\n\nConfirm below to choose this perk.";
+        _descPanel.Visible = true;
+        _confirm.Visible = true;
+        _confirm.SetFade(1.0f);
         Visible = true;
     }
 
@@ -120,15 +135,16 @@ public sealed partial class PerkMenu : Node3D
         Chosen = -1;
         _count = 0;
         _setSig = int.MinValue;
+        _focused = -1;
         Visible = false;
         _descPanel.Visible = false;
         for (int i = 0; i < _cards.Length; i++)
         {
             _cards[i].Visible = false;
             _cards[i].ResetPress();
-            _help[i].Visible = false;
-            _help[i].ResetPress();
         }
+        _confirm.Visible = false;
+        _confirm.ResetPress();
     }
 
     public void Build(float arenaSideMeters)
@@ -144,31 +160,37 @@ public sealed partial class PerkMenu : Node3D
         _cardGap = arenaSideMeters * 0.05f;
         float cardH = arenaSideMeters * 0.34f;
         // Neutral dark card (the original perk cards aren't bright yellow).
-        var cardColor = new Color(0.22f, 0.24f, 0.30f);
         for (int i = 0; i < _cards.Length; i++)
         {
             var card = new VrButton();
             AddChild(card);
-            card.Build(_cardW, cardH, string.Empty, cardColor);
+            card.Build(_cardW, cardH, string.Empty, CardIdle);
             // Portrait cards: shrink + word-wrap the perk name to fit the card width
             // (the default height-based sizing made long names overflow neighbours).
             card.ConfigureLabel(arenaSideMeters * 0.00035f, _cardW * 0.85f);
             int idx = i;
-            card.OnPress += () => Chosen = idx;
+            card.OnPress += () => PressCard(idx);
             card.Visible = false;
             // Alpha pipeline up-front: SetFade's lazy transparency switch caused
             // a first-fade pipeline-compile stall on Quest that ate the ease.
             card.PrewarmFade();
             _cards[i] = card;
 
-            // "?" button below each card: press-and-hold to show the description.
-            var help = new VrButton();
-            AddChild(help);
-            help.Build(_cardW * 0.5f, arenaSideMeters * 0.11f, "?", new Color(0.35f, 0.4f, 0.55f));
-            help.Visible = false;
-            help.PrewarmFade();
-            _help[i] = help;
         }
+
+        // Commitment is spatially separate from the changing card row. After a
+        // choice is confirmed, the player's hand remains below the next offer
+        // instead of overlapping a freshly spawned card.
+        float confirmW = arenaSideMeters * 0.72f;
+        _confirm = new VrButton();
+        AddChild(_confirm);
+        _confirm.Build(confirmW, arenaSideMeters * 0.13f, "Confirm Perk Selection",
+            new Color(0.30f, 0.46f, 0.34f));
+        _confirm.ConfigureLabel(arenaSideMeters * 0.00035f, confirmW * 0.90f);
+        _confirm.Position = new Vector3(0.0f, -(cardH * 0.5f + arenaSideMeters * 0.13f), 0.0f);
+        _confirm.OnPress += ConfirmSelection;
+        _confirm.Visible = false;
+        _confirm.PrewarmFade();
 
         BuildDescPanel(arenaSideMeters);
         Visible = false;
@@ -191,6 +213,10 @@ public sealed partial class PerkMenu : Node3D
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                // UI Edit deliberately keeps real moving sprites active. Own the
+                // reading surface above every world layer so they cannot puncture
+                // the selected-perk copy.
+                RenderPriority = ClassicPanel.BackdropRenderPriority,
             },
         });
         _descLabel = new Label3D
@@ -204,6 +230,7 @@ public sealed partial class PerkMenu : Node3D
             Width = (w * 0.92f) / (s / 1500.0f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             NoDepthTest = true,
+            RenderPriority = ClassicPanel.TextRenderPriority,
         };
         _descPanel.AddChild(_descLabel);
     }
@@ -231,10 +258,11 @@ public sealed partial class PerkMenu : Node3D
             {
                 _cards[i].Visible = false;
                 _cards[i].ResetPress();
-                _help[i].Visible = false;
-                _help[i].ResetPress();
             }
+            _confirm.Visible = false;
+            _confirm.ResetPress();
             _descPanel.Visible = false;
+            _focused = -1;
             _count = 0;
             _setSig = int.MinValue; // next open counts as a fresh set
             return;
@@ -250,6 +278,7 @@ public sealed partial class PerkMenu : Node3D
         if (sig != _setSig)
         {
             _setSig = sig;
+            ClearFocus();
             _fadeStartMs = Time.GetTicksMsec();
             // Start the new set invisible RIGHT NOW: PollPoke applies the ease
             // later in the frame, so without this the swapped-in cards rendered
@@ -257,13 +286,12 @@ public sealed partial class PerkMenu : Node3D
             for (int i = 0; i < _cards.Length; i++)
             {
                 _cards[i].SetFade(0.0f);
-                _help[i].SetFade(0.0f);
             }
+            _confirm.SetFade(0.0f);
         }
 
         float total = count * _cardW + (count - 1) * _cardGap;
         float x0 = -total * 0.5f + _cardW * 0.5f;
-        float cardH = _arenaSide * 0.34f;
         for (int i = 0; i < _cards.Length; i++)
         {
             if (i < count)
@@ -274,19 +302,18 @@ public sealed partial class PerkMenu : Node3D
                 int pid = PerkChoice(snap.Header, i);
                 _cardPerk[i] = pid;
                 _cards[i].SetText(_perkNames.TryGetValue(pid, out string? n) ? n : $"Perk {pid}");
-                // "?" sits below its card, with a clear gap from the card button.
-                _help[i].Visible = true;
-                _help[i].Position = new Vector3(cx, -(cardH * 0.5f + _arenaSide * 0.12f), 0.0f);
             }
             else
             {
                 _cards[i].Visible = false;
                 _cards[i].ResetPress();
-                _help[i].Visible = false;
-                _help[i].ResetPress();
             }
         }
         _count = count;
+        // Runtime invariant: an unselected offer never exposes the commit action.
+        // In particular, a freshly swapped-in set starts with ClearFocus above,
+        // so the hand that confirmed the prior pick has nothing to press here.
+        _confirm.Visible = _focused >= 0;
     }
 
     /// <summary>Feed the current controller-tip world positions to the visible
@@ -301,27 +328,72 @@ public sealed partial class PerkMenu : Node3D
         // recolor (which resets alpha to opaque) doesn't clobber the fade.
         ulong dt = Time.GetTicksMsec() - _fadeStartMs;
         float fade = dt >= FadeMs ? 1.0f : Mathf.Clamp((float)dt / FadeMs, 0.0f, 1.0f);
-        int held = -1;
         for (int i = 0; i < _count; i++)
         {
             _cards[i].PollPoke(probes);
-            _help[i].PollPoke(probes);
             _cards[i].SetFade(fade);
-            _help[i].SetFade(fade);
-            if (_help[i].IsPressed)
-            {
-                held = i;
-            }
         }
-        // Press-and-hold a "?" to show that perk's description above the row.
-        if (held >= 0)
+        if (_confirm.Visible)
         {
-            _descLabel.Text = _perkDescs.TryGetValue(_cardPerk[held], out string? d) ? d : "(no description)";
-            _descPanel.Visible = true;
+            _confirm.PollPoke(probes);
+            _confirm.SetFade(fade);
         }
-        else
+    }
+
+    private void PressCard(int index)
+    {
+        FocusCard(index);
+    }
+
+    private void ConfirmSelection()
+    {
+        if (_focused >= 0 && _focused < _count)
+        {
+            Chosen = _focused;
+            // Remove the commit target immediately; do not wait for the sim tick
+            // that consumes this pick and supplies the next offer.
+            ClearFocus();
+        }
+    }
+
+    private void FocusCard(int index)
+    {
+        if (index < 0 || index >= _count)
+        {
+            return;
+        }
+        _focused = index;
+        for (int i = 0; i < _count; i++)
+        {
+            _cards[i].SetColor(i == index ? CardFocused : CardIdle);
+        }
+        string desc = _perkDescs.TryGetValue(_cardPerk[index], out string? d) ? d : "(no description)";
+        _descLabel.Text = desc + "\n\nConfirm below to choose this perk.";
+        _descPanel.Visible = true;
+        _confirm.Visible = true;
+        // The button has just appeared, so require the hand to be observed clear
+        // before it can commit even if tracking jumps across the two controls.
+        _confirm.ResetPress();
+    }
+
+    private void ClearFocus()
+    {
+        _focused = -1;
+        if (_descPanel != null)
         {
             _descPanel.Visible = false;
+        }
+        if (_confirm != null)
+        {
+            _confirm.Visible = false;
+            _confirm.ResetPress();
+        }
+        for (int i = 0; i < _cards.Length; i++)
+        {
+            if (_cards[i] != null)
+            {
+                _cards[i].SetColor(CardIdle);
+            }
         }
     }
 

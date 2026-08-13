@@ -9,7 +9,7 @@ import pytest
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 
-import prepare_assets  # noqa: E402
+import prepare_assets
 
 
 def _adb(stdout: str):
@@ -64,7 +64,7 @@ def test_discover_classic_explains_gog_extras_when_missing(tmp_path: Path) -> No
 
 
 def test_send_to_pcvr_uses_godot_user_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pack = tmp_path / "source.pack"
     pack.write_bytes(b"pack")

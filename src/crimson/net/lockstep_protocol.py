@@ -232,6 +232,10 @@ class Disconnect(msgspec.Struct, tag="disconnect", forbid_unknown_fields=True):
     reason: str = ""
 
 
+class GameCommandRequest(msgspec.Struct, tag="game_command", forbid_unknown_fields=True):
+    command: GameCommand
+
+
 type NetMessage = (
     Hello
     | Welcome
@@ -247,6 +251,7 @@ type NetMessage = (
     | ResyncCommit
     | Disconnect
     | InputBatch
+    | GameCommandRequest
 )
 
 

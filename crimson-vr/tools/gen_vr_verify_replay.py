@@ -112,7 +112,7 @@ def main() -> None:
     out_path.write_bytes(dump_replay(replay))
     print(
         f"wrote {out_path} ticks={result.ticks} kills={result.creature_kill_count} "
-        f"score={result.score_xp} shots={result.shots_fired}/{result.shots_hit}"
+        f"score={result.score_xp} shots={result.shots_fired}/{result.shots_hit}",
     )
 
 

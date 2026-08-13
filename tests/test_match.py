@@ -4494,8 +4494,8 @@ def _write_native_link_fixture(
             json.dumps(payload, sort_keys=True),
             encoding="utf-8",
         )
-    (artifact_dir / "objects.txt").write_text(object_list, encoding="utf-8")
-    (artifact_dir / "exports.def").write_text(export_definition, encoding="utf-8")
+    (artifact_dir / "objects.txt").write_text(object_list, encoding="utf-8", newline="\n")
+    (artifact_dir / "exports.def").write_text(export_definition, encoding="utf-8", newline="\n")
     return artifact_dir, canonical
 
 

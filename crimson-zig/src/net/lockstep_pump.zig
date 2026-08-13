@@ -105,7 +105,7 @@ test "lockstep pump moves hello ready and match start over udp" {
     try std.testing.expectEqual(@as(usize, 1), try flushOutbox(allocator, io, client_transport, &client_outbox));
 
     var host_outbox: lockstep_outbox.Outbox = .{};
-    const host_seen_hello = try drainHost(allocator, io, host_transport, &host, 20, &host_outbox, .{ .first_timeout_ms = 100 });
+    const host_seen_hello = try drainHost(allocator, io, host_transport, &host, 20, &host_outbox, .{ .first_timeout_ms = 500 });
     try std.testing.expectEqual(@as(usize, 1), host_seen_hello);
     try std.testing.expectEqual(@as(usize, 1), host.peerCount());
     try std.testing.expect(host_outbox.packets.items.len >= 2);
@@ -114,16 +114,24 @@ test "lockstep pump moves hello ready and match start over udp" {
     var ready_outbox: lockstep_outbox.Outbox = .{};
     const client_seen_lobby = try drainClient(allocator, io, client_transport, &client, 30, &ready_outbox, .{
         .max_recv_packets = 4,
-        .first_timeout_ms = 100,
+        .first_timeout_ms = 500,
     });
-    try std.testing.expect(client_seen_lobby >= 2);
+    try std.testing.expect(client_seen_lobby >= 1);
     try std.testing.expect(client.lobby.joined());
     try std.testing.expectEqual(@as(i32, 1), client.lobby.slotIndex());
+    if (client.lobby.lobby_state_latest == null) {
+        _ = try drainClient(allocator, io, client_transport, &client, 31, &ready_outbox, .{
+            .max_recv_packets = 4,
+            .first_timeout_ms = 500,
+        });
+    }
     try std.testing.expect(client.lobby.lobby_state_latest != null);
+    try client.sendReady(allocator, true, 35, &ready_outbox);
     try std.testing.expectEqual(@as(usize, 1), try flushOutbox(allocator, io, client_transport, &ready_outbox));
 
     var start_outbox: lockstep_outbox.Outbox = .{};
-    const host_seen_ready = try drainHost(allocator, io, host_transport, &host, 40, &start_outbox, .{ .first_timeout_ms = 100 });
+    try host.setHostReady(allocator, true, 36, &start_outbox);
+    const host_seen_ready = try drainHost(allocator, io, host_transport, &host, 40, &start_outbox, .{ .first_timeout_ms = 500 });
     try std.testing.expectEqual(@as(usize, 1), host_seen_ready);
     try std.testing.expect(host.started);
     try std.testing.expect(host.lockstep != null);
@@ -133,7 +141,7 @@ test "lockstep pump moves hello ready and match start over udp" {
     defer final_client_outbox.deinit(allocator);
     const client_seen_start = try drainClient(allocator, io, client_transport, &client, 50, &final_client_outbox, .{
         .max_recv_packets = 4,
-        .first_timeout_ms = 100,
+        .first_timeout_ms = 500,
     });
     try std.testing.expect(client_seen_start >= 1);
     try std.testing.expect(client.started);

@@ -71,8 +71,15 @@ pub fn transformPrimaryInput(
     var transformed = input;
     transformed.move_x = 0.0;
     transformed.move_y = 0.0;
-    transformed.flags.fire_down = false;
-    transformed.flags.fire_pressed = false;
+    // A host may use an explicit pressed shot for controller-literacy Typ-o:
+    // the frontend validates the requested controller step, then supplies the
+    // creature aim point and a single pressed edge.  Keyboard Typ-o still uses
+    // pending_fire_target below, so its submit-a-word behaviour is unchanged.
+    // Keeping this on the ordinary fire fields also makes VR runs replayable
+    // without adding a frontend-only command to the deterministic stream.
+    const controller_step_fire = input.flags.fire_pressed;
+    transformed.flags.fire_down = controller_step_fire;
+    transformed.flags.fire_pressed = controller_step_fire;
     transformed.flags.reload_pressed = false;
     transformed.flags.reload_down = false;
 
@@ -89,6 +96,20 @@ pub fn transformPrimaryInput(
     state.typo.pending_fire_target_active = false;
     state.typo.pending_reload = false;
     return transformed;
+}
+
+test "typo transform preserves explicit controller-step shot and aim" {
+    var state: state_mod.GameplayState = .{ .rng = spawn_mod.Crand.init(1) };
+    const transformed = transformPrimaryInput(&state, .{
+        .aim_x = 321.0,
+        .aim_y = 654.0,
+        .flags = .{ .fire_pressed = true },
+    });
+
+    try std.testing.expect(transformed.flags.fire_down);
+    try std.testing.expect(transformed.flags.fire_pressed);
+    try std.testing.expectEqual(@as(f32, 321.0), transformed.aim_x);
+    try std.testing.expectEqual(@as(f32, 654.0), transformed.aim_y);
 }
 
 pub fn midStep(

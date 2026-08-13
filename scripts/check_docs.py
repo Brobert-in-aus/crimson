@@ -35,6 +35,11 @@ def collect_docs(docs_dir: Path) -> list[Path]:
     return sorted(path for path in docs_dir.rglob("*.md") if path.is_file())
 
 
+def normalize_repo_path(path: str | Path) -> str:
+    """Return a stable repository-relative path on every host platform."""
+    return str(path).replace("\\", "/")
+
+
 def walk_nav(node: Any, out: list[str]) -> None:
     if isinstance(node, str):
         if node.endswith(".md"):
@@ -54,7 +59,7 @@ def parse_nav(config_path: Path) -> list[str]:
     nav = config["project"]["nav"]
     entries: list[str] = []
     walk_nav(nav, entries)
-    return entries
+    return [normalize_repo_path(entry) for entry in entries]
 
 
 def normalize_target(raw_target: str) -> str:
@@ -104,7 +109,7 @@ def find_broken_markdown_links(docs_dir: Path, docs_files: list[Path]) -> list[s
 
             # links must stay inside docs and point to an existing markdown page
             if not str(resolved).startswith(str(docs_root)) or not resolved.exists():
-                src_rel = source.relative_to(docs_root)
+                src_rel = normalize_repo_path(source.relative_to(docs_root))
                 errors.append(f"{src_rel}: broken link '{raw_target}'")
 
     return errors
@@ -129,7 +134,7 @@ def load_allowlist(path: Path) -> set[str]:
         item = line.strip()
         if not item or item.startswith("#"):
             continue
-        items.add(item)
+        items.add(normalize_repo_path(item))
     return items
 
 
@@ -142,7 +147,7 @@ def main() -> int:
     allowlist_path = (root / args.tags_allowlist).resolve()
 
     docs_files = collect_docs(docs_dir)
-    docs_rel = sorted(str(path.relative_to(docs_dir)) for path in docs_files)
+    docs_rel = sorted(normalize_repo_path(path.relative_to(docs_dir)) for path in docs_files)
     docs_rel_set = set(docs_rel)
 
     nav_entries = parse_nav(config_path)

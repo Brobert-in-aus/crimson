@@ -8,6 +8,13 @@ public sealed class HighscoreEntry
 {
     public string Name { get; set; } = string.Empty;
     public int Score { get; set; }
+    public long RecordedAtUnix { get; set; }
+    public int PlayerCount { get; set; } = 1;
+    public long ElapsedMs { get; set; }
+    public int Kills { get; set; }
+    public int Shots { get; set; }
+    public int Hits { get; set; }
+    public int QuestKey { get; set; }
 }
 
 /// <summary>Lifetime per-mode aggregates for the Statistics screen, updated at
@@ -36,6 +43,7 @@ public sealed class UserSettings
     public bool HandSwap;
     public float DeadZone = VrInput.DefaultDeadZoneGameUnits;
     public bool FirstRunDone;
+    public string PlayerName = string.Empty;
     public bool Debug;
 
     /// <summary>Reload cycles the player through the arsenal, for touring weapon
@@ -99,8 +107,9 @@ public sealed class UserSettings
     private const int UiLayoutVersion = 3;
     private const string UiLayoutVersionKey = "version";
 
-    // Original Options settings (mirrors the base game). Volumes 0-10, graphics
-    // detail 1-5, info-texts toggle — same scales as the desktop Options screen.
+    // Original Options settings (mirrors the base game). Volumes 0-10 and
+    // graphics detail 1-5 use the desktop scales. UiInfoTexts is retained only
+    // for config compatibility until VR has a real hover-info consumer.
     public int SfxVolume = 10;
     public int MusicVolume = 10;
     public int GraphicsDetail = 5;
@@ -135,10 +144,13 @@ public sealed class UserSettings
     // trio only lists in survival). 1 = survival.
     public int LastGameMode = 1;
 
-    // Per-mode local highscore tables: Survival keeps the original list (and
-    // its legacy cfg key); Rush gets its own. Quests have no score table.
+    // Per-mode local highscore tables. The first two keys remain unchanged so
+    // existing Quest profiles migrate without losing scores. The browser can
+    // display all four base modes even though Typ'o is not currently playable.
     public readonly List<HighscoreEntry> Highscores = new();
     public readonly List<HighscoreEntry> RushHighscores = new();
+    public readonly List<HighscoreEntry> QuestHighscores = new();
+    public readonly List<HighscoreEntry> TypoHighscores = new();
 
     // Lifetime stats per game mode (keys: mode id as string).
     public readonly Dictionary<string, ModeStats> Stats = new();
@@ -155,6 +167,7 @@ public sealed class UserSettings
         HandSwap = cf.GetValue("input", "hand_swap", HandSwap).AsBool();
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
+        PlayerName = cf.GetValue("game", "player_name", PlayerName).AsString();
         Debug = cf.GetValue("dev", "debug", Debug).AsBool();
         WeaponShowcase = cf.GetValue("dev", "weapon_showcase", WeaponShowcase).AsBool();
         SfxVolume = cf.GetValue("audio", "sfx_volume", SfxVolume).AsInt32();
@@ -197,6 +210,8 @@ public sealed class UserSettings
 
         LoadHighscoreList(cf, "highscores", Highscores);
         LoadHighscoreList(cf, "highscores_rush", RushHighscores);
+        LoadHighscoreList(cf, "highscores_quests", QuestHighscores);
+        LoadHighscoreList(cf, "highscores_typo", TypoHighscores);
 
         Stats.Clear();
         string st = cf.GetValue("game", "stats", string.Empty).AsString();
@@ -288,12 +303,15 @@ public sealed class UserSettings
             cf.SetValue("ui_layout", kv.Key, kv.Value);
         }
         cf.SetValue("game", "first_run_done", FirstRunDone);
+        cf.SetValue("game", "player_name", PlayerName);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);
         cf.SetValue("game", "last_game_mode", LastGameMode);
         cf.SetValue("game", "weapon_usage", JsonSerializer.Serialize(WeaponUsageCounts));
         cf.SetValue("game", "highscores", JsonSerializer.Serialize(Highscores));
         cf.SetValue("game", "highscores_rush", JsonSerializer.Serialize(RushHighscores));
+        cf.SetValue("game", "highscores_quests", JsonSerializer.Serialize(QuestHighscores));
+        cf.SetValue("game", "highscores_typo", JsonSerializer.Serialize(TypoHighscores));
         cf.SetValue("game", "stats", JsonSerializer.Serialize(Stats));
         cf.SetValue("game", "ui_info_texts", UiInfoTexts);
         cf.SetValue("audio", "sfx_volume", SfxVolume);
@@ -308,22 +326,41 @@ public sealed class UserSettings
         cf.Save(ConfigPath);
     }
 
-    /// <summary>The highscore table for a game mode (Sim GameModeId values:
-    /// 1 survival, 2 rush). Quests intentionally fall back to the survival
-    /// table only so callers never get null; quest flows skip highscores.</summary>
+    /// <summary>The highscore table for a base-game mode.</summary>
     public List<HighscoreEntry> HighscoresFor(int gameMode)
-        => gameMode == 2 ? RushHighscores : Highscores;
+        => gameMode switch
+        {
+            2 => RushHighscores,
+            3 => QuestHighscores,
+            4 => TypoHighscores,
+            _ => Highscores,
+        };
 
     /// <summary>Add a highscore to the mode's table, kept sorted high-to-low
-    /// and capped at 10.</summary>
-    public void AddHighscore(string name, int score, int gameMode = 1)
+    /// and capped at the base browser's top 100.</summary>
+    public void AddHighscore(string name, int score, int gameMode = 1,
+        long elapsedMs = 0, int kills = 0, int shots = 0, int hits = 0,
+        int playerCount = 1, int questKey = 0)
     {
         List<HighscoreEntry> list = HighscoresFor(gameMode);
-        list.Add(new HighscoreEntry { Name = name, Score = score });
-        list.Sort((a, b) => b.Score.CompareTo(a.Score));
-        if (list.Count > 10)
+        list.Add(new HighscoreEntry
         {
-            list.RemoveRange(10, list.Count - 10);
+            Name = name,
+            Score = score,
+            RecordedAtUnix = System.DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            PlayerCount = playerCount,
+            ElapsedMs = elapsedMs,
+            Kills = kills,
+            Shots = shots,
+            Hits = hits,
+            QuestKey = questKey,
+        });
+        list.Sort(gameMode == 3
+            ? (a, b) => a.Score.CompareTo(b.Score)
+            : (a, b) => b.Score.CompareTo(a.Score));
+        if (list.Count > 100)
+        {
+            list.RemoveRange(100, list.Count - 100);
         }
         Save();
     }

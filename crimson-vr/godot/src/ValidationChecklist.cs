@@ -32,6 +32,11 @@ public sealed partial class ValidationChecklist : Node3D
         ("editpreview", "Edit: moving sprites + all 7 perk cards are visible"),
         ("editclear", "Edit: mirrored buttons and xN clear perk cards"),
         ("layoutdefaults", "Clean profile starts at the tuned arena layout"),
+        ("lan-survival", "LAN Survival: PC/Quest host + join both work"),
+        ("lan-rush", "LAN Rush: PC/Quest host + join both work"),
+        ("lan-slots", "LAN: Quest controls correctly in slots 2-4"),
+        ("lan-playerfx", "LAN: every player's aura, shield and laser render"),
+        ("lan-results", "LAN results show local player stats + player count"),
     };
 
     private const int PerPage = 4;

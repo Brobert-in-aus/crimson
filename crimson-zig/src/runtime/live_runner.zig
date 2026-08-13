@@ -78,6 +78,36 @@ pub const FrameAudioEvents = struct {
     quest_play_hit_sfx: bool = false,
     quest_play_completion_music: bool = false,
 
+    /// Merge catch-up ticks into one drainable frontend batch. Fixed-size
+    /// queues deliberately retain the oldest events when a caller falls behind;
+    /// boolean edge signals are ORed so they cannot be lost between polls.
+    pub fn mergeFrom(self: *FrameAudioEvents, other: FrameAudioEvents) void {
+        for (other.shot_events[0..other.shot_event_count]) |event| {
+            if (self.shot_event_count >= self.shot_events.len) break;
+            self.shot_events[self.shot_event_count] = event;
+            self.shot_event_count += 1;
+        }
+        for (other.reload_weapon_ids[0..other.reload_event_count]) |weapon_id| {
+            if (self.reload_event_count >= self.reload_weapon_ids.len) break;
+            self.reload_weapon_ids[self.reload_event_count] = weapon_id;
+            self.reload_event_count += 1;
+        }
+        for (other.hit_events[0..other.hit_event_count]) |event| {
+            if (self.hit_event_count >= self.hit_events.len) break;
+            self.hit_events[self.hit_event_count] = event;
+            self.hit_event_count += 1;
+        }
+        for (other.sfx_events[0..other.sfx_event_count]) |event| {
+            if (self.sfx_event_count >= self.sfx_events.len) break;
+            self.sfx_events[self.sfx_event_count] = event;
+            self.sfx_event_count += 1;
+        }
+        self.trigger_game_tune = self.trigger_game_tune or other.trigger_game_tune;
+        self.perk_menu_opened = self.perk_menu_opened or other.perk_menu_opened;
+        self.quest_play_hit_sfx = self.quest_play_hit_sfx or other.quest_play_hit_sfx;
+        self.quest_play_completion_music = self.quest_play_completion_music or other.quest_play_completion_music;
+    }
+
     fn appendShot(self: *FrameAudioEvents, weapon_id: game_ids.WeaponId, fire_bullets_active: bool) void {
         if (self.shot_event_count >= self.shot_events.len) return;
         self.shot_events[self.shot_event_count] = .{
@@ -495,6 +525,12 @@ pub const LiveRunner = struct {
         self.session.rebindInternalPointers();
     }
 
+    /// Rebind self-referential runtime views after an owning wrapper has moved
+    /// this by value into its final allocation.
+    pub fn rebindAfterMove(self: *LiveRunner) void {
+        self.rebindInternalPointers();
+    }
+
     fn snapshot(
         self: *const LiveRunner,
         ticks_advanced: usize,
@@ -510,8 +546,23 @@ pub const LiveRunner = struct {
         };
         const shot_counts: ShotCounts = switch (self.session.game_mode) {
             .typo => .{
-                .fired = self.session.state.typo.typing.submit_count,
-                .hit = self.session.state.typo.typing.match_count,
+                // Keyboard Typ-o counts submitted/matched words. VR Typ-o
+                // validates controller steps in the frontend and expresses
+                // each success as an ordinary replayable shot, so include the
+                // weapon counters too. max preserves the zero-dt command tests
+                // and avoids double-counting keyboard shots.
+                .fired = @max(
+                    self.session.state.typo.typing.submit_count,
+                    self.session.state.shots_fired_total,
+                ),
+                .hit = @max(
+                    self.session.state.typo.typing.match_count,
+                    blk: {
+                        var total: i32 = 0;
+                        for (self.session.state.shots_hit) |value| total += value;
+                        break :blk total;
+                    },
+                ),
             },
             else => blk: {
                 var shots_hit_total: i32 = 0;

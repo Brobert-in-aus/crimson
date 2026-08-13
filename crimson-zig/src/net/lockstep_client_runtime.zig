@@ -121,9 +121,25 @@ pub const ClientRuntime = struct {
         try self.send(allocator, .{ .input_batch = batch }, false, now_ms, outbox);
     }
 
+    pub fn submitLocalCommand(
+        self: *ClientRuntime,
+        allocator: std.mem.Allocator,
+        command: lockstep_protocol.GameCommand,
+        now_ms: i64,
+        outbox: *Outbox,
+    ) !void {
+        const slot = self.lobby.slotIndex();
+        if (!self.started or slot < 0 or lockstep_protocol.commandPlayerIndex(command) != slot) return error.InvalidCommandPlayer;
+        try self.send(allocator, .{ .game_command = .{ .command = command } }, true, now_ms, outbox);
+    }
+
     pub fn popCanonicalFrame(self: *ClientRuntime) ?lockstep_protocol.TickFrame {
         const lockstep = if (self.lockstep) |*lockstep| lockstep else return null;
         return lockstep.popCanonicalFrame();
+    }
+
+    pub fn hasTimedOutHost(self: ClientRuntime, now_ms: i64) bool {
+        return self.started and now_ms - self.last_seen_ms >= lockstep_protocol.link_timeout_ms;
     }
 
     pub fn pollResends(
@@ -183,9 +199,22 @@ pub const ClientRuntime = struct {
         self.quest_level = settings.quest_level;
         self.preserve_bugs = settings.preserve_bugs;
 
+        _ = now_ms;
+        _ = outbox;
+    }
+
+    pub fn sendReady(
+        self: *ClientRuntime,
+        allocator: std.mem.Allocator,
+        ready: bool,
+        now_ms: i64,
+        outbox: *Outbox,
+    ) !void {
+        const slot_index = self.lobby.slotIndex();
+        if (slot_index < 0 or self.started) return error.NotReady;
         try self.send(allocator, .{ .ready = .{
-            .slot_index = welcome.slot_index,
-            .ready = true,
+            .slot_index = slot_index,
+            .ready = ready,
         } }, true, now_ms, outbox);
     }
 
@@ -383,7 +412,7 @@ test "lockstep client runtime sends reliable hello" {
     }
 }
 
-test "lockstep client runtime accepts welcome and sends ready" {
+test "lockstep client runtime waits for explicit ready after welcome" {
     const allocator = std.testing.allocator;
     const host_addr = PeerAddr.loopback(31993);
     var client = ClientRuntime.init(.{
@@ -405,6 +434,8 @@ test "lockstep client runtime accepts welcome and sends ready" {
     try std.testing.expectEqual(@as(i32, 1), client.lobby.slotIndex());
     try std.testing.expectEqual(@as(i32, 2), client.mode_id);
     try std.testing.expectEqual(@as(i32, 2), client.player_count);
+    try std.testing.expectEqual(@as(usize, 0), outbox.packets.items.len);
+    try client.sendReady(allocator, true, 11, &outbox);
     try std.testing.expectEqual(@as(usize, 1), outbox.packets.items.len);
     switch (outbox.packets.items[0].packet.message) {
         .ready => |ready| {

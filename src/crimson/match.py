@@ -3966,7 +3966,7 @@ def _scratch_build_key(
             "import_thunk": config.import_thunk,
             "dependencies": [
                 [
-                    str(path.relative_to(match_root) if path.is_relative_to(match_root) else path),
+                    _scratch_dependency_key_path(path, match_root),
                     _mtime_ns(path),
                 ]
                 for path in dependencies
@@ -3983,7 +3983,7 @@ def _scratch_build_key(
             "symbol": config.symbol,
             "dependencies": [
                 [
-                    str(path.relative_to(match_root) if path.is_relative_to(match_root) else path),
+                    _scratch_dependency_key_path(path, match_root),
                     _mtime_ns(path),
                 ]
                 for path in dependencies
@@ -3994,13 +3994,19 @@ def _scratch_build_key(
         "argv": list(_scratch_compile_argv(config, match_root)),
         "auto_inline_off": list(config.auto_inline_off),
         "dependencies": [
-            [str(path.relative_to(match_root) if path.is_relative_to(match_root) else path), _mtime_ns(path)]
+            [_scratch_dependency_key_path(path, match_root), _mtime_ns(path)]
             for path in dependencies
         ],
     }
     if config.include_overlay is not None:
         key["include_overlay"] = str(config.include_overlay.resolve())
     return key
+
+
+def _scratch_dependency_key_path(path: Path, match_root: Path) -> str:
+    if path.is_relative_to(match_root):
+        return path.relative_to(match_root).as_posix()
+    return str(path)
 
 
 def _scratch_profile_digest(config: ScratchConfig) -> str:
@@ -4070,6 +4076,7 @@ def _write_text_atomic(path: Path, text: str) -> None:
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
+        newline="\n",
         dir=path.parent,
         prefix=f".{path.name}.",
         suffix=".tmp",

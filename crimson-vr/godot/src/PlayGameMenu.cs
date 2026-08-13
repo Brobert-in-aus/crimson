@@ -6,9 +6,9 @@ namespace CrimsonVR;
 /// <summary>
 /// The Play Game mode-select panel (base panels/play_game.py): poked open from
 /// the main menu's PLAY GAME item. Mode buttons in the native order — Quests,
-/// Rush, Survival — plus Back. Typo'Shooter stays hidden (VR input design
-/// pending) and Tutorial/Network are out of the VR scope; player count is
-/// fixed at 1. Shares the main menu's anchor transform so all menu planes
+/// Rush, Survival, Typ-o-Shooter, Tutorial — plus Back. Offline player count
+/// stays fixed at 1; Multiplayer opens a
+/// separate direct-LAN submenu. Shares the main menu's anchor transform so all menu planes
 /// coincide (no cross-plane poke carry).
 /// </summary>
 public sealed partial class PlayGameMenu : Node3D
@@ -16,6 +16,9 @@ public sealed partial class PlayGameMenu : Node3D
     private VrButton _quests = null!;
     private VrButton _rush = null!;
     private VrButton _survival = null!;
+    private VrButton _typo = null!;
+    private VrButton _tutorial = null!;
+    private VrButton _multiplayer = null!;
     private VrButton _back = null!;
 
     public bool IsOpen { get; private set; }
@@ -23,6 +26,9 @@ public sealed partial class PlayGameMenu : Node3D
     public event Action? OnQuests;
     public event Action? OnRush;
     public event Action? OnSurvival;
+    public event Action? OnTypo;
+    public event Action? OnTutorial;
+    public event Action? OnMultiplayer;
     public event Action? OnBack;
 
     public void Build(float arenaSideMeters)
@@ -34,17 +40,20 @@ public sealed partial class PlayGameMenu : Node3D
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         // Classic panel backdrop + the PLAY GAME itemTexts title art.
-        ClassicPanel.Build(this, s * 1.0f, s * 1.05f, z: -0.012f);
-        ClassicTitle.BuildRow(this, s * 0.5f, ClassicTitle.RowPlayGame, y: s * 0.42f);
+        ClassicPanel.Build(this, s * 1.0f, s * 1.34f, z: -0.012f);
+        ClassicTitle.BuildRow(this, s * 0.5f, ClassicTitle.RowPlayGame, y: s * 0.49f);
 
         // Native _mode_entries order: Quests, Rush, Survival.
         float w = s * 0.55f;
-        float h = s * 0.13f;
-        float pitch = h + s * 0.04f;
-        float y = s * 0.24f;
+        float h = s * 0.115f;
+        float pitch = h + s * 0.03f;
+        float y = s * 0.32f;
         _quests = MakeButton("Quests", w, h, y, () => OnQuests?.Invoke()); y -= pitch;
         _rush = MakeButton("Rush", w, h, y, () => OnRush?.Invoke()); y -= pitch;
         _survival = MakeButton("Survival", w, h, y, () => OnSurvival?.Invoke()); y -= pitch;
+        _typo = MakeButton("Typ'o'Shooter", w, h, y, () => OnTypo?.Invoke()); y -= pitch;
+        _tutorial = MakeButton("Tutorial", w, h, y, () => OnTutorial?.Invoke()); y -= pitch;
+        _multiplayer = MakeButton("Multiplayer", w, h, y, () => OnMultiplayer?.Invoke()); y -= pitch;
         _back = MakeButton("Back", w * 0.55f, h, y - s * 0.03f, () => OnBack?.Invoke());
 
         Visible = false;
@@ -67,6 +76,9 @@ public sealed partial class PlayGameMenu : Node3D
         _quests.ResetPress();
         _rush.ResetPress();
         _survival.ResetPress();
+        _typo.ResetPress();
+        _tutorial.ResetPress();
+        _multiplayer.ResetPress();
         _back.ResetPress();
     }
 
@@ -85,6 +97,9 @@ public sealed partial class PlayGameMenu : Node3D
         _quests.PollPoke(probes);
         _rush.PollPoke(probes);
         _survival.PollPoke(probes);
+        _typo.PollPoke(probes);
+        _tutorial.PollPoke(probes);
+        _multiplayer.PollPoke(probes);
         _back.PollPoke(probes);
     }
 }

@@ -11,7 +11,7 @@ import pytest
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 
-import pack_assets  # noqa: E402
+import pack_assets
 
 
 def _asset_tree(root: Path) -> None:

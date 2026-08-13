@@ -70,7 +70,7 @@ pub fn createRoom(
         .slot_index = 0,
         .peer_id = peer.peer_id,
         .peer_name = peer.peer_name,
-        .ready = true,
+        .ready = false,
         .reconnect_token = options.host_reconnect_token,
     };
 
@@ -169,7 +169,7 @@ pub fn startSeed(now_ms: i64) i32 {
     return @bitCast(value);
 }
 
-test "relay lobby creates room with ready host slot" {
+test "relay lobby creates room with host waiting for explicit ready" {
     const allocator = std.testing.allocator;
     var host: Peer = .{ .peer_id = "host-id", .build_id = "0.1.0", .peer_name = "host" };
     const code = try room_code.parseRoomCode("ABCD");
@@ -190,7 +190,7 @@ test "relay lobby creates room with ready host slot" {
     try std.testing.expectEqual(@as(i32, 0), host.slot_index);
     try std.testing.expect(host.room_code != null);
     try std.testing.expect(room.slots[0].connected());
-    try std.testing.expect(room.slots[0].ready);
+    try std.testing.expect(!room.slots[0].ready);
     try std.testing.expectEqualStrings("host-token", room.slots[0].reconnect_token);
 }
 
@@ -216,7 +216,9 @@ test "relay lobby joins next free slot and waits for ready before start" {
     try std.testing.expect(!room.slots[1].ready);
     try std.testing.expect(!room.started);
 
-    const ready = try applyReady(&room, guest, .{ .ready = true }, 1004);
+    const guest_ready = try applyReady(&room, guest, .{ .ready = true }, 1004);
+    try std.testing.expect(!guest_ready.started_now);
+    const ready = try applyReady(&room, host, .{ .ready = true }, 1004);
     try std.testing.expect(ready.started_now);
     try std.testing.expect(room.started);
     try std.testing.expectEqual(@as(i32, 0), room.start_tick);

@@ -59,7 +59,9 @@ pub fn liveConfigFromRoomStart(start: relay_protocol.RoomStart) BridgeError!live
 
 pub fn frameInputFromTickFrame(frame: rollback_runtime.TickFrame) BridgeError!live_runner.FrameInput {
     if (frame.player_count > state_mod.max_players) return error.TooManyPlayers;
-    return lockstep_live_bridge.frameInputFromPacked(frame.frame_inputs[0..frame.player_count]);
+    var input = try lockstep_live_bridge.frameInputFromPacked(frame.frame_inputs[0..frame.player_count]);
+    try lockstep_live_bridge.applyCommandsToFrameInput(&input, frame.commands[0..frame.command_count]);
+    return input;
 }
 
 pub fn stepFrame(

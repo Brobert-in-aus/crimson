@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define CRIMSON_HOST_ABI_VERSION 23u
+#define CRIMSON_HOST_ABI_VERSION 27u
 #define CRIMSON_HOST_SNAPSHOT_MAGIC 0x31525643u /* "CVR1" */
 
 /* Return codes */
@@ -33,6 +33,19 @@ extern "C" {
 #define CRIMSON_HOST_E_INVALID_CONFIG (-4)
 #define CRIMSON_HOST_E_OUT_OF_SESSIONS (-5)
 #define CRIMSON_HOST_E_INVALID_INPUT (-6)
+#define CRIMSON_HOST_E_NOT_READY (-7)
+#define CRIMSON_HOST_E_UNSUPPORTED (-8)
+
+/* Network update phases (ABI v25). */
+#define CRIMSON_HOST_NET_CONNECTING 0
+#define CRIMSON_HOST_NET_LOBBY 1
+#define CRIMSON_HOST_NET_RUNNING 2
+#define CRIMSON_HOST_NET_RECONNECTING 3
+#define CRIMSON_HOST_NET_FAILED 4
+
+/* Ordered canonical gameplay commands (reliable, authority-stamped). */
+#define CRIMSON_HOST_NET_COMMAND_PERK_MENU_OPEN 1
+#define CRIMSON_HOST_NET_COMMAND_PERK_PICK 2
 
 /* CrimsonHostInput.flags bits */
 #define CRIMSON_HOST_INPUT_FIRE_DOWN (1u << 0)
@@ -109,7 +122,31 @@ typedef struct crimson_host_tick_result {
     /* ABI v14 (append-only): nonzero once the quest spawn timeline has been
      * cleared (session.quest_completed); always 0 outside quest mode. */
     uint32_t quest_completed;
+    /* ABI v24 (append-only): native tutorial timeline presentation state.
+     * Indices are -1 and alphas are 0 outside Tutorial mode. */
+    int32_t tutorial_stage_index;
+    float tutorial_prompt_alpha;
+    int32_t tutorial_hint_index;
+    float tutorial_hint_alpha;
 } crimson_host_tick_result;
+
+/* Result of one non-blocking network pump. input_flags are the canonical
+ * packed flags for the most recently advanced frame, by slot. ABI v26 appends
+ * local-slot result counters and the negotiated mode. */
+typedef struct crimson_host_net_update {
+    uint32_t frames_advanced;
+    uint32_t ticks_advanced;
+    int32_t phase;
+    int32_t local_slot;       /* -1 until assigned */
+    int32_t last_tick_index;  /* -1 when no canonical frame advanced */
+    uint32_t player_count;
+    uint32_t input_flags[4];
+    int32_t local_shots_fired;
+    int32_t local_shots_hit;
+    int32_t creature_kill_count;       /* shared match total */
+    int32_t local_most_used_weapon_id;
+    int32_t game_mode;
+} crimson_host_net_update_t;
 
 /* Snapshot payload layout (packed, in order):
  *   crimson_host_snapshot_header
@@ -455,6 +492,56 @@ int32_t crimson_host_terrain_info(uint64_t handle,
 /* Terrain FX (blood/scorch splats + corpse stamps) from the last tick.
  * Same buffer protocol as crimson_host_snapshot; drain after every tick. */
 int32_t crimson_host_terrain_fx(uint64_t handle, uint8_t *buf, uint32_t *len);
+
+/* ---- Multiplayer network session ABI (v25+, separate opaque handles) ----
+ *
+ * config_json accepts role ("host"/"join"), netcode
+ * ("lockstep"/"rollback"), seed, mode_id, player_count, quest_level_key,
+ * bind_host, host, port, room_code, build_id, peer_name, session_id,
+ * input_delay_ticks and optional native save status. All referenced strings
+ * are copied during create. create opens the UDP transport but never blocks
+ * waiting for a peer.
+ *
+ * update pumps available packets, submits the local input only once the local
+ * slot/run is ready, then advances available canonical frames. local_input may
+ * be NULL to pump while menus are open. now_ms must be monotonic milliseconds.
+ *
+ * status returns UTF-8 JSON using the ordinary size-then-fill buffer protocol.
+ * It includes phase, role/netcode, slot, room/session identifiers, lobby
+ * counts, slot names/readiness, bound port and the latest failure.
+ *
+ * Snapshot/audio/terrain payload layouts are exactly the single-player ABI
+ * layouts above. Audio and terrain events aggregate every catch-up tick and
+ * are cleared only after a successful fill call. */
+int32_t crimson_host_net_create(const uint8_t *config_json,
+                                uint32_t config_len,
+                                uint64_t *out_handle);
+void crimson_host_net_destroy(uint64_t handle);
+int32_t crimson_host_net_update(uint64_t handle,
+                                int64_t now_ms,
+                                const crimson_host_input *local_input,
+                                crimson_host_net_update_t *out_update);
+int32_t crimson_host_net_command(uint64_t handle,
+                                 int32_t command_type,
+                                 int32_t player_index,
+                                 int32_t value);
+/* Notify a relay session that the app resumed after sleep/focus loss. The
+ * native runtime reuses its reconnect token and requests resync as needed. */
+int32_t crimson_host_net_resume(uint64_t handle, int64_t now_ms);
+int32_t crimson_host_net_status(uint64_t handle,
+                                uint8_t *buf,
+                                uint32_t *len);
+int32_t crimson_host_net_snapshot(uint64_t handle,
+                                  uint8_t *buf,
+                                  uint32_t *len);
+int32_t crimson_host_net_audio_events(uint64_t handle,
+                                      uint8_t *buf,
+                                      uint32_t *len);
+int32_t crimson_host_net_terrain_info(uint64_t handle,
+                                      crimson_host_terrain_info_t *out_info);
+int32_t crimson_host_net_terrain_fx(uint64_t handle,
+                                    uint8_t *buf,
+                                    uint32_t *len);
 
 /* Runs the native replay verifier on .crd bytes; writes its JSON report.
  * Same buffer protocol as crimson_host_snapshot. */

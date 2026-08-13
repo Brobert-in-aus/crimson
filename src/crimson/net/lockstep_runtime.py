@@ -24,6 +24,7 @@ from .lockstep_protocol import (
     TICK_RATE,
     DebugLogBatch,
     Disconnect,
+    GameCommandRequest,
     Hello,
     InputBatch,
     KeepAlive,
@@ -665,6 +666,8 @@ class LockstepRuntime(msgspec.Struct):
 
     def submit_local_command(self, command: GameCommand) -> None:
         if str(self.cfg.role) != "host":
+            if self.client_lockstep is not None:
+                self._client_send(GameCommandRequest(command=command), reliable=True, now_ms=_now_ms())
             return
         self._pending_host_commands.append(command)
 
@@ -927,6 +930,12 @@ class LockstepRuntime(msgspec.Struct):
                     tick_max=int(max_tick),
                 )
             lockstep.submit_input_batch(batch)
+            return
+        if isinstance(message, GameCommandRequest):
+            mapped_slot = lobby.slot_for_addr(addr)
+            if mapped_slot is None or int(message.command.player_index) != int(mapped_slot):
+                return
+            self._pending_host_commands.append(message.command)
             return
 
     def _host_send(

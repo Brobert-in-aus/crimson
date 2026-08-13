@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT))
 
-from pack_assets import build_pack  # noqa: E402
+from pack_assets import build_pack
 
 
 def validate_classic(game_dir: Path) -> None:
@@ -33,10 +33,10 @@ def validate_classic(game_dir: Path) -> None:
     if (game_dir / "data.pak").is_file():
         raise SystemExit(
             "This is the 2014 HD remake, not Crimsonland Classic. In GOG Galaxy, "
-            "open Crimsonland -> Extras and install 'Crimsonland Classic'."
+            "open Crimsonland -> Extras and install 'Crimsonland Classic'.",
         )
     raise SystemExit(
-        "This folder is not Crimsonland Classic 1.9.93; crimson.paq and sfx.paq are required."
+        "This folder is not Crimsonland Classic 1.9.93; crimson.paq and sfx.paq are required.",
     )
 
 
@@ -58,7 +58,7 @@ def default_classic_candidates() -> list[Path]:
             (
                 Path.home() / "GOG Games" / "Crimsonland Classic",
                 Path.home() / "Games" / "Crimsonland Classic",
-            )
+            ),
         )
     return candidates
 
@@ -82,7 +82,7 @@ def discover_classic(candidates: Iterable[Path] | None = None) -> Path:
     raise SystemExit(
         "Crimsonland Classic was not found in the usual GOG locations. Pass GAME_DIR explicitly. "
         "If only the HD remake is installed, use GOG Galaxy -> Crimsonland -> Extras -> "
-        "Crimsonland Classic."
+        "Crimsonland Classic.",
     )
 
 
@@ -95,7 +95,7 @@ def prepare(game_dir: Path, output: Path) -> None:
         raise SystemExit(
             "The Crimson extractor is not installed. Run this command through "
             "the project environment (`uv run python ...`) or use the future "
-            "standalone helper."
+            "standalone helper.",
         ) from error
 
     validate_classic(game_dir)
@@ -142,7 +142,7 @@ def choose_device(adb: str, requested: str | None) -> str:
     if not ready and blocked:
         detail = ", ".join(f"{serial} ({state})" for serial, state in blocked)
         raise SystemExit(
-            f"No authorized Quest is ready: {detail}. Put on the headset and accept USB debugging."
+            f"No authorized Quest is ready: {detail}. Put on the headset and accept USB debugging.",
         )
     if not ready:
         raise SystemExit("No Quest detected. Connect USB or wireless ADB and ensure developer mode is enabled.")
@@ -151,7 +151,7 @@ def choose_device(adb: str, requested: str | None) -> str:
 
 def adb_run(adb: str, serial: str, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [adb, "-s", serial, *args], capture_output=capture, text=True, check=True
+        [adb, "-s", serial, *args], capture_output=capture, text=True, check=True,
     )
 
 

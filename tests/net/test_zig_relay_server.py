@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
+import queue
 import re
-import select
 import shutil
 import signal
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import TypeVar
@@ -70,13 +71,25 @@ class _RelayClient:
 def _start_zig_relay() -> tuple[subprocess.Popen[str], int]:
     repo_root = Path(__file__).resolve().parents[2]
     zig = shutil.which("zig")
-    assert zig is not None
+    if zig is None:
+        bundled_zig = repo_root / "tools" / "zig" / ("zig.exe" if os.name == "nt" else "zig")
+        assert bundled_zig.is_file(), "zig was not found on PATH and the bundled compiler is unavailable"
+        zig = str(bundled_zig)
+    build = subprocess.run(
+        [zig, "build"],
+        cwd=repo_root / "crimson-zig",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, f"failed to build Zig relay:\n{build.stdout}{build.stderr}"
+    relay_executable = repo_root / "crimson-zig" / "zig-out" / "bin" / (
+        "crimson-zig-relay.exe" if os.name == "nt" else "crimson-zig-relay"
+    )
+    assert relay_executable.is_file(), f"relay executable was not installed: {relay_executable}"
     proc = subprocess.Popen(
         [
-            zig,
-            "build",
-            "relay-serve",
-            "--",
+            str(relay_executable),
             "--bind",
             "127.0.0.1",
             "--port",
@@ -90,21 +103,31 @@ def _start_zig_relay() -> tuple[subprocess.Popen[str], int]:
         start_new_session=True,
         text=True,
     )
-    return proc, _wait_for_relay_port(proc)
+    try:
+        return proc, _wait_for_relay_port(proc, timeout_s=30.0)
+    except BaseException:
+        _stop_relay(proc)
+        raise
 
 
 def _wait_for_relay_port(proc: subprocess.Popen[str], *, timeout_s: float = 10.0) -> int:
     assert proc.stderr is not None
     deadline = time.monotonic() + float(timeout_s)
     lines: list[str] = []
+    stderr_lines: queue.Queue[str] = queue.Queue()
+
+    def read_stderr() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr_lines.put(line)
+
+    threading.Thread(target=read_stderr, daemon=True).start()
     while time.monotonic() < deadline:
-        ready, _, _ = select.select([proc.stderr], [], [], 0.1)
-        if not ready:
+        try:
+            line = stderr_lines.get(timeout=min(0.1, max(0.01, deadline - time.monotonic())))
+        except queue.Empty:
             if proc.poll() is not None:
                 break
-            continue
-        line = proc.stderr.readline()
-        if not line:
             continue
         lines.append(line)
         match = re.search(r"listening on 127\.0\.0\.1:(\d+)", line)
@@ -147,7 +170,11 @@ def test_zig_relay_server_runs_python_two_peer_room_flow() -> None:
         assert host_state.player_count == 2
         assert len(host_state.slots) == 2
         assert host_state.slots[0].connected is True
-        assert host_state.slots[0].ready is True
+        assert host_state.slots[0].ready is False
+
+        host.send(RoomReady(slot_index=0, ready=True))
+        _host_ready_packet, host_ready_state = host.recv(RoomState)
+        assert host_ready_state.slots[0].ready is True
 
         guest.send(ClientHello(build_id="0.1.0", peer_name="guest"))
         _guest_welcome_packet, guest_welcome = guest.recv(ClientWelcome)
@@ -201,11 +228,17 @@ def test_zig_relay_server_runs_python_two_peer_room_flow() -> None:
 
 def _stop_relay(proc: subprocess.Popen[str]) -> None:
     try:
-        os.killpg(proc.pid, signal.SIGTERM)
+        if os.name == "nt":
+            proc.terminate()
+        else:
+            os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     try:
         proc.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
-        os.killpg(proc.pid, signal.SIGKILL)
+        if os.name == "nt":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
         proc.wait(timeout=5.0)

@@ -76,8 +76,8 @@ public sealed partial class VrButton : Node3D
     /// UiEnter). Default is the menu button click; the keyboard sets its keys to Type.</summary>
     public int ClickSound;
 
-    /// <summary>True while the button is currently held in (for press-and-hold, e.g.
-    /// the perk '?' description popup).</summary>
+    /// <summary>True while the button is currently held in, for interactions that
+    /// need continuous physical-contact feedback.</summary>
     public bool IsPressed => _pressed;
 
     /// <summary>Index/payload the owner can read in the OnPress handler (e.g. the

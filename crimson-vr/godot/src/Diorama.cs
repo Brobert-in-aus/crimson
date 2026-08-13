@@ -1792,7 +1792,7 @@ public sealed partial class Diorama : Node3D
 
     /// <summary>Copy one sim snapshot into the layers' current buffers, rolling
     /// the previous current into prev. Call once per sim tick.</summary>
-    public void PushSnapshot(in SnapshotView view)
+    public void PushSnapshot(in SnapshotView view, int localPlayerSlot = 0)
     {
         _players.BeginPush();
         _playerLegs.BeginPush();
@@ -1855,7 +1855,7 @@ public sealed partial class Diorama : Node3D
         // are back). Detonations render their two-quad core+halo here too,
         // replacing the synthetic EmitFx explosion blobs (and the possible
         // double-draw the audit flagged).
-        RenderProjectiles(view);
+        RenderProjectiles(view, localPlayerSlot);
 
         _bonuses.BeginPush();
         foreach (Sim.BonusSnap b in view.Bonuses)
@@ -1877,7 +1877,7 @@ public sealed partial class Diorama : Node3D
         RenderGlowPool(view);
         RenderFreezeOverlay(view);
         RenderCreatureOverlays(view);
-        UpdateTargetHealthBar(view);
+        UpdateTargetHealthBar(view, localPlayerSlot);
     }
 
     // ---- Target (enemy) health bar — Doctor perk (base_gameplay_mode.py
@@ -1912,7 +1912,7 @@ public sealed partial class Diorama : Node3D
         return node;
     }
 
-    private void UpdateTargetHealthBar(in SnapshotView view)
+    private void UpdateTargetHealthBar(in SnapshotView view, int localPlayerSlot)
     {
         _targetBarBg ??= BuildTargetBarQuad(30, out _targetBarBgMat);
         _targetBarFg ??= BuildTargetBarQuad(31, out _targetBarFgMat);
@@ -1920,7 +1920,8 @@ public sealed partial class Diorama : Node3D
         bool found = false;
         if (view.Header.PlayerCount > 0)
         {
-            Sim.PlayerSnap p = view.Players[0];
+            int slot = Mathf.Clamp(localPlayerSlot, 0, view.Players.Length - 1);
+            Sim.PlayerSnap p = view.Players[slot];
             if ((p.PerkFlags & Sim.PlayerSnap.PerkFlagDoctor) != 0 && p.Health > 0.0f)
             {
                 var aim = new Vector2(p.AimX, p.AimY);

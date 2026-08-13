@@ -1,4 +1,5 @@
 pub const lockstep_protocol = @import("lockstep_protocol.zig");
+pub const canonical_capture = @import("canonical_capture.zig");
 pub const lockstep_client_runtime = @import("lockstep_client_runtime.zig");
 pub const lockstep_host_runtime = @import("lockstep_host_runtime.zig");
 pub const lockstep_input_adapter = @import("lockstep_input_adapter.zig");
@@ -11,6 +12,7 @@ pub const lockstep_reliable = @import("lockstep_reliable.zig");
 pub const lockstep_session = @import("lockstep_session.zig");
 pub const lockstep_state = @import("lockstep_state.zig");
 pub const lockstep_transport = @import("lockstep_transport.zig");
+pub const network_live_runtime = @import("network_live_runtime.zig");
 pub const packed_input = @import("packed_input.zig");
 pub const reliable = @import("reliable.zig");
 pub const reliable_channel = @import("reliable_channel.zig");
@@ -37,6 +39,7 @@ pub const session_settings = @import("session_settings.zig");
 
 test {
     _ = lockstep_protocol;
+    _ = canonical_capture;
     _ = lockstep_client_runtime;
     _ = lockstep_host_runtime;
     _ = lockstep_input_adapter;
@@ -47,6 +50,7 @@ test {
     _ = lockstep_session;
     _ = lockstep_state;
     _ = lockstep_transport;
+    _ = network_live_runtime;
     _ = packed_input;
     _ = reliable;
     _ = reliable_channel;

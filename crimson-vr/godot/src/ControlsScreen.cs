@@ -108,6 +108,8 @@ public sealed partial class ControlsScreen : Node3D
             "Buttons  -  poke with a fingertip or controller top",
             cabinet ? "Pause  -  the flat button beside the pad"
                     : "Pause  -  the flat button beside the arena",
+            "Recenter  -  hold the controller's menu/recenter control",
+            "            or choose Recenter View from Pause",
             "",
             "Mode, arena size and layout live in VR Settings.",
         };
@@ -120,7 +122,7 @@ public sealed partial class ControlsScreen : Node3D
             // old 0.22/0.075 the mode header and trailing hint pushed the last
             // two lines straight through it.
             float y = s * 0.25f;
-            float step = s * 0.062f;
+            float step = s * 0.057f;
             foreach (string line in lines)
             {
                 var l = new SmallFontLabel();

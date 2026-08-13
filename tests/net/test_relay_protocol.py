@@ -13,6 +13,7 @@ from crimson.net.relay_protocol import (
     ROLLBACK_MAX_TICKS,
     ClientHello,
     LockstepControl,
+    RbCanonicalCommand,
     RbInputBatch,
     RbInputSample,
     RbResyncRequest,
@@ -22,6 +23,7 @@ from crimson.net.relay_protocol import (
     decode_packet,
     encode_packet,
 )
+from crimson.sim.input_providers import PerkMenuOpenCommand
 
 
 def test_relay_packet_round_trip_for_control_message() -> None:
@@ -65,6 +67,12 @@ def test_relay_packet_round_trip_for_rollback_input_batch() -> None:
     assert isinstance(decoded.message, RbInputBatch)
     assert decoded.message.slot_index == 1
     assert decoded.message.samples[0].tick_index == 11
+
+
+def test_relay_packet_round_trip_for_canonical_perk_command() -> None:
+    message = RbCanonicalCommand(command=PerkMenuOpenCommand(player_index=3), tick_index=42)
+    decoded = decode_packet(encode_packet(RelayPacket(reliable=True, message=message)))
+    assert decoded.message == message
 
 
 def test_relay_packet_round_trip_for_legacy_tunnel_message() -> None:

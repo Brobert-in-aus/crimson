@@ -618,7 +618,7 @@ public sealed partial class Diorama
 
     /// <summary>Render all primaries/secondaries with their faithful per-type
     /// draw routines. Call once per pushed snapshot.</summary>
-    private void RenderProjectiles(in SnapshotView view)
+    private void RenderProjectiles(in SnapshotView view, int localPlayerSlot)
     {
         _trailN = 0;
         _bulletHeadN = 0;
@@ -638,21 +638,25 @@ public sealed partial class Diorama
         _lastProjectileElapsedMs = elapsedMs;
         _projectileVisualSeen.Clear();
         bool ionMaster = false;
-        if (view.Header.PlayerCount > 0)
+        int localSlot = view.Players.Length == 0 ? 0 : Mathf.Clamp(localPlayerSlot, 0, view.Players.Length - 1);
+        for (int playerSlot = 0; playerSlot < view.Players.Length; playerSlot++)
         {
-            Sim.PlayerSnap p0 = view.Players[0];
-            ionMaster = (p0.PerkFlags & Sim.PlayerSnap.PerkFlagIonGunMaster) != 0;
-            // Sharpshooter laser sight draws first in the projectile pass.
-            bool laser = (p0.PerkFlags & Sim.PlayerSnap.PerkFlagSharpshooter) != 0 || DebugFx.LaserSight;
-            if (laser && p0.Health > 0.0f)
+            Sim.PlayerSnap player = view.Players[playerSlot];
+            ionMaster |= (player.PerkFlags & Sim.PlayerSnap.PerkFlagIonGunMaster) != 0;
+            // Every Sharpshooter owns a laser. Debug forcing remains local so
+            // one presentation toggle does not paint synthetic perks on peers.
+            bool includeDebug = playerSlot == localSlot;
+            bool laser = (player.PerkFlags & Sim.PlayerSnap.PerkFlagSharpshooter) != 0
+                || (includeDebug && DebugFx.LaserSight);
+            if (laser && player.Health > 0.0f)
             {
-                var pp = new Vector2(p0.X, p0.Y);
-                var dir = new Vector2(Mathf.Sin(p0.AimHeading), -Mathf.Cos(p0.AimHeading));
+                var pp = new Vector2(player.X, player.Y);
+                var dir = new Vector2(Mathf.Sin(player.AimHeading), -Mathf.Cos(player.AimHeading));
                 // Head alpha 0.2 at the far end, tail alpha 0.5 at the start.
                 EmitStretch(_trailMesh, ref _trailN, TrailCap, pp + dir * 15.0f, pp + dir * 512.0f,
                     halfWidthUnits: 1.0f, new Color(1.0f, 0.0f, 0.0f, 0.2f), customX: 0.5f);
             }
-            RenderPlayerFx(p0, elapsedMs);
+            RenderPlayerFx(player, elapsedMs, includeDebug);
         }
 
         foreach (Sim.ProjectileSnap pr in view.Projectiles)
@@ -788,14 +792,14 @@ public sealed partial class Diorama
     /// <summary>Player-anchored effect passes (trooper.py): the Radioactive
     /// green aura under the body and the counter-rotating shield-ring pair
     /// above it while the shield bonus runs.</summary>
-    private void RenderPlayerFx(in Sim.PlayerSnap p, float elapsedMs)
+    private void RenderPlayerFx(in Sim.PlayerSnap p, float elapsedMs, bool includeDebug)
     {
         float t = elapsedMs * 0.001f;
         var pos = new Vector2(p.X, p.Y);
 
         // trooper.py:107-132 — AURA cell, additive, 100u, pulsing alpha. Drawn
         // regardless of health (the native pass sits before the alive check).
-        if (((p.PerkFlags & Sim.PlayerSnap.PerkFlagRadioactive) != 0 || DebugFx.RadioactiveAura)
+        if (((p.PerkFlags & Sim.PlayerSnap.PerkFlagRadioactive) != 0 || (includeDebug && DebugFx.RadioactiveAura))
             && _effectUv.TryGetValue(PlayerAuraEffectId, out Vector3 auraUv))
         {
             float auraAlpha = (Mathf.Sin(t) + 1.0f) * 0.1875f + 0.25f;
@@ -807,7 +811,7 @@ public sealed partial class Diorama
         // aim heading; strength pulses and ramps out with the last second. The
         // debug toggle renders as if a fresh shield were up (no ramp).
         float shieldTimer = p.ShieldTimer;
-        if (shieldTimer <= 1e-3f && DebugFx.ShieldRing)
+        if (shieldTimer <= 1e-3f && includeDebug && DebugFx.ShieldRing)
         {
             shieldTimer = 5.0f;
         }

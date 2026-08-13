@@ -37,9 +37,12 @@ public sealed partial class ArenaLayoutMenu : Node3D
     private Row[] _rows = Array.Empty<Row>();
     private VrButton _reset = null!;
     private VrButton _back = null!;
+    private ResetState _resetState;
+    private enum ResetState { Idle, Confirm, Undo }
 
     public event Action? OnBack;
     public event Action? OnReset;
+    public event Action? OnUndoReset;
 
     public void Build(
         float arenaSideMeters,
@@ -117,9 +120,9 @@ public sealed partial class ArenaLayoutMenu : Node3D
 
         _reset = new VrButton();
         AddChild(_reset);
-        _reset.Build(s * 0.5f, s * 0.09f, "Reset layout", new Color(0.7f, 0.45f, 0.4f), plate: true);
+        _reset.Build(s * 0.58f, s * 0.09f, "Reset buttons & pad", new Color(0.7f, 0.45f, 0.4f), plate: true);
         _reset.Position = new Vector3(0.0f, y, 0.0f);
-        _reset.OnPress += () => OnReset?.Invoke();
+        _reset.OnPress += PressReset;
         y -= s * 0.13f;
 
         _back = new VrButton();
@@ -174,6 +177,10 @@ public sealed partial class ArenaLayoutMenu : Node3D
     public void SetShown(bool visible)
     {
         Visible = visible;
+        if (!visible)
+        {
+            SetResetState(ResetState.Idle);
+        }
         foreach (Row r in _rows)
         {
             r.Slider.ResetPress();
@@ -194,5 +201,39 @@ public sealed partial class ArenaLayoutMenu : Node3D
         }
         _reset.PollPoke(probes);
         _back.PollPoke(probes);
+    }
+
+    private void PressReset()
+    {
+        switch (_resetState)
+        {
+            case ResetState.Idle:
+                SetResetState(ResetState.Confirm);
+                break;
+            case ResetState.Confirm:
+                OnReset?.Invoke();
+                SetResetState(ResetState.Undo);
+                break;
+            case ResetState.Undo:
+                OnUndoReset?.Invoke();
+                SetResetState(ResetState.Idle);
+                break;
+        }
+    }
+
+    private void SetResetState(ResetState state)
+    {
+        _resetState = state;
+        if (_reset == null)
+        {
+            return;
+        }
+        _reset.SetText(state switch
+        {
+            ResetState.Confirm => "Confirm reset",
+            ResetState.Undo => "Undo reset",
+            _ => "Reset buttons & pad",
+        });
+        _reset.ResetPress();
     }
 }

@@ -2,6 +2,7 @@ const std = @import("std");
 const msgpack = @import("msgpack");
 
 const relay_protocol = @import("relay_protocol.zig");
+const windows_udp_receive = @import("windows_udp_receive.zig");
 
 const Io = std.Io;
 const IpAddress = std.Io.net.IpAddress;
@@ -49,6 +50,7 @@ pub const UdpTransport = struct {
     bind_port: u16 = 0,
     recv_buffer_size: usize = 64 * 1024,
     socket: ?Socket = null,
+    windows_receive: ?*windows_udp_receive.ReceiveQueue = null,
     bound_port: u16 = 0,
 
     pub fn open(self: *UdpTransport, io: Io) !void {
@@ -60,12 +62,18 @@ pub const UdpTransport = struct {
         });
         errdefer socket.close(io);
         const bound_addr = peerAddrFromIp(socket.address) orelse return error.UnsupportedAddressFamily;
+        if (@import("builtin").os.tag == .windows) {
+            self.windows_receive = try windows_udp_receive.ReceiveQueue.init(socket, self.recv_buffer_size);
+        }
         self.bound_port = bound_addr.port;
         self.socket = socket;
     }
 
     pub fn close(self: *UdpTransport, io: Io) void {
-        if (self.socket) |socket| socket.close(io);
+        if (self.windows_receive) |queue| {
+            queue.deinit();
+        } else if (self.socket) |socket| socket.close(io);
+        self.windows_receive = null;
         self.socket = null;
         self.bound_port = 0;
     }
@@ -98,6 +106,18 @@ pub const UdpTransport = struct {
         errdefer out.deinit(allocator);
         const socket = self.socket orelse return out;
         if (max_packets == 0) return out;
+
+        if (self.windows_receive) |queue| {
+            var raw = try queue.take(allocator, io, max_packets, first_timeout_ms);
+            defer raw.deinit(allocator);
+            for (raw.items.items) |packet| {
+                const addr = peerAddrFromIp(packet.from) orelse continue;
+                var decoded = relay_protocol.decodePacket(allocator, packet.data) catch continue;
+                errdefer decoded.deinit();
+                try out.items.append(allocator, .{ .addr = addr, .decoded = decoded });
+            }
+            return out;
+        }
 
         const recv_buffer = try allocator.alloc(u8, self.recv_buffer_size);
         defer allocator.free(recv_buffer);

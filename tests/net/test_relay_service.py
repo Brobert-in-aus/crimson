@@ -20,7 +20,7 @@ from crimson.net.relay_protocol import (
     RoomStart,
     RoomState,
 )
-from crimson.net.relay_service import RelayServer, RelayServerConfig
+from crimson.net.relay_service import RelayServer, RelayServerConfig, _room_code
 
 
 def _packet_calls(send_packet: MagicMock) -> list[tuple[tuple[str, int], Any]]:
@@ -31,6 +31,15 @@ def _packet_calls(send_packet: MagicMock) -> list[tuple[tuple[str, int], Any]]:
             continue
         packets.append((call.args[0], call.args[1]))
     return packets
+
+
+def test_generated_room_codes_use_unambiguous_alphabet() -> None:
+    import random
+
+    rand = random.Random(1234)
+    codes = [_room_code(rand) for _ in range(1000)]
+    assert all(set(code.lower()) <= set("acdefhjkmnprtvwxy347") for code in codes)
+    assert len(set(codes)) > 990
 
 
 def _patch_send_capture(mocker, server: RelayServer) -> MagicMock:
@@ -74,9 +83,14 @@ def _start_two_peer_room(server: RelayServer, *, now_ms: int) -> tuple[Any, Any,
         now_ms=int(now_ms) + 3,
     )
     server._handle_message(
+        peer=host_peer,
+        message=RoomReady(slot_index=0, ready=True),
+        now_ms=int(now_ms) + 4,
+    )
+    server._handle_message(
         peer=join_peer,
         message=RoomReady(slot_index=1, ready=True),
-        now_ms=int(now_ms) + 4,
+        now_ms=int(now_ms) + 5,
     )
     return host_peer, join_peer, room_code
 
@@ -122,13 +136,21 @@ def test_room_create_join_ready_start_flow(mocker) -> None:
     assert int(join_peer.slot_index) == 1
     assert str(join_peer.room_code) == room_code
     sent = _packet_calls(send_packet)
-    assert any(isinstance(packet.message, RoomState) for _addr, packet in sent)
+    host_state = next(packet.message for addr, packet in sent if addr == host_addr and isinstance(packet.message, RoomState))
+    join_state = next(packet.message for addr, packet in sent if addr == join_addr and isinstance(packet.message, RoomState))
+    assert host_state.local_slot_index == 0
+    assert join_state.local_slot_index == 1
     send_packet.reset_mock()
 
     server._handle_message(
+        peer=host_peer,
+        message=RoomReady(slot_index=0, ready=True),
+        now_ms=1004,
+    )
+    server._handle_message(
         peer=join_peer,
         message=RoomReady(slot_index=1, ready=True),
-        now_ms=1004,
+        now_ms=1005,
     )
     room = server._rooms[room_code]
     assert room.started is True
@@ -218,6 +240,26 @@ def test_resync_sender_role_validation(mocker) -> None:
     sent = _packet_calls(send_packet)
     assert any(
         addr == join_peer.addr and isinstance(packet.message, RelayError) and packet.message.reason == "invalid_resync_sender"
+        for addr, packet in sent
+    )
+
+
+def test_host_recovery_error_is_forwarded_to_guest(mocker) -> None:
+    server = RelayServer(RelayServerConfig(bind_host="127.0.0.1", bind_port=0))
+    send_packet = _patch_send_capture(mocker, server)
+    host_peer, join_peer, _room_code = _start_two_peer_room(server, now_ms=6500)
+
+    send_packet.reset_mock()
+    server._handle_message(
+        peer=host_peer,
+        message=RelayError(reason="resync_snapshot_unavailable"),
+        now_ms=6501,
+    )
+    sent = _packet_calls(send_packet)
+    assert any(
+        addr == join_peer.addr
+        and isinstance(packet.message, RelayError)
+        and packet.message.reason == "resync_snapshot_unavailable"
         for addr, packet in sent
     )
 

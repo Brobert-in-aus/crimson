@@ -9,6 +9,7 @@ from crimson.game_modes import GameMode
 from crimson.net import lockstep_protocol as protocol
 from crimson.net.lockstep_protocol import (
     DebugLogBatch,
+    GameCommandRequest,
     Hello,
     KeepAlive,
     LockstepPacket,
@@ -77,6 +78,12 @@ def test_lan_tick_frame_and_keepalive_messages_round_trip() -> None:
         decoded = decode_packet(encode_packet(packet))
         assert type(decoded.message) is type(message)
         assert decoded.message == message
+
+
+def test_lan_game_command_request_round_trip() -> None:
+    message = GameCommandRequest(command=PerkPickCommand(player_index=2, choice_index=4))
+    decoded = decode_packet(encode_packet(LockstepPacket(reliable=True, message=message)))
+    assert decoded.message == message
 
 
 def test_protocol_constants_match_spec() -> None:

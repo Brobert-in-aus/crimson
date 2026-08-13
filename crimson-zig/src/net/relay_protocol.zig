@@ -85,6 +85,7 @@ pub const RoomReady = struct {
 pub const RoomState = struct {
     room_code: room_code.RoomCode,
     session_id: []const u8 = "",
+    local_slot_index: i32 = -1,
     mode_id: i32 = 0,
     player_count: i32 = 1,
     quest_level: ?quest_level.QuestLevel = null,
@@ -144,6 +145,15 @@ pub const RbInputBatch = struct {
     samples: []const RbInputSample = &.{},
 };
 
+pub const RbCommandRequest = struct {
+    command: lockstep_protocol.GameCommand,
+};
+
+pub const RbCanonicalCommand = struct {
+    tick_index: i32 = 0,
+    command: lockstep_protocol.GameCommand,
+};
+
 pub const RbResyncRequest = struct {
     request_id: []const u8 = "",
     from_tick: i32 = 0,
@@ -196,6 +206,8 @@ pub const NetMessage = union(enum) {
     ping: Ping,
     pong: Pong,
     rb_input_sample: RbInputBatch,
+    rb_command_request: RbCommandRequest,
+    rb_canonical_command: RbCanonicalCommand,
     rb_resync_request: RbResyncRequest,
     rb_resync_begin: RbResyncBegin,
     rb_resync_chunk: RbResyncChunk,
@@ -294,6 +306,13 @@ pub fn cloneMessage(allocator: std.mem.Allocator, message: NetMessage) !NetMessa
         .ping => |ping| .{ .ping = ping },
         .pong => |pong| .{ .pong = pong },
         .rb_input_sample => |batch| .{ .rb_input_sample = try cloneInputBatch(allocator, batch) },
+        .rb_command_request => |request| .{ .rb_command_request = .{
+            .command = try lockstep_protocol.cloneGameCommand(allocator, request.command),
+        } },
+        .rb_canonical_command => |canonical| .{ .rb_canonical_command = .{
+            .tick_index = canonical.tick_index,
+            .command = try lockstep_protocol.cloneGameCommand(allocator, canonical.command),
+        } },
         .rb_resync_request => |request| .{ .rb_resync_request = .{
             .request_id = try dupeBytes(allocator, request.request_id),
             .from_tick = request.from_tick,
@@ -347,6 +366,8 @@ pub fn deinitMessage(allocator: std.mem.Allocator, message: *NetMessage) void {
         .relay_error => |err| freeBytes(allocator, err.reason),
         .ping, .pong => {},
         .rb_input_sample => |batch| freeSamples(allocator, batch.samples),
+        .rb_command_request => |request| lockstep_protocol.deinitGameCommand(allocator, request.command),
+        .rb_canonical_command => |canonical| lockstep_protocol.deinitGameCommand(allocator, canonical.command),
         .rb_resync_request => |request| {
             freeBytes(allocator, request.request_id);
             freeBytes(allocator, request.reason);
@@ -373,6 +394,7 @@ fn cloneRoomState(allocator: std.mem.Allocator, state: RoomState) !RoomState {
     return .{
         .room_code = state.room_code,
         .session_id = try dupeBytes(allocator, state.session_id),
+        .local_slot_index = state.local_slot_index,
         .mode_id = state.mode_id,
         .player_count = state.player_count,
         .quest_level = state.quest_level,
@@ -549,6 +571,24 @@ test "relay rollback input messages carry packed player input" {
     const empty: RbInputBatch = .{};
     try std.testing.expectEqual(@as(i32, -1), empty.slot_index);
     try std.testing.expectEqual(@as(usize, 0), empty.samples.len);
+}
+
+test "relay canonical perk command round trips authoritative tick" {
+    const packet: RelayPacket = .{ .reliable = true, .message = .{ .rb_canonical_command = .{
+        .tick_index = 42,
+        .command = .{ .perk_menu_open = .{ .player_index = 3 } },
+    } } };
+    const bytes = try encodePacket(std.testing.allocator, packet);
+    defer std.testing.allocator.free(bytes);
+    const decoded = try decodePacket(std.testing.allocator, bytes);
+    defer decoded.deinit();
+    switch (decoded.value.message) {
+        .rb_canonical_command => |canonical| {
+            try std.testing.expectEqual(@as(i32, 42), canonical.tick_index);
+            try std.testing.expectEqual(@as(i32, 3), lockstep_protocol.commandPlayerIndex(canonical.command));
+        },
+        else => return error.ExpectedCanonicalCommand,
+    }
 }
 
 test "relay rollback resync messages mirror python defaults" {

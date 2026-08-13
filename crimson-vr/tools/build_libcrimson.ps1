@@ -2,7 +2,10 @@
 # native/ dir (gitignored). Run from anywhere; requires Zig 0.16+ on PATH or
 # at tools/zig/zig.exe in the repo root.
 #
-#   build_libcrimson.ps1 -android           both targets (Quest needs -android)
+#   build_libcrimson.ps1                    Windows x64
+#   build_libcrimson.ps1 -Linux             Windows + Linux x64
+#   build_libcrimson.ps1 -Android           Windows + Quest arm64
+#   build_libcrimson.ps1 -Linux -Android    all distribution targets
 #   build_libcrimson.ps1 -Optimize Debug    unoptimized, for a native debugger
 #
 # OPTIMIZE MATTERS A LOT and used to be left unset, which meant Debug: Zig's
@@ -19,7 +22,9 @@
 
 param(
     [ValidateSet('Debug', 'ReleaseSafe', 'ReleaseFast', 'ReleaseSmall')]
-    [string]$Optimize = 'ReleaseSafe'
+    [string]$Optimize = 'ReleaseSafe',
+    [switch]$Linux,
+    [switch]$Android
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,10 +47,18 @@ try {
     Copy-Item (Join-Path $zigDir 'zig-out\bin\crimson_host.dll') (Join-Path $godotNative 'win-x64\') -Force
     Write-Output "win-x64: crimson_host.dll -> $godotNative\win-x64 ($Optimize)"
 
+    if ($Linux) {
+        & $zig build host-lib -Dtarget=x86_64-linux-gnu "-Doptimize=$Optimize"
+        if ($LASTEXITCODE -ne 0) { throw "zig build host-lib (linux) failed ($LASTEXITCODE)" }
+        New-Item -ItemType Directory -Force (Join-Path $godotNative 'linux-x64') | Out-Null
+        Copy-Item (Join-Path $zigDir 'zig-out\lib\libcrimson_host.so') (Join-Path $godotNative 'linux-x64\') -Force
+        Write-Output "linux-x64: libcrimson_host.so -> $godotNative\linux-x64 ($Optimize)"
+    }
+
     # Quest / Android arm64. Zig 0.16 ships bionic stubs, so no NDK is required
     # to produce the .so; the NDK is only needed for on-device readelf/robustness
     # work. The .so lands in zig-out/lib (not bin) for non-Windows targets.
-    if ($args -contains '-android') {
+    if ($Android) {
         # The .so must link bionic libc (proper TLS/pthread/getauxval) or it fails
         # to dlopen / aborts on Quest. Point Zig at the NDK's bionic via a libc file.
         $ndkRoot = $env:ANDROID_NDK_ROOT

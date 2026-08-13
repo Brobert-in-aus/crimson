@@ -15,6 +15,9 @@ const crimson_zig = @import("crimson_zig");
 
 const game_ids = crimson_zig.game_ids;
 const live_runner = crimson_zig.live_runner;
+const lockstep_input_adapter = crimson_zig.net.lockstep_input_adapter;
+const network_live_runtime = crimson_zig.net.network_live_runtime;
+const packed_input = crimson_zig.net.packed_input;
 const state_mod = crimson_zig.state;
 const terrain_fx_mod = crimson_zig.terrain_fx;
 const verify_native = crimson_zig.verify_native;
@@ -31,7 +34,11 @@ const replay_codec = crimson_zig.replay_codec;
 // v23: recording_rng exposes per-tick live rng samples for divergence bisects,
 // and the perk offer is rolled on the menu-open edge instead of by whoever
 // reads it first — a snapshot poll used to move the stream between ticks.
-pub const abi_version: u32 = 23;
+// v24: tutorial presentation state in CrimsonHostTickResult.
+// v25: separate network handles and shared presentation encoders.
+// v26: slot-aware network result counters and negotiated game mode.
+// v27: canonical network commands and explicit resume/reconnect hook.
+pub const abi_version: u32 = 27;
 pub const snapshot_magic: u32 = 0x31525643; // "CVR1" little-endian
 
 // Synthetic wire-only bit OR'd into the exported creature flags to signal a
@@ -47,6 +54,8 @@ pub const err_buffer_too_small: i32 = -3;
 pub const err_invalid_config: i32 = -4;
 pub const err_out_of_sessions: i32 = -5;
 pub const err_invalid_input: i32 = -6;
+pub const err_not_ready: i32 = -7;
+pub const err_unsupported: i32 = -8;
 
 const input_flag_fire_down: u32 = 1 << 0;
 const input_flag_fire_pressed: u32 = 1 << 1;
@@ -97,7 +106,42 @@ pub const CrimsonHostTickResult = extern struct {
     // uses it to show quest results + advance the unlock index. Append-only
     // (ABI v14).
     quest_completed: u32,
+    // Tutorial presentation state (ABI v24). The runtime owns the scripted
+    // event-driven timeline; the frontend only maps these stable indices to
+    // VR-appropriate prompt cards. Values stay -1/0 outside tutorial mode.
+    tutorial_stage_index: i32,
+    tutorial_prompt_alpha: f32,
+    tutorial_hint_index: i32,
+    tutorial_hint_alpha: f32,
 };
+
+pub const CrimsonHostNetUpdate = extern struct {
+    frames_advanced: u32,
+    ticks_advanced: u32,
+    phase: i32,
+    local_slot: i32,
+    last_tick_index: i32,
+    player_count: u32,
+    input_flags: [state_mod.max_players]u32,
+    // ABI v26: results for the negotiated local slot. Kills remain the shared
+    // match total because the runtime does not attribute every environmental
+    // or bonus kill to one player.
+    local_shots_fired: i32,
+    local_shots_hit: i32,
+    creature_kill_count: i32,
+    local_most_used_weapon_id: i32,
+    game_mode: i32,
+};
+
+pub const net_phase_connecting: i32 = 0;
+pub const net_phase_lobby: i32 = 1;
+pub const net_phase_running: i32 = 2;
+pub const net_phase_reconnecting: i32 = 3;
+pub const net_phase_failed: i32 = 4;
+
+pub const net_command_perk_menu_open: i32 = 1;
+pub const net_command_perk_pick: i32 = 2;
+pub const net_command_set_ready: i32 = 3;
 
 pub const SnapshotHeader = extern struct {
     magic: u32,
@@ -466,6 +510,101 @@ const SessionBox = struct {
     // advances, which is by construction a tick the replay will run.
 };
 
+const NetworkSessionConfig = struct {
+    role: []const u8 = "host",
+    netcode: []const u8 = "lockstep",
+    seed: i32 = 1,
+    mode_id: i32 = 1,
+    player_count: i32 = 2,
+    quest_level_key: i32 = -1,
+    bind_host: []const u8 = "0.0.0.0",
+    host: []const u8 = "127.0.0.1",
+    port: u16 = 31993,
+    room_code: []const u8 = "",
+    build_id: []const u8 = crimson_zig.version,
+    peer_name: []const u8 = "vr",
+    session_id: []const u8 = "host-abi-lockstep",
+    input_delay_ticks: i32 = 0,
+    max_recv_packets: usize = 512,
+    status: ?crimson_zig.formats.game_cfg.Status = null,
+};
+
+const NetworkOwnedStrings = struct {
+    bind_host: []u8,
+    host: []u8,
+    room_code: []u8,
+    build_id: []u8,
+    peer_name: []u8,
+    session_id: []u8,
+
+    fn init(config: NetworkSessionConfig) !NetworkOwnedStrings {
+        const bind_host = try gpa.dupe(u8, config.bind_host);
+        errdefer gpa.free(bind_host);
+        const host = try gpa.dupe(u8, config.host);
+        errdefer gpa.free(host);
+        const room = try gpa.dupe(u8, config.room_code);
+        errdefer gpa.free(room);
+        const build = try gpa.dupe(u8, config.build_id);
+        errdefer gpa.free(build);
+        const peer = try gpa.dupe(u8, config.peer_name);
+        errdefer gpa.free(peer);
+        const session = try gpa.dupe(u8, config.session_id);
+        return .{
+            .bind_host = bind_host,
+            .host = host,
+            .room_code = room,
+            .build_id = build,
+            .peer_name = peer,
+            .session_id = session,
+        };
+    }
+
+    fn deinit(self: *NetworkOwnedStrings) void {
+        gpa.free(self.bind_host);
+        gpa.free(self.host);
+        gpa.free(self.room_code);
+        gpa.free(self.build_id);
+        gpa.free(self.peer_name);
+        gpa.free(self.session_id);
+        self.* = undefined;
+    }
+};
+
+const NetworkSessionBox = struct {
+    generation: u32,
+    io_backend: std.Io.Threaded,
+    strings: NetworkOwnedStrings,
+    runtime: network_live_runtime.NetworkLiveRuntime = undefined,
+    runtime_initialized: bool = false,
+    pending_audio: live_runner.FrameAudioEvents = .{},
+    pending_terrain_fx: terrain_fx_mod.TerrainFxBatch = .{},
+    phase: i32 = net_phase_connecting,
+    last_failure: [256]u8 = [_]u8{0} ** 256,
+    last_failure_len: usize = 0,
+    last_now_ms: i64 = 0,
+    recording: bool = false,
+    record_ticks: std.ArrayList(RecordedTick) = .empty,
+    record_events: std.ArrayList(replay_codec.ReplayEvent) = .empty,
+    record_rng: std.ArrayList(u32) = .empty,
+    record_overflow: bool = false,
+    record_stats: RecordedStats = .{},
+    record_config: HostSessionConfig = .{},
+
+    fn io(self: *NetworkSessionBox) std.Io {
+        return self.io_backend.io();
+    }
+
+    fn setFailure(self: *NetworkSessionBox, err: anyerror) void {
+        self.setFailureText(@errorName(err));
+    }
+
+    fn setFailureText(self: *NetworkSessionBox, message: []const u8) void {
+        self.phase = net_phase_failed;
+        self.last_failure_len = @min(message.len, self.last_failure.len);
+        @memcpy(self.last_failure[0..self.last_failure_len], message[0..self.last_failure_len]);
+    }
+};
+
 /// The seven figures the verifier compares, harvested from the live run.
 ///
 /// finish originally got these by re-simulating the recording and reading the
@@ -521,6 +660,7 @@ const RecordingBox = struct {
 };
 
 const max_sessions = 8;
+const max_network_sessions = 8;
 /// One in flight is the normal case (the run that just ended). The spare covers
 /// a player who dies, restarts and dies again before the first encode lands.
 const max_recordings = 4;
@@ -528,6 +668,8 @@ const gpa = std.heap.page_allocator;
 
 var session_slots: [max_sessions]?*SessionBox = [_]?*SessionBox{null} ** max_sessions;
 var next_generation: u32 = 1;
+var network_session_slots: [max_network_sessions]?*NetworkSessionBox = [_]?*NetworkSessionBox{null} ** max_network_sessions;
+var next_network_generation: u32 = 1;
 var recording_slots: [max_recordings]?*RecordingBox = [_]?*RecordingBox{null} ** max_recordings;
 var next_recording_generation: u32 = 1;
 // The recording table is the ONE structure two threads touch: the host detaches
@@ -602,11 +744,27 @@ fn handleFor(index: usize, generation: u32) u64 {
     return (@as(u64, generation) << 32) | @as(u64, @intCast(index));
 }
 
+const network_handle_tag: u64 = 1 << 63;
+
+fn networkHandleFor(index: usize, generation: u32) u64 {
+    return network_handle_tag | (@as(u64, generation & 0x7FFF_FFFF) << 32) | @as(u64, @intCast(index));
+}
+
 fn boxForHandle(handle: u64) ?*SessionBox {
     const index: usize = @intCast(handle & 0xFFFF_FFFF);
     const generation: u32 = @intCast(handle >> 32);
     if (index >= max_sessions) return null;
     const box = session_slots[index] orelse return null;
+    if (box.generation != generation) return null;
+    return box;
+}
+
+fn networkBoxForHandle(handle: u64) ?*NetworkSessionBox {
+    if ((handle & network_handle_tag) == 0) return null;
+    const index: usize = @intCast(handle & 0xFFFF_FFFF);
+    const generation: u32 = @intCast((handle >> 32) & 0x7FFF_FFFF);
+    if (index >= max_network_sessions) return null;
+    const box = network_session_slots[index] orelse return null;
     if (box.generation != generation) return null;
     return box;
 }
@@ -830,6 +988,158 @@ pub export fn crimson_host_session_destroy(handle: u64) void {
     gpa.destroy(box);
 }
 
+fn networkRole(text: []const u8) !network_live_runtime.Role {
+    if (std.ascii.eqlIgnoreCase(text, "host")) return .host;
+    if (std.ascii.eqlIgnoreCase(text, "join") or std.ascii.eqlIgnoreCase(text, "client")) return .join;
+    return error.InvalidNetworkRole;
+}
+
+fn networkNetcode(text: []const u8) !network_live_runtime.Netcode {
+    if (std.ascii.eqlIgnoreCase(text, "lockstep")) return .lockstep;
+    if (std.ascii.eqlIgnoreCase(text, "rollback")) return .rollback;
+    return error.InvalidNetworkNetcode;
+}
+
+fn initNetworkRuntime(
+    box: *NetworkSessionBox,
+    launch: network_live_runtime.LaunchConfig,
+    seed: i32,
+    status: ?crimson_zig.formats.game_cfg.Status,
+) !void {
+    try network_live_runtime.NetworkLiveRuntime.initIntoResolved(&box.runtime, launch, seed, status, box.io());
+    box.runtime_initialized = true;
+}
+
+pub export fn crimson_host_net_create(
+    config_json: ?[*]const u8,
+    config_len: u32,
+    out_handle: ?*u64,
+) i32 {
+    last_error_len = 0;
+    const out = out_handle orelse {
+        setError("out_handle is null");
+        return err_invalid_input;
+    };
+
+    var config: NetworkSessionConfig = .{};
+    if (config_json) |ptr| {
+        if (config_len > 0) {
+            const parsed = std.json.parseFromSlice(NetworkSessionConfig, gpa, ptr[0..config_len], .{ .ignore_unknown_fields = true }) catch |err| {
+                setErrorFmt("invalid network config json: {s}", .{@errorName(err)});
+                return err_invalid_config;
+            };
+            defer parsed.deinit();
+            config = parsed.value;
+        }
+    }
+
+    const role = networkRole(config.role) catch |err| {
+        setErrorFmt("invalid network role: {s}", .{@errorName(err)});
+        return err_invalid_config;
+    };
+    const netcode = networkNetcode(config.netcode) catch |err| {
+        setErrorFmt("invalid netcode: {s}", .{@errorName(err)});
+        return err_invalid_config;
+    };
+    if (config.player_count < 1 or config.player_count > state_mod.max_players) {
+        setError("network player_count must be between 1 and 4");
+        return err_invalid_config;
+    }
+    const quest = if (config.quest_level_key >= 0)
+        crimson_zig.quest_level.QuestLevel.fromLevelKey(config.quest_level_key) catch {
+            setError("invalid network quest_level_key");
+            return err_invalid_config;
+        }
+    else
+        null;
+
+    var slot_index: usize = max_network_sessions;
+    for (network_session_slots, 0..) |slot, idx| {
+        if (slot == null) {
+            slot_index = idx;
+            break;
+        }
+    }
+    if (slot_index >= max_network_sessions) {
+        setError("all network session slots in use");
+        return err_out_of_sessions;
+    }
+
+    var strings = NetworkOwnedStrings.init(config) catch {
+        setError("network config allocation failed");
+        return err_generic;
+    };
+    errdefer strings.deinit();
+    const box = gpa.create(NetworkSessionBox) catch {
+        setError("network session allocation failed");
+        return err_generic;
+    };
+    errdefer gpa.destroy(box);
+    box.* = .{
+        .generation = next_network_generation,
+        .io_backend = std.Io.Threaded.init(gpa, .{}),
+        .strings = strings,
+    };
+    var backend_live = true;
+    errdefer if (backend_live) box.io_backend.deinit();
+
+    const launch: network_live_runtime.LaunchConfig = .{
+        .role = role,
+        .mode_id = config.mode_id,
+        .player_count = config.player_count,
+        .quest_level = quest,
+        .netcode = netcode,
+        .bind_host = box.strings.bind_host,
+        .host = box.strings.host,
+        .port = config.port,
+        .room_code_text = if (box.strings.room_code.len == 0) null else box.strings.room_code,
+        .build_id = box.strings.build_id,
+        .peer_name = box.strings.peer_name,
+        .session_id = box.strings.session_id,
+        .input_delay_ticks = config.input_delay_ticks,
+        .max_recv_packets = config.max_recv_packets,
+    };
+    runOnBigStack(initNetworkRuntime, .{ box, launch, config.seed, config.status }) catch |err| {
+        setErrorFmt("network session init failed: {s}", .{@errorName(err)});
+        return err_invalid_config;
+    };
+    if (!box.runtime_initialized) {
+        setError("network runtime was not initialized");
+        return err_generic;
+    }
+    const runtime = &box.runtime;
+    runtime.start(gpa, box.io(), 0) catch |err| {
+        runtime.deinit(gpa, box.io());
+        box.runtime_initialized = false;
+        setErrorFmt("network session start failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+
+    next_network_generation +%= 1;
+    if (next_network_generation == 0 or next_network_generation >= 0x8000_0000) next_network_generation = 1;
+    network_session_slots[slot_index] = box;
+    out.* = networkHandleFor(slot_index, box.generation);
+    backend_live = false;
+    return ok;
+}
+
+pub export fn crimson_host_net_destroy(handle: u64) void {
+    if ((handle & network_handle_tag) == 0) return;
+    const index: usize = @intCast(handle & 0xFFFF_FFFF);
+    if (index >= max_network_sessions) return;
+    const box = network_session_slots[index] orelse return;
+    if (box.generation != @as(u32, @intCast((handle >> 32) & 0x7FFF_FFFF))) return;
+    network_session_slots[index] = null;
+    if (box.runtime_initialized) box.runtime.deinit(gpa, box.io());
+    box.runtime_initialized = false;
+    box.io_backend.deinit();
+    box.record_ticks.deinit(gpa);
+    box.record_events.deinit(gpa);
+    box.record_rng.deinit(gpa);
+    box.strings.deinit();
+    gpa.destroy(box);
+}
+
 fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
     var frame: live_runner.FrameInput = .{};
     const count = @min(inputs.len, frame.players.len);
@@ -860,6 +1170,328 @@ fn frameInputFromHost(inputs: []const CrimsonHostInput) live_runner.FrameInput {
             null;
     }
     return frame;
+}
+
+fn packedInputFromHost(input: CrimsonHostInput) packed_input.PackedPlayerInput {
+    const inputs = [_]CrimsonHostInput{input};
+    return lockstep_input_adapter.packGameInput(frameInputFromHost(&inputs).player);
+}
+
+fn mergeNetworkUpdate(target: *network_live_runtime.Update, update: network_live_runtime.Update) void {
+    target.stats.received += update.stats.received;
+    target.stats.sent += update.stats.sent;
+    target.frames_advanced += update.frames_advanced;
+    target.ticks_advanced += update.ticks_advanced;
+    if (update.last_tick_index != null) target.last_tick_index = update.last_tick_index;
+    if (update.last_player_count != 0) {
+        target.last_player_count = update.last_player_count;
+        target.last_input_flags = update.last_input_flags;
+    }
+    if (update.last_frame_update != null) target.last_frame_update = update.last_frame_update;
+    target.audio.mergeFrom(update.audio);
+    target.terrain_fx.mergeFrom(update.terrain_fx);
+}
+
+fn captureNetworkFrames(box: *NetworkSessionBox) void {
+    var captures = box.runtime.takeCanonicalCaptures();
+    defer captures.deinit(gpa);
+    if (!box.recording or box.record_overflow) return;
+    const runner = box.runtime.runnerForLocalInput() orelse return;
+    refreshNetworkRecordConfig(box, runner);
+    for (captures.items) |capture| {
+        if (capture.tick_index < 0) continue;
+        const tick: usize = @intCast(capture.tick_index);
+        var row: RecordedTick = .{
+            .players = undefined,
+            .player_count = capture.player_count,
+            .dt = runner.session.dt_nominal,
+        };
+        for (0..row.player_count) |idx| {
+            const input = capture.inputs[idx];
+            row.players[idx] = .{
+                .move_x = input.move_x,
+                .move_y = input.move_y,
+                .aim_x = input.aim_x,
+                .aim_y = input.aim_y,
+                .flags = input.flags,
+            };
+        }
+        if (tick < box.record_ticks.items.len) {
+            box.record_ticks.items[tick] = row;
+            box.record_rng.items[tick] = runner.session.state.rng.state;
+            removeNetworkEventsAtTick(box, @intCast(tick));
+        } else if (tick == box.record_ticks.items.len) {
+            box.record_ticks.append(gpa, row) catch {
+                box.record_overflow = true;
+                return;
+            };
+            box.record_rng.append(gpa, runner.session.state.rng.state) catch {
+                box.record_overflow = true;
+                return;
+            };
+        } else {
+            box.record_overflow = true;
+            return;
+        }
+        for (capture.commands[0..capture.command_count]) |command| {
+            const event: replay_codec.ReplayEvent = switch (command.kind) {
+                .perk_menu_open => .{ .perk_menu_open = .{
+                    .tick_index = @intCast(tick),
+                    .player_index = command.player_index,
+                } },
+                .perk_pick => .{ .perk_pick = .{
+                    .tick_index = @intCast(tick),
+                    .player_index = command.player_index,
+                    .choice_index = command.value,
+                } },
+            };
+            box.record_events.append(gpa, event) catch {
+                box.record_overflow = true;
+                return;
+            };
+        }
+    }
+    updateNetworkRecordStats(box, runner);
+}
+
+fn removeNetworkEventsAtTick(box: *NetworkSessionBox, tick: i32) void {
+    var idx: usize = 0;
+    while (idx < box.record_events.items.len) {
+        const event_tick: ?usize = switch (box.record_events.items[idx]) {
+            .perk_menu_open => |event| event.tick_index,
+            .perk_pick => |event| event.tick_index,
+            else => null,
+        };
+        if (event_tick != null and event_tick.? == @as(usize, @intCast(tick))) _ = box.record_events.orderedRemove(idx) else idx += 1;
+    }
+}
+
+fn refreshNetworkRecordConfig(box: *NetworkSessionBox, runner: *const live_runner.LiveRunner) void {
+    box.record_config.seed = runner.seed;
+    box.record_config.game_mode = @intFromEnum(runner.session.game_mode);
+    box.record_config.player_count = @intCast(runner.session.playersConst().len);
+    box.record_config.world_size = runner.session.world_size;
+    box.record_config.quest_level_key = runner.quest_level_key orelse 101;
+    const status = switch (box.runtime) {
+        .host => |host| host.session.runtime.status,
+        .client => |client| if (client.session.runtime.lobby.match_start) |start| start.status else null,
+        .rollback => |rollback| if (rollback.session.match_config) |config| config.status else null,
+    };
+    if (status) |value| {
+        box.record_config.status_quest_unlock_index = value.quest_unlock_index;
+        box.record_config.status_quest_unlock_index_full = value.quest_unlock_index_full;
+        for (0..@min(value.weapon_usage_counts.len, box.record_config.status_weapon_usage_counts.len)) |idx| {
+            box.record_config.status_weapon_usage_counts[idx] = value.weapon_usage_counts[idx];
+        }
+    }
+}
+
+fn updateNetworkRecordStats(box: *NetworkSessionBox, runner: *const live_runner.LiveRunner) void {
+    const players = runner.session.playersConst();
+    const shots = claimedShots(&runner.session);
+    const local = networkLocalResultStats(runner, 0);
+    box.record_stats = .{
+        .elapsed_ms_sim = @intFromFloat(runner.session.elapsed_ms_sim),
+        .player_experience = if (players.len == 0) 0 else players[0].experience,
+        .creature_kill_count = runner.session.creatures.kill_count,
+        .most_used_weapon_id = local.most_used_weapon_id,
+        .shots_fired = shots.fired,
+        .shots_hit = shots.hit,
+    };
+}
+
+pub export fn crimson_host_net_update(
+    handle: u64,
+    now_ms: i64,
+    local_input: ?*const CrimsonHostInput,
+    out_update: ?*CrimsonHostNetUpdate,
+) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse {
+        setError("invalid network session handle");
+        return err_invalid_handle;
+    };
+    const runtime = if (box.runtime_initialized) &box.runtime else {
+        setError("network runtime is unavailable");
+        return err_invalid_handle;
+    };
+    box.last_now_ms = now_ms;
+
+    var combined: network_live_runtime.Update = .{};
+    const first = runtime.update(gpa, box.io(), now_ms) catch |err| {
+        box.setFailure(err);
+        setErrorFmt("network update failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    mergeNetworkUpdate(&combined, first);
+    captureNetworkFrames(box);
+
+    if (runtime.runnerForLocalInput() != null) {
+        if (local_input) |input| {
+            runtime.submitLocalInput(gpa, box.io(), packedInputFromHost(input.*), now_ms) catch |err| {
+                box.setFailure(err);
+                setErrorFmt("network input failed: {s}", .{@errorName(err)});
+                return err_generic;
+            };
+            const second = runtime.update(gpa, box.io(), now_ms) catch |err| {
+                box.setFailure(err);
+                setErrorFmt("network update failed: {s}", .{@errorName(err)});
+                return err_generic;
+            };
+            mergeNetworkUpdate(&combined, second);
+            captureNetworkFrames(box);
+        }
+        box.phase = switch (runtime.*) {
+            .rollback => |rollback| if (rollback.session.runtime) |state|
+                if (state.paused_for_reconnect or state.paused_for_resync) net_phase_reconnecting else net_phase_running
+            else
+                net_phase_running,
+            else => net_phase_running,
+        };
+    } else if (runtime.localInputSlot() != null or runtime.* == .host) {
+        box.phase = net_phase_lobby;
+    } else {
+        box.phase = net_phase_connecting;
+    }
+
+    const direct_peer_timed_out = switch (runtime.*) {
+        .host => |host| host.session.runtime.hasTimedOutPeer(now_ms),
+        .client => |client| client.session.runtime.hasTimedOutHost(now_ms),
+        .rollback => false,
+    };
+    if (direct_peer_timed_out) box.setFailureText("peer_timeout");
+
+    box.pending_audio.mergeFrom(combined.audio);
+    box.pending_terrain_fx.mergeFrom(combined.terrain_fx);
+
+    if (runtime.* == .client and runtime.client.session.runtime.error_reason.len != 0) {
+        box.setFailureText(runtime.client.session.runtime.error_reason);
+    }
+    if (runtime.* == .rollback) {
+        if (runtime.rollback.session.error_reason.len != 0) {
+            box.setFailureText(runtime.rollback.session.error_reason);
+        } else if (runtime.rollback.session.runtime) |state| {
+            if (state.error_reason.len != 0) box.setFailureText(state.error_reason);
+        }
+    }
+
+    if (out_update) |out| {
+        const runner = runtime.runnerForLocalInput();
+        const local_slot = runtime.localInputSlot() orelse 0;
+        const local_stats = if (runner) |live| networkLocalResultStats(live, local_slot) else NetworkLocalResultStats{};
+        out.* = .{
+            .frames_advanced = @intCast(combined.frames_advanced),
+            .ticks_advanced = @intCast(combined.ticks_advanced),
+            .phase = box.phase,
+            .local_slot = if (runtime.localInputSlot()) |slot| @intCast(slot) else -1,
+            .last_tick_index = combined.last_tick_index orelse -1,
+            .player_count = @intCast(combined.last_player_count),
+            .input_flags = combined.last_input_flags,
+            .local_shots_fired = local_stats.shots_fired,
+            .local_shots_hit = local_stats.shots_hit,
+            .creature_kill_count = local_stats.creature_kill_count,
+            .local_most_used_weapon_id = local_stats.most_used_weapon_id,
+            .game_mode = local_stats.game_mode,
+        };
+    }
+    return ok;
+}
+
+const NetworkLocalResultStats = struct {
+    shots_fired: i32 = 0,
+    shots_hit: i32 = 0,
+    creature_kill_count: i32 = 0,
+    most_used_weapon_id: i32 = 0,
+    game_mode: i32 = 0,
+};
+
+fn networkLocalResultStats(runner: *const live_runner.LiveRunner, local_slot: usize) NetworkLocalResultStats {
+    const slot = @min(local_slot, state_mod.max_players - 1);
+    const players = runner.session.playersConst();
+    const fallback_weapon: i32 = if (slot < players.len)
+        @intFromEnum(players[slot].weapon.weapon_id)
+    else
+        0;
+    const counts = &runner.session.state.weapon_shots_fired[slot];
+    var best: usize = 1;
+    for (counts[1..], 1..) |count, idx| {
+        if (count > counts[best]) best = idx;
+    }
+    return .{
+        .shots_fired = runner.session.state.shots_fired[slot],
+        .shots_hit = runner.session.state.shots_hit[slot],
+        .creature_kill_count = runner.session.creatures.kill_count,
+        .most_used_weapon_id = if (counts[best] > 0) @intCast(best) else fallback_weapon,
+        .game_mode = @intFromEnum(runner.session.game_mode),
+    };
+}
+
+pub export fn crimson_host_net_command(
+    handle: u64,
+    command_type: i32,
+    player_index: i32,
+    value: i32,
+) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse {
+        setError("invalid network session handle");
+        return err_invalid_handle;
+    };
+    const runtime = if (box.runtime_initialized) &box.runtime else {
+        setError("network runtime is unavailable");
+        return err_invalid_handle;
+    };
+    if (command_type == net_command_set_ready) {
+        runtime.setLocalReady(gpa, box.io(), value != 0, box.last_now_ms) catch |err| {
+            setErrorFmt("network ready failed: {s}", .{@errorName(err)});
+            return err_generic;
+        };
+        return ok;
+    }
+    const local_slot = runtime.localInputSlot() orelse {
+        setError("network player slot is not assigned yet");
+        return err_not_ready;
+    };
+    if (player_index < 0 or @as(usize, @intCast(player_index)) != local_slot) {
+        setError("network command player does not match the local slot");
+        return err_invalid_input;
+    }
+    const command: crimson_zig.net.lockstep_protocol.GameCommand = switch (command_type) {
+        net_command_perk_menu_open => .{ .perk_menu_open = .{ .player_index = player_index } },
+        net_command_perk_pick => blk: {
+            if (value < 0 or value >= 7) {
+                setError("perk choice index is out of range");
+                return err_invalid_input;
+            }
+            break :blk .{ .perk_pick = .{ .player_index = player_index, .choice_index = value } };
+        },
+        else => {
+            setError("unsupported network gameplay command");
+            return err_unsupported;
+        },
+    };
+    runtime.submitLocalCommand(gpa, box.io(), command, box.last_now_ms) catch |err| {
+        box.setFailure(err);
+        setErrorFmt("network command failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    return ok;
+}
+
+pub export fn crimson_host_net_resume(handle: u64, now_ms: i64) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse {
+        setError("invalid network session handle");
+        return err_invalid_handle;
+    };
+    if (!box.runtime_initialized) return err_not_ready;
+    box.runtime.resumeAfterSuspend(gpa, now_ms) catch |err| {
+        box.setFailure(err);
+        setErrorFmt("network resume failed: {s}", .{@errorName(err)});
+        return err_generic;
+    };
+    box.phase = net_phase_reconnecting;
+    return ok;
 }
 
 /// Record the perk traffic for player 0.
@@ -965,9 +1597,10 @@ fn flushPerkEvents(box: *SessionBox, tick_index: u64) void {
 /// cannot answer different questions about the same run.
 pub fn claimedShots(session: *const crimson_zig.session.DeterministicSession) state_mod.PlayerShots {
     if (session.game_mode == .typo) {
+        const weapon_shots = crimson_zig.survival_progression.player0Shots(session.state);
         return .{
-            .fired = session.state.typo.typing.submit_count,
-            .hit = session.state.typo.typing.match_count,
+            .fired = @max(session.state.typo.typing.submit_count, weapon_shots.fired),
+            .hit = @max(session.state.typo.typing.match_count, weapon_shots.hit),
         };
     }
     return crimson_zig.survival_progression.player0Shots(session.state);
@@ -1125,6 +1758,10 @@ pub export fn crimson_host_session_tick(
             .creature_kill_count = update.creature_kill_count,
             .most_used_weapon_id = update.most_used_weapon_id,
             .quest_completed = @intFromBool(box.runner.session.quest_completed),
+            .tutorial_stage_index = box.runner.session.state.tutorial_overlay.prompt_stage_index,
+            .tutorial_prompt_alpha = box.runner.session.state.tutorial_overlay.prompt_alpha,
+            .tutorial_hint_index = box.runner.session.state.tutorial_overlay.hint_index,
+            .tutorial_hint_alpha = box.runner.session.state.tutorial_overlay.hint_alpha,
         };
     }
     return ok;
@@ -1159,6 +1796,10 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         setError("invalid session handle");
         return err_invalid_handle;
     };
+    return snapshotForRunner(&box.runner, 0, buf, len);
+}
+
+fn snapshotForRunner(runner: *live_runner.LiveRunner, local_slot: usize, buf: ?[*]u8, len: ?*u32) i32 {
     const len_ptr = len orelse {
         setError("len is null");
         return err_invalid_input;
@@ -1167,12 +1808,12 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
     var header: SnapshotHeader = .{
         .magic = snapshot_magic,
         .version = abi_version,
-        .tick_lo = @truncate(box.runner.session.tick_index),
-        .tick_hi = @truncate(box.runner.session.tick_index >> 32),
-        .game_mode = @intFromEnum(box.runner.session.game_mode),
-        .world_size = box.runner.session.world_size,
-        .elapsed_ms_sim = box.runner.session.elapsed_ms_sim,
-        .perk_pending_count = box.runner.perkPendingCount(),
+        .tick_lo = @truncate(runner.*.session.tick_index),
+        .tick_hi = @truncate(runner.*.session.tick_index >> 32),
+        .game_mode = @intFromEnum(runner.*.session.game_mode),
+        .world_size = runner.*.session.world_size,
+        .elapsed_ms_sim = runner.*.session.elapsed_ms_sim,
+        .perk_pending_count = runner.*.perkPendingCount(),
         .perk_choice_count = 0,
         .perk_choices = [_]i32{0} ** 7,
         .player_count = 0,
@@ -1181,23 +1822,23 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         .secondary_count = 0,
         .bonus_count = 0,
         .particle_count = 0,
-        .energizer_timer = box.runner.session.state.bonuses.energizer,
-        .freeze_timer = box.runner.session.state.bonuses.freeze,
+        .energizer_timer = runner.*.session.state.bonuses.energizer,
+        .freeze_timer = runner.*.session.state.bonuses.freeze,
         .monster_vision = 0,
         .glow_count = 0,
         .sprite_effect_count = 0,
-        .weapon_power_up_timer = box.runner.session.state.bonuses.weapon_power_up,
-        .reflex_boost_timer = box.runner.session.state.bonuses.reflex_boost,
-        .double_experience_timer = box.runner.session.state.bonuses.double_experience,
+        .weapon_power_up_timer = runner.*.session.state.bonuses.weapon_power_up,
+        .reflex_boost_timer = runner.*.session.state.bonuses.reflex_boost,
+        .double_experience_timer = runner.*.session.state.bonuses.double_experience,
     };
 
     // Monster Vision is a per-player perk that draws a yellow aura over every
     // creature (draw_creature_overlays / build_draw_context); surface it as a
     // global flag keyed on the local player.
     {
-        const players_const = box.runner.session.playersConst();
-        if (players_const.len > 0 and
-            crimson_zig.perks.perkActive(&players_const[0], crimson_zig.perks.PerkId.monster_vision))
+        const players_const = runner.*.session.playersConst();
+        if (local_slot < players_const.len and
+            crimson_zig.perks.perkActive(&players_const[local_slot], crimson_zig.perks.PerkId.monster_vision))
         {
             header.monster_vision = 1;
         }
@@ -1210,37 +1851,37 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
         // diverged from the player's first level-up. Reporting an empty offer
         // until the menu is opened is the correct answer here -- the roll
         // belongs to the open, which is a recorded moment.
-        const choices = box.runner.preparedPerkChoices();
+        const choices = runner.*.preparedPerkChoices();
         header.perk_choice_count = @intCast(@min(choices.len, header.perk_choices.len));
         for (choices[0..header.perk_choice_count], 0..) |choice, idx| {
             header.perk_choices[idx] = @intFromEnum(choice);
         }
     }
 
-    const players = box.runner.session.playersConst();
+    const players = runner.*.session.playersConst();
     header.player_count = @intCast(players.len);
-    for (box.runner.session.creatures.entries) |entry| {
+    for (runner.*.session.creatures.entries) |entry| {
         if (entry.active) header.creature_count += 1;
     }
-    for (box.runner.session.projectiles.entries) |entry| {
+    for (runner.*.session.projectiles.entries) |entry| {
         if (entry.active) header.projectile_count += 1;
     }
-    for (box.runner.session.secondary_projectiles.entries) |entry| {
+    for (runner.*.session.secondary_projectiles.entries) |entry| {
         if (entry.active) header.secondary_count += 1;
     }
-    for (box.runner.session.bonuses.entries) |entry| {
+    for (runner.*.session.bonuses.entries) |entry| {
         if (entry.bonus_id != .unused and !entry.picked) header.bonus_count += 1;
     }
     // Live sprite-effect entries, using draw_effect_pool's liveness gate.
-    for (box.runner.session.effects.entries) |entry| {
+    for (runner.*.session.effects.entries) |entry| {
         if (entry.flags != 0 and entry.age >= 0.0) header.particle_count += 1;
     }
     // Live flame/bubblegun particles (draw_particle_pool's `active` gate).
-    for (box.runner.session.particles.entries) |entry| {
+    for (runner.*.session.particles.entries) |entry| {
         if (entry.active) header.glow_count += 1;
     }
     // Live sprite effects (draw_sprite_effect_pool's `active` gate).
-    for (box.runner.session.sprite_effects.entries) |entry| {
+    for (runner.*.session.sprite_effects.entries) |entry| {
         if (entry.active) header.sprite_effect_count += 1;
     }
 
@@ -1302,7 +1943,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .aux_timer = player.aux_timer,
         });
     }
-    for (box.runner.session.creatures.entries, 0..) |entry, creature_slot| {
+    for (runner.*.session.creatures.entries, 0..) |entry, creature_slot| {
         if (!entry.active) continue;
         const wire_flags: u32 = entry.flags | (if (entry.plague_infected) creature_wire_flag_plague else 0);
         writeStruct(out, &offset, CreatureSnap{
@@ -1325,7 +1966,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .generation = entry.presentation_generation,
         });
     }
-    for (box.runner.session.projectiles.entries, 0..) |entry, proj_slot| {
+    for (runner.*.session.projectiles.entries, 0..) |entry, proj_slot| {
         if (!entry.active) continue;
         writeStruct(out, &offset, ProjectileSnap{
             .x = entry.pos.x,
@@ -1342,7 +1983,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .pool_index = @intCast(proj_slot),
         });
     }
-    for (box.runner.session.secondary_projectiles.entries) |entry| {
+    for (runner.*.session.secondary_projectiles.entries) |entry| {
         if (!entry.active) continue;
         writeStruct(out, &offset, SecondarySnap{
             .x = entry.pos.x,
@@ -1353,7 +1994,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .type_id = @intFromEnum(entry.type_id),
         });
     }
-    for (box.runner.session.bonuses.entries) |entry| {
+    for (runner.*.session.bonuses.entries) |entry| {
         if (entry.bonus_id == .unused or entry.picked) continue;
         writeStruct(out, &offset, BonusSnap{
             .x = entry.pos.x,
@@ -1364,7 +2005,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .amount = entry.amount,
         });
     }
-    for (box.runner.session.effects.entries) |entry| {
+    for (runner.*.session.effects.entries) |entry| {
         if (entry.flags == 0 or entry.age < 0.0) continue;
         writeStruct(out, &offset, ParticleSnap{
             .x = entry.pos.x,
@@ -1382,7 +2023,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .flags = entry.flags,
         });
     }
-    for (box.runner.session.particles.entries) |entry| {
+    for (runner.*.session.particles.entries) |entry| {
         if (!entry.active) continue;
         writeStruct(out, &offset, ParticleGlowSnap{
             .x = entry.pos.x,
@@ -1396,7 +2037,7 @@ pub export fn crimson_host_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
             .style_id = @intFromEnum(entry.style_id),
         });
     }
-    for (box.runner.session.sprite_effects.entries) |entry| {
+    for (runner.*.session.sprite_effects.entries) |entry| {
         if (!entry.active) continue;
         writeStruct(out, &offset, SpriteEffectSnap{
             .x = entry.pos.x,
@@ -1420,12 +2061,15 @@ pub export fn crimson_host_audio_events(handle: u64, buf: ?[*]u8, len: ?*u32) i3
         setError("invalid session handle");
         return err_invalid_handle;
     };
+    return audioEventsPayload(box.last_audio, buf, len);
+}
+
+fn audioEventsPayload(audio: live_runner.FrameAudioEvents, buf: ?[*]u8, len: ?*u32) i32 {
     const len_ptr = len orelse {
         setError("len is null");
         return err_invalid_input;
     };
 
-    const audio = box.last_audio;
     var flags: u32 = 0;
     if (audio.perk_menu_opened) flags |= audio_flag_perk_menu_opened;
     if (audio.trigger_game_tune) flags |= audio_flag_trigger_game_tune;
@@ -1493,18 +2137,22 @@ pub export fn crimson_host_terrain_info(handle: u64, out_info: ?*TerrainInfo) i3
         setError("invalid session handle");
         return err_invalid_handle;
     };
+    return terrainInfoForRunner(&box.runner, out_info);
+}
+
+fn terrainInfoForRunner(runner: *const live_runner.LiveRunner, out_info: ?*TerrainInfo) i32 {
     const out = out_info orelse {
         setError("out_info is null");
         return err_invalid_input;
     };
-    const setup = box.runner.terrain_setup;
+    const setup = runner.terrain_setup;
     out.* = .{
         .terrain_slot_0 = @intCast(setup.terrain_slots[0]),
         .terrain_slot_1 = @intCast(setup.terrain_slots[1]),
         .terrain_slot_2 = @intCast(setup.terrain_slots[2]),
         .terrain_seed = setup.terrain_seed,
-        .terrain_size = box.runner.session.terrain_size,
-        .world_size = box.runner.session.world_size,
+        .terrain_size = runner.session.terrain_size,
+        .world_size = runner.session.world_size,
     };
     return ok;
 }
@@ -1517,12 +2165,15 @@ pub export fn crimson_host_terrain_fx(handle: u64, buf: ?[*]u8, len: ?*u32) i32 
         setError("invalid session handle");
         return err_invalid_handle;
     };
+    return terrainFxPayload(box.last_terrain_fx, buf, len);
+}
+
+fn terrainFxPayload(batch: terrain_fx_mod.TerrainFxBatch, buf: ?[*]u8, len: ?*u32) i32 {
     const len_ptr = len orelse {
         setError("len is null");
         return err_invalid_input;
     };
 
-    const batch = box.last_terrain_fx;
     const header: TerrainFxHeader = .{
         .version = abi_version,
         .decal_count = @intCast(batch.decal_count),
@@ -1578,12 +2229,222 @@ pub export fn crimson_host_terrain_fx(handle: u64, buf: ?[*]u8, len: ?*u32) i32 
     return ok;
 }
 
+const NetStatusSlot = struct {
+    slot_index: i32 = -1,
+    connected: bool = false,
+    ready: bool = false,
+    is_host: bool = false,
+    peer_name: []const u8 = "",
+};
+
+const NetStatusSummary = struct {
+    connected: usize = 0,
+    expected: usize = 1,
+    ready: usize = 0,
+    session_id: []const u8 = "",
+    room_code: [4]u8 = [_]u8{0} ** 4,
+    room_code_len: usize = 0,
+    slots: [state_mod.max_players]NetStatusSlot = [_]NetStatusSlot{.{}} ** state_mod.max_players,
+    slot_count: usize = 0,
+};
+
+fn copyNetStatusSlots(summary: *NetStatusSummary, slots: []const crimson_zig.net.schema_shared.SlotState) void {
+    summary.slot_count = @min(slots.len, summary.slots.len);
+    for (slots[0..summary.slot_count], 0..) |slot, idx| {
+        summary.slots[idx] = .{
+            .slot_index = slot.slot_index,
+            .connected = slot.connected,
+            .ready = slot.ready,
+            .is_host = slot.is_host,
+            .peer_name = slot.peer_name,
+        };
+        if (slot.connected) summary.connected += 1;
+        if (slot.ready) summary.ready += 1;
+    }
+}
+
+fn networkStatusSummary(runtime: *const network_live_runtime.NetworkLiveRuntime) NetStatusSummary {
+    return switch (runtime.*) {
+        .host => |host| blk: {
+            const lobby = host.session.runtime.lobby;
+            var result: NetStatusSummary = .{
+                .connected = 1,
+                .expected = @intCast(std.math.clamp(lobby.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players)))),
+                .ready = if (lobby.host_ready) 1 else 0,
+                .session_id = lobby.session_id,
+                .slot_count = @intCast(std.math.clamp(lobby.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players)))),
+            };
+            for (result.slots[0..result.slot_count], 0..) |*slot, idx| slot.slot_index = @intCast(idx);
+            result.slots[0] = .{ .slot_index = 0, .connected = true, .ready = lobby.host_ready, .is_host = true, .peer_name = "host" };
+            for (lobby.peers.items) |peer| {
+                if (peer.slot_index < 0) continue;
+                const idx: usize = @intCast(peer.slot_index);
+                if (idx >= result.slot_count) continue;
+                result.slots[idx] = .{ .slot_index = peer.slot_index, .connected = true, .ready = peer.ready, .peer_name = peer.peer_name };
+                result.connected += 1;
+                if (peer.ready) result.ready += 1;
+            }
+            break :blk result;
+        },
+        .client => |client| blk: {
+            var result: NetStatusSummary = .{};
+            if (client.session.runtime.lobby.lobby_state_latest) |state| {
+                result.expected = @intCast(std.math.clamp(state.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players))));
+                result.session_id = state.session_id;
+                copyNetStatusSlots(&result, state.slots);
+            } else if (client.session.runtime.lobby.welcome) |welcome| {
+                result.expected = @intCast(std.math.clamp(welcome.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players))));
+                result.connected = if (welcome.accepted) 1 else 0;
+                result.ready = result.connected;
+                result.session_id = welcome.session_id;
+            }
+            break :blk result;
+        },
+        .rollback => |rollback| blk: {
+            var result: NetStatusSummary = .{
+                .expected = @intCast(std.math.clamp(rollback.session.options.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players)))),
+            };
+            if (rollback.session.room_state_latest) |state| {
+                result.expected = @intCast(std.math.clamp(state.player_count, @as(i32, 1), @as(i32, @intCast(state_mod.max_players))));
+                result.session_id = state.session_id;
+                result.room_code = state.room_code.bytes;
+                result.room_code_len = result.room_code.len;
+                copyNetStatusSlots(&result, state.slots);
+            } else if (rollback.session.room_code_latest) |code| {
+                result.room_code = code.bytes;
+                result.room_code_len = result.room_code.len;
+                result.connected = if (rollback.session.accepted) 1 else 0;
+                result.ready = if (rollback.session.sent_ready) 1 else 0;
+            }
+            break :blk result;
+        },
+    };
+}
+
+fn phaseText(phase: i32) []const u8 {
+    return switch (phase) {
+        net_phase_lobby => "lobby",
+        net_phase_running => "running",
+        net_phase_reconnecting => "reconnecting",
+        net_phase_failed => "failed",
+        else => "connecting",
+    };
+}
+
+pub export fn crimson_host_net_status(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse {
+        setError("invalid network session handle");
+        return err_invalid_handle;
+    };
+    const runtime = if (box.runtime_initialized) &box.runtime else {
+        setError("network runtime is unavailable");
+        return err_invalid_handle;
+    };
+    const len_ptr = len orelse {
+        setError("len is null");
+        return err_invalid_input;
+    };
+    const summary = networkStatusSummary(runtime);
+    const payload = .{
+        .phase = phaseText(box.phase),
+        .role = switch (runtime.*) {
+            .host => "host",
+            .client => "join",
+            .rollback => |rollback| switch (rollback.session.options.role) {
+                .host => "host",
+                .join => "join",
+            },
+        },
+        .netcode = switch (runtime.*) {
+            .host, .client => "lockstep",
+            .rollback => "rollback",
+        },
+        .local_slot = if (runtime.localInputSlot()) |slot| @as(i32, @intCast(slot)) else -1,
+        .bound_port = runtime.boundPort(),
+        .room_code = summary.room_code[0..summary.room_code_len],
+        .session_id = summary.session_id,
+        .expected = summary.expected,
+        .connected = summary.connected,
+        .ready = summary.ready,
+        .started = runtime.runnerForLocalInput() != null,
+        .mode_id = if (runtime.runConfigForResults()) |config| @intFromEnum(config.game_mode) else 0,
+        .slots = summary.slots[0..summary.slot_count],
+        .failure = box.last_failure[0..box.last_failure_len],
+    };
+    const json = std.json.Stringify.valueAlloc(gpa, payload, .{}) catch {
+        setError("network status allocation failed");
+        return err_generic;
+    };
+    defer gpa.free(json);
+    const out = buf orelse {
+        len_ptr.* = @intCast(json.len);
+        return ok;
+    };
+    if (len_ptr.* < json.len) {
+        len_ptr.* = @intCast(json.len);
+        setError("network status buffer too small");
+        return err_buffer_too_small;
+    }
+    @memcpy(out[0..json.len], json);
+    len_ptr.* = @intCast(json.len);
+    return ok;
+}
+
+fn networkRunner(box: *NetworkSessionBox) ?*live_runner.LiveRunner {
+    if (!box.runtime_initialized) return null;
+    return box.runtime.runnerForLocalInput();
+}
+
+pub export fn crimson_host_net_snapshot(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse return err_invalid_handle;
+    const runner = networkRunner(box) orelse {
+        setError("network match is not running");
+        return err_not_ready;
+    };
+    const local_slot = box.runtime.localInputSlot() orelse 0;
+    return snapshotForRunner(runner, local_slot, buf, len);
+}
+
+pub export fn crimson_host_net_audio_events(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse return err_invalid_handle;
+    const rc = audioEventsPayload(box.pending_audio, buf, len);
+    if (rc == ok and buf != null) box.pending_audio = .{};
+    return rc;
+}
+
+pub export fn crimson_host_net_terrain_info(handle: u64, out_info: ?*TerrainInfo) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse return err_invalid_handle;
+    const runner = networkRunner(box) orelse return err_not_ready;
+    return terrainInfoForRunner(runner, out_info);
+}
+
+pub export fn crimson_host_net_terrain_fx(handle: u64, buf: ?[*]u8, len: ?*u32) i32 {
+    last_error_len = 0;
+    const box = networkBoxForHandle(handle) orelse return err_invalid_handle;
+    const rc = terrainFxPayload(box.pending_terrain_fx, buf, len);
+    if (rc == ok and buf != null) box.pending_terrain_fx = .{};
+    return rc;
+}
+
 /// Passthrough to the native replay verifier. Lets hosts (and the M1 test
 /// gate) validate that this library links the exact verified replay stack.
 /// Start (or restart) replay capture on a session. Safe to call mid-run; it
 /// discards anything captured so far.
 pub export fn crimson_host_replay_begin(handle: u64) i32 {
     last_error_len = 0;
+    if (networkBoxForHandle(handle)) |network| {
+        network.record_ticks.clearRetainingCapacity();
+        network.record_events.clearRetainingCapacity();
+        network.record_rng.clearRetainingCapacity();
+        network.record_overflow = false;
+        network.record_stats = .{};
+        network.recording = true;
+        return ok;
+    }
     const box = boxForHandle(handle) orelse {
         setError("invalid session handle");
         return err_invalid_handle;
@@ -1745,13 +2606,14 @@ fn encodeCapture(
 /// same non-failure as finish reporting size 0.
 pub export fn crimson_host_replay_detach(handle: u64, out_recording: ?*u64) i32 {
     last_error_len = 0;
-    const box = boxForHandle(handle) orelse {
-        setError("invalid session handle");
-        return err_invalid_handle;
-    };
     const out = out_recording orelse {
         setError("out_recording is null");
         return err_invalid_input;
+    };
+    if (networkBoxForHandle(handle)) |network| return detachNetworkRecording(network, out);
+    const box = boxForHandle(handle) orelse {
+        setError("invalid session handle");
+        return err_invalid_handle;
     };
     const state = recordingState(box);
     switch (state) {
@@ -1791,6 +2653,67 @@ pub export fn crimson_host_replay_detach(handle: u64, out_recording: ?*u64) i32 
     // secured, so a failure above cannot leave the rows owned by nobody.
     rec.* = takeRecording(box);
     rec.generation = next_recording_generation;
+    next_recording_generation +%= 1;
+    if (next_recording_generation == 0) next_recording_generation = 1;
+    recording_slots[index] = rec;
+    out.* = handleFor(index, rec.generation);
+    return ok;
+}
+
+fn detachNetworkRecording(box: *NetworkSessionBox, out: *u64) i32 {
+    if (!box.recording) {
+        setError("replay recording was never started (call crimson_host_replay_begin)");
+        return err_generic;
+    }
+    if (box.record_overflow) {
+        setError("network replay recording is incomplete");
+        return err_generic;
+    }
+    if (box.record_ticks.items.len == 0) {
+        box.recording = false;
+        out.* = 0;
+        return ok;
+    }
+    const runner = networkRunner(box) orelse {
+        setError("network match is not running");
+        return err_not_ready;
+    };
+    if (box.record_ticks.items.len != runner.session.tick_index) {
+        setErrorFmt("network recording covers {d} ticks but the session ran {d}", .{
+            box.record_ticks.items.len, runner.session.tick_index,
+        });
+        return err_generic;
+    }
+    refreshNetworkRecordConfig(box, runner);
+    updateNetworkRecordStats(box, runner);
+    const rec = gpa.create(RecordingBox) catch {
+        setError("recording allocation failed");
+        return err_generic;
+    };
+    lockRecordings();
+    defer unlockRecordings();
+    var slot: ?usize = null;
+    for (recording_slots, 0..) |entry, idx| if (entry == null) {
+        slot = idx;
+        break;
+    };
+    const index = slot orelse {
+        gpa.destroy(rec);
+        setError("too many recordings in flight; encode or destroy one first");
+        return err_out_of_sessions;
+    };
+    rec.* = .{
+        .config = box.record_config,
+        .ticks = box.record_ticks,
+        .events = box.record_events,
+        .rng = box.record_rng,
+        .stats = box.record_stats,
+        .generation = next_recording_generation,
+    };
+    box.record_ticks = .empty;
+    box.record_events = .empty;
+    box.record_rng = .empty;
+    box.recording = false;
     next_recording_generation +%= 1;
     if (next_recording_generation == 0) next_recording_generation = 1;
     recording_slots[index] = rec;

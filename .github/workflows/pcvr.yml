@@ -1,0 +1,93 @@
+name: PCVR personal build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_artifact:
+        description: Upload Windows/Linux packages (private repositories only)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PCVR_CACHE: ${{ github.workspace }}/.pcvr-ci-cache
+
+jobs:
+  pcvr:
+    name: Build asset-free PCVR packages
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: Refuse public binary publication
+        if: ${{ inputs.publish_artifact && !github.event.repository.private }}
+        shell: pwsh
+        run: |
+          throw 'Public workflow artifacts would redistribute upstream-linked binaries. Validate without upload, or use a private standalone repository.'
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Assert asset-free checkout
+        shell: pwsh
+        run: ./crimson-vr/tools/assert_quest_asset_free.ps1
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.16.0"
+
+      - name: Cache pinned PCVR downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PCVR_CACHE }}
+          key: pcvr-tools-godot-4.7
+
+      - name: Restore PCVR toolchain
+        id: pcvr-tools
+        shell: pwsh
+        run: ./crimson-vr/tools/bootstrap_pcvr_ci.ps1 -CacheDir $env:PCVR_CACHE
+
+      - name: Test VR frontend
+        shell: pwsh
+        run: dotnet test crimson-vr/tests/CrimsonVR.Tests/CrimsonVR.Tests.csproj
+
+      - name: Build desktop native libraries
+        shell: pwsh
+        run: ./crimson-vr/tools/build_libcrimson.ps1 -Linux
+
+      - name: Export Windows and Linux packages
+        shell: pwsh
+        run: ./crimson-vr/tools/build_pcvr.ps1 -Godot '${{ steps.pcvr-tools.outputs.godot }}'
+
+      - name: Upload private personal-build packages
+        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CrimsonVR-PCVR-${{ github.run_number }}
+          path: artifacts/pcvr/CrimsonVR-PCVR-*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Public validation summary
+        if: ${{ !inputs.publish_artifact }}
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY 'Windows and Linux PCVR packages built successfully. No binary artifact was uploaded.'

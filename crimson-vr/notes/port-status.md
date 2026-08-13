@@ -6,44 +6,85 @@ and what's still missing to reach faithful parity with the base game. The
 work is almost entirely the **presentation + interaction** layer, so most gaps
 below are "not surfaced in VR yet", not "not simulated".
 
-_Last updated: 2026-08-09. The original full-game parity audit remains below;
-the current pass additionally records Quest MR, hands, replay, layout editing,
-and the user-supplied asset/bootstrap workflow._
+_Last updated: 2026-08-13._
+
+## Release readiness
+
+The 2026-08-13 release audit is **NO-GO**. The current candidate builds, but the
+reordered rollback recovery smoke fails and native Windows networking tests are
+nondeterministic. Broader headset/relay validation, clean-machine workflow
+rehearsals, derived-content review, and code/binary distribution decisions also
+remain open. The canonical blocker register, commands, and evidence template are
+in [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md).
+
+Feature status below describes implementation coverage; it must not be read as
+release approval.
+
+## Feature-review reconciliation
+
+- **Tutorial is implemented.** Its reachable prompt/actions use a sidecar panel
+  outside the playfield sightline in both Cabinet and Tabletop, aimed toward the
+  recentered seat with the same stable upright-yaw rule as Cabinet power-up
+  information. The native runtime already owned the full event-driven nine-stage
+  lesson. ABI v24 exposes prompt/hint indices and fades; the VR panel translates
+  them to controller/hand language and provides Skip, Repeat and Play-a-game
+  exits. Practice-round copy explicitly requires collecting each dropped
+  power-up as well as clearing its wave, matching the director's advance gate.
+- **Typo'Shooter remains deliberately unsurfaced.** A poke keyboard is not a
+  viable real-time combat input. It needs a separate voice or physical-keyboard
+  design; this is a product/input decision, not missing simulation work.
+- **Multiplayer remains post-v1, with direct LAN implemented through slice 4.**
+  ABI v27 and the VR frontend support 2-4 player Survival/Rush hosting and
+  joining, negotiated-slot controls/HUD/results, and per-player FX. Hardware
+  validation remains. Canonical perk commands/replays plus relay room-code UI,
+  DNS and resume reconnect are implemented; an operated relay and physical
+  recovery validation remain. Score
+  records use the negotiated player count and the browser's 1-4 filter.
+- **Statistics is complete for local/offline use:** lifetime mode stats,
+  Weapons/Perks databases, a top-100 score browser and Credits. The browser has
+  mode/date/player/name filters, paging and quest navigation. The original
+  internet-score option is omitted because its service is defunct.
+- **Credits and AlienZooKeeper are implemented.** The direct Secret route is an
+  accessible VR adaptation of the original obscure text-click puzzle. The
+  minigame retains its 6x6 board, any-two swap, horizontal-first match scan,
+  9.6s timer, +2s per match, score, Reset and Back.
 
 ## Implemented in VR
 
 **Flow / screens**
-- Boot straight into a **main menu** (custom, using the original `ui_signCrimson`
-  logo + `ui_menuItem` neon-bar plates): Play Game, Options, Statistics (inert),
+- First launch opens a short **direct-touch guide** with Continue and Adjust
+  Reach; returning players boot straight into the **main menu** (custom, using the original `ui_signCrimson`
+  logo + `ui_menuItem` neon-bar plates): Play Game, Options, Statistics,
   Quit. **[audit]** Fidelity caveats: the base menu items slide-in/rotate on a
   staggered timeline with hover-fade alpha ramps and an additive "ready" glow
   (`menu.py:405-410,467-480,510-523`); VR plates are static poke targets. The
   base game's pulsing additive menu **cursor** (`ui/cursor.py:41-92`) has no VR
   analog by design (poke interaction) — `ui_cursor` is repurposed as the
   move-hand reticle.
-- **Survival gameplay** rendered as the tabletop diorama.
-- **Pause** menu (flat toggle + Resume / Settings / Quit). Quit returns to the
-  main menu; the main menu's Quit exits the app. **[audit]** The base pause menu
+- **Survival, Rush, Quests and Tutorial gameplay** rendered as the diorama.
+- **Pause** menu (flat toggle + Resume / Settings / Exit to Main Menu). Leaving
+  a run requires a consequence confirmation; the main menu's Quit exits the app. **[audit]** The base pause menu
   is a reskin of the animated main-menu system (plates + sign + slide-in +
   world-fade background, `pause_menu.py:45-437`); VR's flat panel is a deliberate
   interaction substitute, not a fidelity match. Base layout is Options/Quit/Back
   (ESC resumes); VR is Resume/Settings/Quit.
-- **Options** screen mirroring the base game (segmented `ui_rectOn/Off` sliders:
-  Sound / Music / Graphics detail; `ui_checkOn/Off` "UI Info texts") + a **VR
+- **Options** screen mirroring the applicable base-game controls (segmented
+  `ui_rectOn/Off` sliders: Sound / Music / Graphics detail) + a **VR
   Settings** submenu (movement hand, dead zone, debug overlays, **render-scale
   supersampling 0.6-1.6× and MSAA Off/2×/4×** — the latter two were undocumented;
   `SettingsMenu.cs:99-118`, `Main.cs:405-417`).
-  **[audit] "UI Info texts" is INERT**: the checkbox persists
-  `UserSettings.UiInfoTexts` but nothing reads it (`Main.cs:198`). Undisclosed
-  until now — either wire it (bonus hover labels are its base-game consumer) or
-  label it inert like Statistics.
+  The inert "UI Info texts" checkbox was removed from the player-facing menu on
+  2026-08-11; the persisted field remains only for config compatibility until
+  bonus hover labels provide a real consumer.
   **[audit]** "Graphics detail" only culls VR-side nodes
   (`Diorama.SetGraphicsDetail`, `Diorama.cs:156-174`); it does not send
   `detail_preset` to the sim (ABI supports it, `crimson_host.h:339`), so sim-side
   particle-spawn thinning never varies. See also the `fx_detail` semantics row in
   the draw-pass table.
 - **Level-up / perk pick**: level-up button + accumulated counter + `ui_levelUp`
-  sound; poke to open cards; per-card "?" press-and-hold description popup.
+  sound; a card poke selects it and pins its description, then the separately
+  positioned Confirm Perk Selection button commits. Confirm is absent until a
+  card in the current offer is selected and hides immediately when pressed.
   **[audit]** This *replaces* (not omits) the base game's perk-prompt banner — a
   `ui_menuItem` bar that hinge-swings in from the top-right carrying
   `ui_textLevelUp` with an additive pulse (`perk_prompt_ui.py:91-131`) — and the
@@ -53,7 +94,7 @@ and the user-supplied asset/bootstrap workflow._
 - **Game-over / results screen** (2026-07-09, ABI v10): death → ~1.2 s pacing
   delay (stand-in for the base death VO + death-timer) → the results panel
   appears immediately as ONE composite death screen (base two-phase panel):
-  when the score ranks (base top-100 gate; ours is the local top-10) the panel
+  when the score ranks (the base top-100 gate) the panel
   opens raised/pushed back with the virtual keyboard in front ("State your
   name, trooper!", buttons hidden), then drops to the buttons phase on Enter;
   unranked deaths open straight in the buttons phase — with the `ui_textReaper` banner,
@@ -62,13 +103,14 @@ and the user-supplied asset/bootstrap workflow._
   (`ui_wicons`) + display name (weapons table baked into the sprite manifest),
   frags, hit %, and Play Again / Main Menu buttons; `UI_PANELCLICK` cue on
   open. Fidelity caveats: no ease-out slide-in / world alpha-fade, no
-  High-scores button (browser screen doesn't exist yet), local top-10 not
-  top-100, no hover tooltips, keyboard replaces inline text entry (by design).
+  no hover tooltips; keyboard replaces inline text entry (by design). The full
+  local browser is reached through Statistics.
   Kill count + most-used weapon crossed the ABI in **v10**
   (`creature_kill_count`, `most_used_weapon_id` in the tick result).
-- **Arena recenter** — left `menu_button` / right `ax_button` reposition + re-yaw
-  the tabletop, plus initial auto-place (`Main.cs:1076-1122`). **[audit]**
-  (was undocumented).
+- **Arena recenter** — hold left `menu_button` / right `ax_button` for 700 ms to
+  reposition + re-yaw the tabletop, with head-relative progress/completion
+  feedback directly in front of the player rather than attached to the menu,
+  plus initial auto-place. The mapping is included in first-run and Controls.
 - **Validation checklist** (dev tool) is a paged poke panel whose pass/fail state
   persists. Passed rows are retired between test batches; current untested and
   changed behavior receives fresh persistence keys.
@@ -80,7 +122,8 @@ and the user-supplied asset/bootstrap workflow._
   Level-Up and hand-control rectangle. Edit mode previews moving real creature
   sprites, the maximum seven perk cards and an x3 level-up badge. Layout dumps
   are durable and ADB-readable; the 2026-08-09 headset layout is baked into clean
-  profile defaults with exactly mirrored action buttons.
+  profile defaults with exactly mirrored action buttons. "Reset buttons & pad"
+  now requires confirmation and offers an in-place undo for the current mode.
 
 **Presentation (diorama)**
 - Creatures (animated sheets, per-type tint, energizer/freeze/hit-flash, death →
@@ -106,8 +149,8 @@ and the user-supplied asset/bootstrap workflow._
 - Audio: SFX routed from the sim's per-tick audio events; menu music
   (`crimson_theme`) + in-game (`gt1_ingame`); level-up cue. **[audit]** Multiple
   behavioral gaps vs. the base game — see the new **Audio parity** section.
-- Haptics (fire / damage / reload). Persisted settings + local highscores
-  (top-10; base game keeps top-**100** per-mode tables — see meta section).
+- Haptics (fire / damage / reload). Persisted settings + local top-100
+  high-score tables with timestamp, player-count and run-stat metadata.
 - Fire-Bullets shot audio plays the base game's dual-sample substitution
   (`FIRE_BULLETS` + `PLASMA_MINIGUN`, `AudioBank.cs:165-170`). **[audit]**
   (undocumented faithful detail).
@@ -117,14 +160,22 @@ and the user-supplied asset/bootstrap workflow._
   turns a user-owned Crimsonland Classic install into an integrity-checked pack
   for PCVR or the Quest app inbox; import is traversal-safe and atomic, and a
   failed replacement preserves the working asset tree. Clean PCVR and Quest
-  imports have both passed.
+  imports have both passed. On 2026-08-11 the private-copy CI build contract was
+  reproduced locally and its fresh-key Release APK was clean-installed on Quest
+  with the known-good pack staged; the app was deliberately left stopped for a
+  clean first-launch import check. APK SHA-256 is `9612C1D6…CAB6C4`; the matching
+  local/headset pack SHA-256 is `B43B203B…F0736F`.
+- Reproducible asset-free PCVR packaging now builds Windows x64 and cross-builds
+  Linux x64 from one Windows host. The local scripts and private-repository CI
+  emit self-contained archives with loose, hash-recorded native libraries; public
+  CI validates without uploading upstream-linked binaries.
 
 ## Provided by the sim already (just needs surfacing)
 
 The embedded sim simulates the **whole game**, so these need only VR UI/render:
 - **All game modes** — `HostSessionConfig.game_mode` (+ `quest_level_key`) selects
-  Survival / Quest / Rush / Typo'Shooter / Tutorial. VR currently **hardcodes
-  Survival** (`game_mode:1`). **[audit]** The enum also has **DEMO=0** (attract
+  Survival / Quest / Rush / Typo'Shooter / Tutorial. VR surfaces Survival,
+  Rush, Quests and Tutorial. **[audit]** The enum also has **DEMO=0** (attract
   mode) and Tutorial is id **8** (non-contiguous), plus a replay-playback mode
   exists desktop-side (`modes/replay_playback_mode.py`).
 - All **weapons** (~43 defined, 33 droppable), **58 perks** (verified,
@@ -167,30 +218,30 @@ them. Revisit only if the interaction model changes.
 | **Mods screen** (`mods.py`) | **Skip (v1)** | Desktop mod loader; out of scope. |
 | **"Show internet scores"** (high-scores browser checkbox) | **Skip** | Service defunct; local tables only. |
 | **Typo'Shooter surfacing** | **Blocked on design** | Sim supports it, but typing via poke keyboard is impractical at gameplay speed. Needs a VR input design (voice? hybrid?) before the mode is surfaced. Not a render/UI port task. |
-| **Network / co-op** | Out of scope v1 | (unchanged) |
+| **Network / co-op** | **In progress post-v1** | Slices 1-6 are implemented: native/VR direct LAN and relay room-code flow, explicit all-player ready-up, Survival/Rush, slot-aware presentation/results, canonical perk commands, multiplayer replay capture, DNS and reconnect/resync lifecycle. A two-player PC-host/Quest-client direct-LAN match and 59.6 Hz pacing are validated; broader hardware coverage and an operated relay remain pending. Casual Quests and the Python/native proof matrix are slices 7-8. See `notes/multiplayer-plan.md` and `notes/multiplayer-implementation.md`. |
 
 ## Screens & flow not yet in VR (exists in the base game)
 
 | Area | Base-game source | Status in VR |
 |---|---|---|
-| **Game-over / results screen** **[audit]** | `screens/results/game_over.py` | **DONE 2026-07-09** (see Implemented; ABI v10). Remaining fidelity deltas: slide-in/world-fade animation, High scores button (blocked on the browser screen), top-100 table, hover tooltips. |
-| **Quest results** **[audit]** | `screens/quest_views/quest_results.py`, `quests/results.py:25-192` | Missing. Animated time breakdown (base time counts up, life + unpicked-perk bonuses tick in 1s steps w/ `UI_CLINK_01`), Well-Done banner, unlock-reveal (weapon/perk), Play Again / Play Next / High Scores / Main Menu; 5.10 routes to end-note. |
-| **Quest failed** **[audit]** | `screens/quest_views/quest_failed.py:47-419` | Missing. Reaper banner, retry-count-dependent taunt lines, score preview, Play Again / Play Another / Main Menu. |
-| **End-note (game ending)** **[audit]** | `screens/quest_views/end_note.py:38-297` | Missing. Post-5.10 victory screen; hardcore-vs-normal body text (Splitter Gun / Typo unlock). |
-| **High-scores browser** **[audit]** | `screens/high_scores_view/*` | Missing. 100-entry scrollable table + right panel with 4 dropdowns (date filter / player count / mode / name slot), internet-scores checkbox, quest prev/next. VR keeps a local top-10 nothing displays. |
-| **Game-mode select** | `play_game.py` | Missing — Survival hardcoded. Note it's a **two-level** flow: mode select (player-count dropdown 1-4, per-mode tooltips, times-played counts) then the **quest stage/level select** (`quest_views/quests_menu.py`: 5 stage pages × 10 rows, hardcore checkbox, unlock gating). |
+| **Game-over / results screen** **[audit]** | `screens/results/game_over.py` | **DONE 2026-07-09** (see Implemented; ABI v10). Remaining fidelity deltas are cosmetic slide/world-fade and hover tooltips. |
+| **Quest results** **[audit]** | `screens/quest_views/quest_results.py`, `quests/results.py:25-192` | **Functional VR adaptation DONE.** Completion time, unlock advancement, Next/Retry/Quest Menu/Main Menu and the 5.10 end-note route are present. The animated life/unpicked-perk bonus breakdown and unlock-reveal presentation remain polish/parity gaps. |
+| **Quest failed** **[audit]** | `screens/quest_views/quest_failed.py:47-419` | **Functional VR adaptation DONE.** Failure result, Retry, Quest Menu and Main Menu are present; retry-count taunts/score preview remain. |
+| **End-note (game ending)** **[audit]** | `screens/quest_views/end_note.py:38-297` | **DONE.** Post-5.10 normal/hardcore text and Survival/Rush/Main Menu routes. |
+| **High-scores browser** **[audit]** | `screens/high_scores_view/*` | **DONE 2026-08-10 (local/offline).** Top-100 persistence, 10-row pages, date/player/mode/name filters and quest prev/next. Internet scores skipped because the service is defunct. |
+| **Game-mode select** | `play_game.py` | **DONE for supported VR modes.** Quests/Rush/Survival/Tutorial plus quest selection and hardcore. Typ'o is blocked on input design; multiplayer is post-v1. |
 | **Attract / demo mode** **[audit]** | `demo.py:74-811`, idle trigger `menu.py:276-283` | **Skip by default** (see VR-inapplicable table). Base: after 23s menu idle the game plays itself — 6 scripted variants, AI bots, "DEMO MODE (n/6)" overlay. |
 | **Boot sequence** | `screens/boot.py:38-262` | Partial-scope: publisher logo splashes **skipped by design** (see VR-inapplicable table); a custom VR boot with the `intro` track remains a future step. Listed so "boot straight into menu" isn't read as done. |
-| **Statistics** | `stats.py:90-343` | Menu item present but inert. **[audit]** Base screen is a hub: total playtime + links to High Scores / Weapon DB / Perk DB / Credits; backed by persisted 52-weapon usage counts + quest play counts (`save_status.py:52-55`). Plays `shortie_monk`. |
-| **Controls** | `controls.py` (+ `ui_textControls`) | Missing |
-| **Databases** (encyclopedia) | `databases_perks.py`, `databases_weapons.py` | Missing |
-| **Credits** | `credits.py` | Missing. **[audit]** Hides the secret button (`credits.py:507-525`) that opens AlienZooKeeper. |
-| **AlienZooKeeper easter egg** **[audit]** | `panels/alien_zookeeper.py:129-546` | Missing. Hidden, fully playable 6×6 **match-3 minigame** ("a puzzle game unfinished / ..or something more?"): click-to-swap, +2s per match, score, Reset/Back. Reached Statistics → Credits → secret button. |
+| **Statistics** | `stats.py:90-343` | **DONE 2026-08-10.** Lifetime per-mode statistics and routes to High Scores / Weapon DB / Perk DB / Credits. Per-screen music is cosmetic polish. |
+| **Controls** | `controls.py` (+ `ui_textControls`) | **DONE as a VR-specific controls reference.** |
+| **Databases** (encyclopedia) | `databases_perks.py`, `databases_weapons.py` | **DONE.** Unlock-aware perk and weapon browsing. |
+| **Credits** | `credits.py` | **DONE 2026-08-10.** Paged VR credits; direct Secret route replaces the original text-click puzzle. |
+| **AlienZooKeeper easter egg** **[audit]** | `panels/alien_zookeeper.py:129-546` | **DONE 2026-08-10.** Fully playable 6×6 swap/match minigame, +2s per match, score, timer, Reset/Back. |
 | **Mods** | `mods.py` | **Skip v1** (see VR-inapplicable table) |
-| **Network / co-op** | `network_lobby.py`, `network_session.py` | Missing (out of scope for v1) |
+| **Network / co-op** | `network_lobby.py`, `network_session.py`, `crimson-zig/src/net/` | **Slices 1-6 implemented; broader headset/operated-relay validation pending.** The poke-only flow defaults to relay room codes, keeps direct LAN under Advanced, and requires every connected player to Ready before starting. Survival/Rush, local-slot input/HUD/results, per-player effects, canonical perk choices, all-slot replay capture, DNS and resume reconnect/resync are wired. A PC-host/Quest-client direct match is validated at 59.6 Hz. Casual Quests and the Python/native proof matrix remain; see `notes/multiplayer-implementation.md`. |
 | **Demo-trial gating** **[audit]** | `demo_trial.py`, `ui/demo_trial_overlay.py` | **Skip** (see VR-inapplicable table — shareware-build-only). |
 | **Replay playback mode** | `modes/replay_playback_mode.py` | Playback remains missing; native **.crd recording is implemented and Quest-confirmed** (`notes/replay-recording-plan.md`). |
-| First-run seated **calibration** + **arena scale** UI | (VR-specific) | Arena & Layout editing is implemented and persisted; measured reach calibration remains deferred. |
+| First-run seated **calibration** + **arena scale** UI | (VR-specific) | First-run now teaches poke/recenter and routes Adjust Reach directly into the persisted Arena & Layout editor. Measured reach sampling remains deferred. |
 
 **Flow behaviors (cross-screen) not in VR [audit]:**
 - **Screen-fade transitions** — global black fade in/out entering gameplay
@@ -229,8 +280,8 @@ panel — art, UV math, alphas and thresholds verified matching `Hud.cs` vs
 | Aim spread circle | radius scales with `player.spread_heat` (`overlays.py:22-50`) | **DONE 2026-07-10** as the planned reticle spread ring: `spread_heat` now crosses the ABI (**v11**), ring radius = max(6, dist×heat×0.5)+2 game units at the aim point. |
 | Bonus-HUD slots | 16 slots sliding in/out from screen-left, `ui_indPanel` + icon + timer bar(s), dual-timer 2P variant, compact mode (`bonuses/hud.py`, `hud.py:738-874`) | Missing (needs bonus-HUD state over ABI). |
 | Weapon-name popup | on weapon change: panel + icon + name, 1s fade-in/hold/1s fade-out via `aux_timer` (`hud.py:876-936`) | Missing. |
-| Quest HUD | sliding top panel, progress panel + green bar, analog clock (pointer = 6°/s), mm:ss text; XP/bonus HUD shifts down 80px (`hud.py:530-634,62`) | Missing (mode not surfaced). |
-| Rush/Typo time HUD | clock + "{N} seconds" (`hud.py:692-736`); Typo adds typing box + floating creature name labels (`typo_mode.py:255-271`) | Missing (modes not surfaced). |
+| Quest HUD | sliding top panel, progress panel + green bar, analog clock (pointer = 6°/s), mm:ss text; XP/bonus HUD shifts down 80px (`hud.py:530-634,62`) | Missing even though Quests are surfaced; the sim still enforces the limit. |
+| Rush/Typo time HUD | clock + "{N} seconds" (`hud.py:692-736`); Typo adds typing box + floating creature name labels (`typo_mode.py:255-271`) | Rush is surfaced but its faithful clock presentation is missing; Typo remains deliberately unsurfaced. |
 | XP threshold source | sim-side | VR **reimplements the Survival curve in the frontend** (`Hud.cs:200-212`) — will drift if sim changes; fine for now, flagged. |
 | On-screen banners | `ui_textLevelUp/PickAPerk/LevComp/Quest/Reaper/WellDone`; quest title/timer overlay + level-complete banner have fade/scale timelines (`ui/overlays/quest_run.py:23-70`) | Not used (perk prompt intentionally replaced — see Implemented). |
 
@@ -238,8 +289,8 @@ panel — art, UV math, alphas and thresholds verified matching `Hud.cs` vs
 sprites — VR's `Label3D`s are not a fidelity loss; there is **no** low-health
 vignette/red-flash in the base game (the heart's faster pulse is the only cue,
 and VR reproduces it); `ui/shadow.py` shadows apply to menu panels only, not the
-HUD; tutorial has a 9-stage scripted prompt overlay (`tutorial/timeline.py:18-48`)
-— mode not surfaced, listed under modes not HUD.
+HUD. Tutorial's 9-stage scripted prompt (`tutorial/timeline.py:18-48`) is surfaced
+through the VR sidecar described above rather than treated as ordinary HUD.
 
 ## Render-pipeline parity (draw-pass audit)
 
@@ -455,17 +506,16 @@ it's a **sim** event (bonus spawn/pickup, `creatures/runtime.py:469`,
    RENDER passes are still open). Remaining: bonus-HUD slots + weapon-name
    popup (need bonus-HUD state over the ABI).
 5. **Audio behaviors**: first-hit random game-tune + crossfade + `gt2_harppen`;
-   music-volume-0 stop; reflex-boost pitch (Godot `pitch_scale`); wire "UI Info
-   texts" to bonus hover labels or mark it inert.
-6. **Statistics** (playtime + weapon usage + DB hub) + **Controls** screens;
-   **high-scores browser** (top-100 per-mode tables need persistence beyond the
-   current top-10).
-7. **Databases** (perk/weapon encyclopedia) — data already in the manifest/sim.
+   music-volume-0 stop; reflex-boost pitch (Godot `pitch_scale`). The inert UI
+   Info Texts control is no longer surfaced; reintroduce it only with hover labels.
+6. ~~**Statistics / Controls / high-score browser**~~ — **DONE**. Local top-100
+   tables, filters/paging, lifetime stats and all hub routes are implemented.
+7. ~~**Databases**~~ — **DONE** (perk/weapon encyclopedia with unlock rules).
 8. Custom VR boot with the `intro` track (publisher logos + attract mode are
    skipped per the VR-inapplicable table); per-mode music; pause world-fade;
    optional cosmetic polish: panel-slide timelines + brief world-fade
    transitions.
-9. Credits (+ AlienZooKeeper secret, if we're feeling faithful).
+9. ~~Credits + AlienZooKeeper~~ — **DONE 2026-08-10**.
 10. **Base-game menu THEMING pass — DONE 2026-07-10** (in-headset validation
     pending): baked small font rendered as glyph-quad meshes
     (SmallFontLabel), VrButton classic skin (ui_button plates + native hover

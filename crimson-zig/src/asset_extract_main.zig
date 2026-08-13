@@ -328,11 +328,15 @@ test "asset-extract parser requires game and assets dirs" {
 test "asset-extract output path converts image extensions to png" {
     const path = try extractedEntryPath(std.testing.allocator, "/assets/crimson", "ui/panel.jaz", .jaz);
     defer std.testing.allocator.free(path);
-    try std.testing.expectEqualStrings("/assets/crimson/ui/panel.png", path);
+    const expected_path = try std.fs.path.join(std.testing.allocator, &.{ "/assets/crimson", "ui/panel.png" });
+    defer std.testing.allocator.free(expected_path);
+    try std.testing.expectEqualStrings(expected_path, path);
 
     const jpg_path = try extractedEntryPath(std.testing.allocator, "/assets/crimson", "load/splash.jpg", .jpg);
     defer std.testing.allocator.free(jpg_path);
-    try std.testing.expectEqualStrings("/assets/crimson/load/splash.jpg", jpg_path);
+    const expected_jpg_path = try std.fs.path.join(std.testing.allocator, &.{ "/assets/crimson", "load/splash.jpg" });
+    defer std.testing.allocator.free(expected_jpg_path);
+    try std.testing.expectEqualStrings(expected_jpg_path, jpg_path);
 }
 
 test "asset-extract raw paq entries preserve normalized paths" {

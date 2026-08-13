@@ -155,15 +155,15 @@ public sealed partial class Hud : Node3D
     /// are never rotated. And a group's draw order has to move from the panel
     /// band to the world band, since on the board it has creatures in front of
     /// it.</summary>
-    public void SetCabinetLayout(bool cabinet)
+    public void SetBoardLayout(bool healthOnBoard, bool xpOnBoard)
     {
         if (_heart != null)
         {
-            _heart.RotationDegrees = new Vector3(0.0f, 0.0f, cabinet ? HeartSpinDegrees : 0.0f);
+            _heart.RotationDegrees = new Vector3(0.0f, 0.0f, healthOnBoard ? HeartSpinDegrees : 0.0f);
         }
 
-        int track = cabinet ? HealthBoardTrackPriority : HealthPanelTrackPriority;
-        int face = cabinet ? HealthBoardFacePriority : HealthPanelFacePriority;
+        int track = healthOnBoard ? HealthBoardTrackPriority : HealthPanelTrackPriority;
+        int face = healthOnBoard ? HealthBoardFacePriority : HealthPanelFacePriority;
         if (_healthTrackMat != null) _healthTrackMat.RenderPriority = track;
         if (_healthFillMat != null) _healthFillMat.RenderPriority = face;
         if (_heartMat != null) _heartMat.RenderPriority = face;
@@ -174,19 +174,19 @@ public sealed partial class Hud : Node3D
         // player. Rolling them back by the same -90 puts the text across the
         // board with its tops toward the far edge — read from the seat, not
         // from the side.
-        float spin = cabinet ? HeartSpinDegrees : 0.0f;
+        float spin = xpOnBoard ? HeartSpinDegrees : 0.0f;
         foreach (Label3D l in _xpLabels)
         {
             l.RotationDegrees = new Vector3(0.0f, 0.0f, spin);
-            l.RenderPriority = cabinet ? XpBoardTextPriority : XpPanelTextPriority;
+            l.RenderPriority = xpOnBoard ? XpBoardTextPriority : XpPanelTextPriority;
         }
-        if (_xpPanelMat != null) _xpPanelMat.RenderPriority = cabinet ? XpBoardBackPriority : XpPanelBackPriority;
-        if (_xpFillMat != null) _xpFillMat.RenderPriority = cabinet ? XpBoardFacePriority : XpPanelFacePriority;
+        if (_xpPanelMat != null) _xpPanelMat.RenderPriority = xpOnBoard ? XpBoardBackPriority : XpPanelBackPriority;
+        if (_xpFillMat != null) _xpFillMat.RenderPriority = xpOnBoard ? XpBoardFacePriority : XpPanelFacePriority;
         // On the board the backing art is redundant: the group sits on the
         // vignetted margin, which already separates it from the playfield, and
         // a second dark plate on top of it just reads as a smudge. In the panel
         // it is still what holds the readings together.
-        if (_xpPanel != null) _xpPanel.Visible = !cabinet;
+        if (_xpPanel != null) _xpPanel.Visible = !xpOnBoard;
     }
 
     private MeshInstance3D? _heart;

@@ -48,6 +48,19 @@ pub const TerrainFxBatch = struct {
     pub fn corpsesSlice(self: *const TerrainFxBatch) []const TerrainCorpseFx {
         return self.corpses[0..self.corpse_count];
     }
+
+    pub fn mergeFrom(self: *TerrainFxBatch, other: TerrainFxBatch) void {
+        for (other.decalsSlice()) |entry| {
+            if (self.decal_count >= self.decals.len) break;
+            self.decals[self.decal_count] = entry;
+            self.decal_count += 1;
+        }
+        for (other.corpsesSlice()) |entry| {
+            if (self.corpse_count >= self.corpses.len) break;
+            self.corpses[self.corpse_count] = entry;
+            self.corpse_count += 1;
+        }
+    }
 };
 
 pub const FxQueue = struct {

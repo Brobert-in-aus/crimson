@@ -56,8 +56,343 @@ fn createTestSession() !u64 {
     return handle;
 }
 
-test "abi version reports v23" {
-    try std.testing.expectEqual(@as(u32, 23), exports.crimson_host_abi_version());
+test "abi version reports v27" {
+    try std.testing.expectEqual(@as(u32, 27), exports.crimson_host_abi_version());
+}
+
+const NetworkStatus = struct {
+    phase: []const u8,
+    local_slot: i32,
+    bound_port: u16,
+    connected: usize,
+    expected: usize,
+    ready: usize,
+    started: bool,
+    mode_id: i32,
+    failure: []const u8,
+};
+
+fn readNetworkStatus(handle: u64) !std.json.Parsed(NetworkStatus) {
+    var len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_status(handle, null, &len));
+    const bytes = try std.testing.allocator.alloc(u8, len);
+    defer std.testing.allocator.free(bytes);
+    var written = len;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_status(handle, bytes.ptr, &written));
+    return std.json.parseFromSlice(NetworkStatus, std.testing.allocator, bytes[0..written], .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    });
+}
+
+fn expectNetOk(rc: i32) !void {
+    if (rc == exports.ok) return;
+    var error_buf: [1024]u8 = undefined;
+    const error_len = exports.crimson_host_last_error(&error_buf, error_buf.len);
+    if (error_len > 0) std.debug.print("network ABI error ({d}): {s}\n", .{ rc, error_buf[0..@intCast(error_len)] });
+    try std.testing.expectEqual(exports.ok, rc);
+}
+
+fn setNetworkReady(handle: u64, player_index: i32) !void {
+    try expectNetOk(exports.crimson_host_net_command(
+        handle,
+        exports.net_command_set_ready,
+        player_index,
+        1,
+    ));
+}
+
+test "network ABI validates config and destroys a waiting host" {
+    try std.testing.expectEqual(@as(usize, 60), @sizeOf(exports.CrimsonHostNetUpdate));
+
+    const invalid =
+        \\{"role":"spectator","netcode":"lockstep"}
+    ;
+    var invalid_handle: u64 = 0;
+    try std.testing.expectEqual(exports.err_invalid_config, exports.crimson_host_net_create(invalid.ptr, invalid.len, &invalid_handle));
+
+    const host_config =
+        \\{"role":"host","netcode":"lockstep","seed":17,"mode_id":1,"player_count":2,"port":0,"build_id":"abi-loopback"}
+    ;
+    var host: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(host_config.ptr, host_config.len, &host));
+    const status = try readNetworkStatus(host);
+    defer status.deinit();
+    try std.testing.expect(status.value.bound_port != 0);
+    try std.testing.expectEqual(@as(usize, 2), status.value.expected);
+    try std.testing.expectEqual(@as(i32, 0), status.value.local_slot);
+    try std.testing.expectEqual(@as(i32, 1), status.value.mode_id);
+    var wrong_api_len: u32 = 0;
+    try std.testing.expectEqual(exports.err_invalid_handle, exports.crimson_host_snapshot(host, null, &wrong_api_len));
+    exports.crimson_host_net_destroy(host);
+    try std.testing.expectEqual(exports.err_invalid_handle, exports.crimson_host_net_update(host, 1, null, null));
+}
+
+test "network ABI resolves DNS relay and lockstep hostnames" {
+    const lockstep =
+        \\{"role":"join","netcode":"lockstep","seed":1,"mode_id":1,"player_count":2,"host":"localhost","port":31993,"build_id":"dns-test"}
+    ;
+    var lockstep_handle: u64 = 0;
+    try expectNetOk(exports.crimson_host_net_create(lockstep.ptr, lockstep.len, &lockstep_handle));
+    exports.crimson_host_net_destroy(lockstep_handle);
+
+    const relay =
+        \\{"role":"join","netcode":"rollback","seed":1,"mode_id":1,"player_count":2,"host":"localhost","port":31993,"room_code":"a1b2","build_id":"dns-test"}
+    ;
+    var relay_handle: u64 = 0;
+    try expectNetOk(exports.crimson_host_net_create(relay.ptr, relay.len, &relay_handle));
+    exports.crimson_host_net_destroy(relay_handle);
+}
+
+test "network ABI lockstep loopback stays deterministic for 10000 ticks" {
+    const host_config =
+        \\{"role":"host","netcode":"lockstep","seed":4660,"mode_id":1,"player_count":2,"port":0,"build_id":"abi-loopback","session_id":"abi-loopback"}
+    ;
+    var host: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(host_config.ptr, host_config.len, &host));
+    defer exports.crimson_host_net_destroy(host);
+
+    const host_status = try readNetworkStatus(host);
+    const port = host_status.value.bound_port;
+    host_status.deinit();
+    var client_config_buf: [256]u8 = undefined;
+    const client_config = try std.fmt.bufPrint(&client_config_buf, "{{\"role\":\"join\",\"netcode\":\"lockstep\",\"seed\":4660,\"mode_id\":1,\"player_count\":2,\"host\":\"127.0.0.1\",\"port\":{d},\"build_id\":\"abi-loopback\",\"session_id\":\"abi-loopback\"}}", .{port});
+    var client: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(client_config.ptr, @intCast(client_config.len), &client));
+    defer exports.crimson_host_net_destroy(client);
+
+    const input: exports.CrimsonHostInput = .{
+        .move_x = 0.25,
+        .move_y = -0.5,
+        .aim_x = 700.0,
+        .aim_y = 300.0,
+        .flags = 1,
+        .move_mode = -1,
+        .aim_scheme = -1,
+        .perk_choice_index = -1,
+        .perk_menu_active = 0,
+    };
+    var host_update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    var client_update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    var now_ms: i64 = 1;
+    var pumps: usize = 0;
+    var host_ready = false;
+    var client_ready = false;
+    while (host_update.phase != exports.net_phase_running or client_update.phase != exports.net_phase_running) : (pumps += 1) {
+        if (pumps > 2000) {
+            const timed_out_host = try readNetworkStatus(host);
+            defer timed_out_host.deinit();
+            const timed_out_client = try readNetworkStatus(client);
+            defer timed_out_client.deinit();
+            std.debug.print("loopback lobby timeout: host={any} client={any}\n", .{ timed_out_host.value, timed_out_client.value });
+            return error.NetworkLobbyTimeout;
+        }
+        try expectNetOk(exports.crimson_host_net_update(host, now_ms, null, &host_update));
+        try expectNetOk(exports.crimson_host_net_update(client, now_ms, null, &client_update));
+        if (!host_ready and host_update.local_slot == 0) {
+            try setNetworkReady(host, 0);
+            host_ready = true;
+        }
+        if (!client_ready and client_update.local_slot == 1) {
+            try setNetworkReady(client, 1);
+            client_ready = true;
+        }
+        now_ms += 1;
+    }
+    try std.testing.expectEqual(@as(i32, 0), host_update.local_slot);
+    try std.testing.expectEqual(@as(i32, 1), client_update.local_slot);
+
+    var host_tick: i32 = -1;
+    var client_tick: i32 = -1;
+    pumps = 0;
+    while (host_tick < 9_999 or client_tick < 9_999) : (pumps += 1) {
+        if (pumps > 30_000) return error.NetworkTickTimeout;
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_net_update(host, now_ms, &input, &host_update));
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_net_update(client, now_ms, &input, &client_update));
+        now_ms += 1;
+        if (host_update.last_tick_index >= 0) host_tick = host_update.last_tick_index;
+        if (client_update.last_tick_index >= 0) client_tick = client_update.last_tick_index;
+    }
+
+    while (host_tick != client_tick) {
+        if (host_tick < client_tick) {
+            try std.testing.expectEqual(exports.ok, exports.crimson_host_net_update(host, now_ms, null, &host_update));
+            if (host_update.last_tick_index >= 0) host_tick = host_update.last_tick_index;
+        } else {
+            try std.testing.expectEqual(exports.ok, exports.crimson_host_net_update(client, now_ms, null, &client_update));
+            if (client_update.last_tick_index >= 0) client_tick = client_update.last_tick_index;
+        }
+        now_ms += 1;
+    }
+    try std.testing.expect(host_tick >= 9_999);
+    try std.testing.expectEqual(@as(i32, 1), host_update.game_mode);
+    try std.testing.expectEqual(@as(i32, 1), client_update.game_mode);
+    try std.testing.expect(host_update.local_shots_fired > 0);
+    try std.testing.expect(client_update.local_shots_fired > 0);
+    try std.testing.expectEqual(host_update.creature_kill_count, client_update.creature_kill_count);
+
+    var host_len: u32 = 0;
+    var client_len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(host, null, &host_len));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(client, null, &client_len));
+    try std.testing.expectEqual(host_len, client_len);
+    const host_bytes = try std.testing.allocator.alloc(u8, host_len);
+    defer std.testing.allocator.free(host_bytes);
+    const client_bytes = try std.testing.allocator.alloc(u8, client_len);
+    defer std.testing.allocator.free(client_bytes);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(host, host_bytes.ptr, &host_len));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(client, client_bytes.ptr, &client_len));
+    try std.testing.expectEqualSlices(u8, host_bytes, client_bytes);
+}
+
+test "network ABI twin headless hosts stay deterministic for 10000 ticks" {
+    const config =
+        \\{"role":"host","netcode":"lockstep","seed":4660,"mode_id":1,"player_count":1,"port":0,"build_id":"abi-headless","session_id":"abi-headless","max_recv_packets":0}
+    ;
+    var left: u64 = 0;
+    var right: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(config.ptr, config.len, &left));
+    defer exports.crimson_host_net_destroy(left);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(config.ptr, config.len, &right));
+    defer exports.crimson_host_net_destroy(right);
+    try setNetworkReady(left, 0);
+    try setNetworkReady(right, 0);
+
+    const input: exports.CrimsonHostInput = .{
+        .move_x = 0.25,
+        .move_y = -0.5,
+        .aim_x = 700.0,
+        .aim_y = 300.0,
+        .flags = 1,
+        .move_mode = -1,
+        .aim_scheme = -1,
+        .perk_choice_index = -1,
+        .perk_menu_active = 0,
+    };
+    var left_update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    var right_update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    for (0..10_000) |tick| {
+        try expectNetOk(exports.crimson_host_net_update(left, @intCast(tick), &input, &left_update));
+        try expectNetOk(exports.crimson_host_net_update(right, @intCast(tick), &input, &right_update));
+        try std.testing.expectEqual(left_update.last_tick_index, right_update.last_tick_index);
+        try std.testing.expectEqual(left_update.input_flags, right_update.input_flags);
+    }
+    try std.testing.expectEqual(@as(i32, 9_999), left_update.last_tick_index);
+
+    var left_len: u32 = 0;
+    var right_len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(left, null, &left_len));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(right, null, &right_len));
+    try std.testing.expectEqual(left_len, right_len);
+    const left_bytes = try std.testing.allocator.alloc(u8, left_len);
+    defer std.testing.allocator.free(left_bytes);
+    const right_bytes = try std.testing.allocator.alloc(u8, right_len);
+    defer std.testing.allocator.free(right_bytes);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(left, left_bytes.ptr, &left_len));
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(right, right_bytes.ptr, &right_len));
+    try std.testing.expectEqualSlices(u8, left_bytes, right_bytes);
+
+    var audio_len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_audio_events(left, null, &audio_len));
+    try std.testing.expect(audio_len > @sizeOf(exports.AudioHeader));
+    const audio = try std.testing.allocator.alloc(u8, audio_len);
+    defer std.testing.allocator.free(audio);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_audio_events(left, audio.ptr, &audio_len));
+    var drained_len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_audio_events(left, null, &drained_len));
+    try std.testing.expectEqual(@as(u32, @sizeOf(exports.AudioHeader)), drained_len);
+}
+
+test "network ABI runs Rush and reports local-slot results" {
+    const config =
+        \\{"role":"host","netcode":"lockstep","seed":99,"mode_id":2,"player_count":1,"port":0,"build_id":"abi-rush","session_id":"abi-rush","max_recv_packets":0}
+    ;
+    var handle: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_create(config.ptr, config.len, &handle));
+    defer exports.crimson_host_net_destroy(handle);
+    try setNetworkReady(handle, 0);
+
+    const input: exports.CrimsonHostInput = .{
+        .move_x = 0.0,
+        .move_y = 0.0,
+        .aim_x = 512.0,
+        .aim_y = 0.0,
+        .flags = 1,
+        .move_mode = -1,
+        .aim_scheme = -1,
+        .perk_choice_index = -1,
+        .perk_menu_active = 0,
+    };
+    var update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    for (0..600) |tick| {
+        try expectNetOk(exports.crimson_host_net_update(handle, @intCast(tick), &input, &update));
+    }
+    try std.testing.expectEqual(exports.net_phase_running, update.phase);
+    try std.testing.expectEqual(@as(i32, 2), update.game_mode);
+    try std.testing.expect(update.local_shots_fired > 0);
+
+    var len: u32 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(handle, null, &len));
+    const bytes = try std.testing.allocator.alloc(u8, len);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_net_snapshot(handle, bytes.ptr, &len));
+    var header: exports.SnapshotHeader = undefined;
+    @memcpy(std.mem.asBytes(&header), bytes[0..@sizeOf(exports.SnapshotHeader)]);
+    try std.testing.expectEqual(@as(i32, 2), header.game_mode);
+}
+
+test "network ABI records every canonical player row into a verifiable replay" {
+    const config =
+        \\{"role":"host","netcode":"lockstep","seed":321,"mode_id":1,"player_count":1,"port":0,"build_id":"abi-replay","session_id":"abi-replay","max_recv_packets":0}
+    ;
+    var handle: u64 = 0;
+    try expectNetOk(exports.crimson_host_net_create(config.ptr, config.len, &handle));
+    defer exports.crimson_host_net_destroy(handle);
+    try setNetworkReady(handle, 0);
+    try expectNetOk(exports.crimson_host_replay_begin(handle));
+
+    var update = std.mem.zeroes(exports.CrimsonHostNetUpdate);
+    for (0..600) |tick| {
+        const input = scriptedInput(tick);
+        try expectNetOk(exports.crimson_host_net_update(handle, @intCast(tick), &input, &update));
+    }
+    try std.testing.expectEqual(@as(i32, 599), update.last_tick_index);
+
+    var recording: u64 = 0;
+    try expectNetOk(exports.crimson_host_replay_detach(handle, &recording));
+    defer _ = exports.crimson_host_recording_destroy(recording);
+    try std.testing.expect(recording != 0);
+    var len: u32 = 0;
+    try expectNetOk(exports.crimson_host_recording_encode(recording, null, &len));
+    const bytes = try std.testing.allocator.alloc(u8, len);
+    defer std.testing.allocator.free(bytes);
+    try expectNetOk(exports.crimson_host_recording_encode(recording, bytes.ptr, &len));
+    var report_len: u32 = 0;
+    try expectNetOk(exports.crimson_host_verify_replay_json(bytes.ptr, len, null, &report_len));
+    const report = try std.testing.allocator.alloc(u8, report_len);
+    defer std.testing.allocator.free(report);
+    try expectNetOk(exports.crimson_host_verify_replay_json(bytes.ptr, len, report.ptr, &report_len));
+    try std.testing.expect(std.mem.indexOf(u8, report[0..report_len], "\"status\":\"ok\"") != null);
+}
+
+test "tutorial presentation state crosses the tick ABI" {
+    const config =
+        \\{"seed":7,"game_mode":8,"player_count":1,"world_size":1024.0,"tick_rate":60}
+    ;
+    var handle: u64 = 0;
+    try std.testing.expectEqual(exports.ok, exports.crimson_host_session_create(config.ptr, config.len, &handle));
+    defer exports.crimson_host_session_destroy(handle);
+
+    var result: exports.CrimsonHostTickResult = undefined;
+    var saw_prompt = false;
+    for (0..180) |tick| {
+        const inputs = [_]exports.CrimsonHostInput{scriptedInput(tick)};
+        try std.testing.expectEqual(exports.ok, exports.crimson_host_session_tick(handle, &inputs, 1, &result));
+        saw_prompt = saw_prompt or result.tutorial_stage_index >= 0;
+    }
+    try std.testing.expect(saw_prompt);
+    try std.testing.expect(result.tutorial_prompt_alpha >= 0.0 and result.tutorial_prompt_alpha <= 1.0);
+    try std.testing.expect(result.tutorial_hint_alpha >= 0.0 and result.tutorial_hint_alpha <= 1.0);
 }
 
 test "recorded replay verifies through the ABI" {

@@ -40,7 +40,7 @@ def _python_enum_values(enum_type: type[IntEnum], *, exclude: set[str] | None = 
 
 
 def _zig_enum_values(enum_name: str) -> dict[str, int]:
-    source = ZIG_GAME_IDS.read_text()
+    source = ZIG_GAME_IDS.read_text(encoding="utf-8")
     match = re.search(rf"pub const {enum_name} = enum\(i32\) \{{(.*?)\n\}};", source, re.DOTALL)
     assert match is not None
 
@@ -61,7 +61,7 @@ def _python_supported_spawn_ids() -> set[int]:
 
 
 def _zig_supported_spawn_ids() -> set[int]:
-    source = ZIG_CREATURES.read_text()
+    source = ZIG_CREATURES.read_text(encoding="utf-8")
     supported = {int(value, 16) for value in re.findall(r"\n\s*0x([0-9a-fA-F]+)\s*=>\s*\{", source)}
     for name in re.findall(r"@intFromEnum\(spawn_mod\.SpawnId\.([a-z0-9_]+)\)\s*=>\s*\{", source):
         supported.add(int(SpawnId[name.upper()]))
@@ -84,8 +84,8 @@ def _python_supported_fire_weapons() -> set[str]:
 
 
 def _zig_supported_fire_weapons() -> set[str]:
-    fire_recipes_source = ZIG_FIRE_RECIPES.read_text()
-    weapon_data_source = ZIG_WEAPON_DATA.read_text()
+    fire_recipes_source = ZIG_FIRE_RECIPES.read_text(encoding="utf-8")
+    weapon_data_source = ZIG_WEAPON_DATA.read_text(encoding="utf-8")
 
     supported = set(re.findall(r"\n\s*\.([a-z0-9_]+)\s*=>\s*\.?\{", fire_recipes_source))
     switch_match = re.search(
@@ -110,7 +110,7 @@ def _zig_quest_start_weapon_ids() -> dict[int, int]:
     weapon_ids = _zig_enum_values("WeaponId")
     by_level: dict[int, int] = {}
     for path in sorted(ZIG_QUEST_SPAWN_DIR.glob("logic_tier*.zig")):
-        source = path.read_text()
+        source = path.read_text(encoding="utf-8")
         for level_key, weapon_name in re.findall(
             r"\.level_key\s*=\s*(\d+),\s*\.start_weapon_id\s*=\s*game_ids\.WeaponId\.([a-z0-9_]+),",
             source,
@@ -120,7 +120,7 @@ def _zig_quest_start_weapon_ids() -> dict[int, int]:
 
 
 def _zig_quest_titles() -> list[str]:
-    source = ZIG_WINDOW_MENU_PANELS.read_text()
+    source = ZIG_WINDOW_MENU_PANELS.read_text(encoding="utf-8")
     match = re.search(r"pub const quest_titles = \[_\]\[\]const u8\{(.*?)\n\};", source, re.DOTALL)
     assert match is not None
     return [
@@ -147,7 +147,7 @@ def _normalized_python_rebind_row(row: RebindRowSpec) -> tuple[str, str, int | N
 
 
 def _zig_rebind_rows_by_name() -> dict[str, tuple[tuple[str, str, int | None, bool], ...]]:
-    source = ZIG_WINDOW_OPTIONS.read_text()
+    source = ZIG_WINDOW_OPTIONS.read_text(encoding="utf-8")
     rows_by_name: dict[str, tuple[tuple[str, str, int | None, bool], ...]] = {}
     for name, body in re.findall(r"const (controls_rows_[a-z0-9_]+) = \[_\]RebindRow\{(.*?)\n\};", source, re.DOTALL):
         rows: list[tuple[str, str, int | None, bool]] = []

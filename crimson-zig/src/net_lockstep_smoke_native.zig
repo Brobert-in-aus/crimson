@@ -103,6 +103,9 @@ fn runSmoke(allocator: std.mem.Allocator, io: Io) !SmokePayload {
     client_received += stats.received;
     packets_sent += stats.sent;
 
+    try host.session.setLocalReady(allocator, io, true, 35);
+    try client.session.setLocalReady(allocator, io, true, 35);
+
     stats = try host.update(allocator, io, 40);
     host_received += stats.received;
     packets_sent += stats.sent;

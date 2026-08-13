@@ -1,183 +1,43 @@
 using System;
-using System.Collections.Generic;
 using System.Text;
 using Godot;
 
 namespace CrimsonVR;
 
-/// <summary>
-/// The Statistics screen (base panels/stats.py, VR-sized subset): lifetime
-/// per-mode aggregates (runs, playtime, kills, accuracy, best score) plus the
-/// local top-10 high-score tables for Survival and Rush — the high-scores
-/// browser folded in. Opened from the main menu's STATISTICS item. Classic
-/// panel/backdrop/small-font theming; shares the menu anchor plane.
-/// </summary>
+/// <summary>Lifetime statistics plus routes to the score browser, databases,
+/// and credits. Keeping these on a hub avoids crowding the main VR menu.</summary>
 public sealed partial class StatsMenu : Node3D
 {
-    private UserSettings _settings = null!;
-    private SmallFontLabel? _statsText;
-    private SmallFontLabel? _survivalScores;
-    private SmallFontLabel? _rushScores;
-    private Label3D? _fallbackText;
-    private VrButton _weapons = null!;
-    private VrButton _perks = null!;
-    private VrButton _back = null!;
-
+    private UserSettings _settings = null!; private SmallFontLabel? _statsText; private Label3D? _fallback;
+    private VrButton _weapons = null!, _perks = null!, _scores = null!, _credits = null!, _back = null!;
     public bool IsOpen { get; private set; }
+    public event Action? OnBack; public event Action? OnWeapons; public event Action? OnPerks;
+    public event Action? OnHighScores; public event Action? OnCredits;
 
-    public event Action? OnBack;
-    public event Action? OnWeapons;
-    public event Action? OnPerks;
-
-    public void Build(float arenaSideMeters, UserSettings settings)
+    public void Build(float s, UserSettings settings)
     {
-        _settings = settings;
-        float s = arenaSideMeters;
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
-        RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
-
-        ClassicPanel.Build(this, s * 1.5f, s * 1.15f, z: -0.012f);
-        ClassicTitle.BuildRow(this, s * 0.5f, ClassicTitle.RowStatistics, y: s * 0.47f);
-
-        SmallFont? font = SmallFont.Shared();
-        if (font != null)
-        {
-            float px = s / 620.0f; // ~16px glyphs sized for the panel
-            _statsText = MakeText(font, px, new Vector3(0.0f, s * 0.24f, 0.0f), center: true);
-            _survivalScores = MakeText(font, px, new Vector3(-s * 0.36f, -s * 0.13f, 0.0f), center: true);
-            _rushScores = MakeText(font, px, new Vector3(s * 0.36f, -s * 0.13f, 0.0f), center: true);
-        }
-        else
-        {
-            _fallbackText = new Label3D
-            {
-                FontSize = 80,
-                PixelSize = s / 1300.0f,
-                Modulate = new Color(0.9f, 0.9f, 0.95f),
-                OutlineSize = 18,
-                OutlineModulate = new Color(0.0f, 0.0f, 0.0f),
-                Position = new Vector3(0.0f, s * 0.05f, 0.0f),
-            };
-            AddChild(_fallbackText);
-        }
-
-        // Bottom row like the flat stats panel's button stack: the databases
-        // live behind the Statistics screen (panels/stats.py Weapons/Perks).
-        _weapons = new VrButton();
-        AddChild(_weapons);
-        _weapons.BuildClassic(s * 0.3f, s * 0.11f, "Weapons");
-        _weapons.Position = new Vector3(-s * 0.38f, -s * 0.48f, 0.0f);
-        _weapons.OnPress += () => OnWeapons?.Invoke();
-
-        _perks = new VrButton();
-        AddChild(_perks);
-        _perks.BuildClassic(s * 0.3f, s * 0.11f, "Perks");
-        _perks.Position = new Vector3(0.0f, -s * 0.48f, 0.0f);
-        _perks.OnPress += () => OnPerks?.Invoke();
-
-        _back = new VrButton();
-        AddChild(_back);
-        _back.BuildClassic(s * 0.3f, s * 0.11f, "Back");
-        _back.Position = new Vector3(s * 0.38f, -s * 0.48f, 0.0f);
-        _back.OnPress += () => OnBack?.Invoke();
-
-        Visible = false;
+        _settings = settings; Position = new Vector3(0, s * .85f, s * .25f); RotationDegrees = new Vector3(-12, 180, 0);
+        ClassicPanel.Build(this, s * 1.5f, s * 1.15f, -.012f);
+        ClassicTitle.BuildRow(this, s * .5f, ClassicTitle.RowStatistics, s * .47f);
+        if (SmallFont.Shared() is { } font) { _statsText = new SmallFontLabel(); AddChild(_statsText); _statsText.Build(font, s / 620f, new Color(1,1,1,.85f)); _statsText.Position = new Vector3(0, s * .13f, 0); }
+        else { _fallback = new Label3D { FontSize = 70, PixelSize = s / 1300f, Position = new Vector3(0, s * .13f, 0), HorizontalAlignment = HorizontalAlignment.Center }; AddChild(_fallback); }
+        _weapons = Button(s, -.38f, -.27f, "Weapons", () => OnWeapons?.Invoke());
+        _perks = Button(s, 0, -.27f, "Perks", () => OnPerks?.Invoke());
+        _scores = Button(s, .38f, -.27f, "High Scores", () => OnHighScores?.Invoke());
+        _credits = Button(s, -.2f, -.48f, "Credits", () => OnCredits?.Invoke());
+        _back = Button(s, .2f, -.48f, "Back", () => OnBack?.Invoke()); Visible = false;
     }
-
-    private SmallFontLabel MakeText(SmallFont font, float pixelSize, Vector3 pos, bool center)
+    private VrButton Button(float s, float x, float y, string text, Action action) { var b = new VrButton(); AddChild(b); b.BuildClassic(s * .3f, s * .11f, text); b.Position = new Vector3(x*s,y*s,0); b.OnPress += action; return b; }
+    public void Open() { IsOpen = Visible = true; foreach (var b in new[] { _weapons,_perks,_scores,_credits,_back }) b.ResetPress(); Refresh(); }
+    public void Close() { IsOpen = Visible = false; }
+    public void PollPoke(ReadOnlySpan<HandProbe> p) { if (!IsOpen) return; foreach (var b in new[] { _weapons,_perks,_scores,_credits,_back }) b.PollPoke(p); }
+    private void Refresh() { string text = BuildStats(); _statsText?.SetText(text); if (_fallback != null) _fallback.Text = text; }
+    private string BuildStats() { var sb = new StringBuilder(); Append(sb,"Survival",1); Append(sb,"Rush",2); Append(sb,"Quests",3); Append(sb,"Tutorial",8); return sb.ToString(); }
+    private void Append(StringBuilder sb, string name, int mode)
     {
-        var t = new SmallFontLabel();
-        t.Build(font, pixelSize, new Color(1.0f, 1.0f, 1.0f, 0.85f), center);
-        t.Position = pos;
-        AddChild(t);
-        return t;
-    }
-
-    public void Open()
-    {
-        IsOpen = true;
-        Visible = true;
-        Refresh();
-        _weapons.ResetPress();
-        _perks.ResetPress();
-        _back.ResetPress();
-    }
-
-    public void Close()
-    {
-        IsOpen = false;
-        Visible = false;
-    }
-
-    public void PollPoke(ReadOnlySpan<HandProbe> probes)
-    {
-        if (!IsOpen)
-        {
-            return;
-        }
-        _weapons.PollPoke(probes);
-        _perks.PollPoke(probes);
-        _back.PollPoke(probes);
-    }
-
-    private void Refresh()
-    {
-        string stats = BuildStatsBlock();
-        if (_statsText != null)
-        {
-            _statsText.SetText(stats);
-            _survivalScores!.SetText(BuildScoreTable("High Scores - Survival", _settings.Highscores));
-            _rushScores!.SetText(BuildScoreTable("High Scores - Rush", _settings.RushHighscores));
-        }
-        else if (_fallbackText != null)
-        {
-            _fallbackText.Text = stats;
-        }
-    }
-
-    private string BuildStatsBlock()
-    {
-        var sb = new StringBuilder();
-        AppendMode(sb, "Survival", 1);
-        AppendMode(sb, "Rush", 2);
-        AppendMode(sb, "Quests", 3);
-        return sb.ToString();
-    }
-
-    private void AppendMode(StringBuilder sb, string name, int mode)
-    {
-        ModeStats s = _settings.StatsFor(mode);
-        long mins = s.PlayMs / 60000;
-        float acc = s.Shots > 0 ? 100.0f * s.Hits / s.Shots : 0.0f;
-        sb.Append(name).Append(":  ")
-          .Append(s.Runs).Append(" games   ")
-          .Append(mins / 60).Append('h').Append((mins % 60).ToString("D2")).Append("m   ")
-          .Append(s.Kills).Append(" kills   ")
-          .Append(acc.ToString("F0")).Append("% acc");
-        if (mode != 3)
-        {
-            sb.Append("   best ").Append(s.BestScore);
-        }
-        sb.Append('\n');
-    }
-
-    private static string BuildScoreTable(string title, List<HighscoreEntry> list)
-    {
-        var sb = new StringBuilder();
-        sb.Append(title).Append('\n');
-        if (list.Count == 0)
-        {
-            sb.Append("- no scores yet -");
-            return sb.ToString();
-        }
-        for (int i = 0; i < list.Count && i < 10; i++)
-        {
-            sb.Append(i + 1).Append(". ").Append(list[i].Name).Append("  ").Append(list[i].Score);
-            if (i < list.Count - 1 && i < 9)
-            {
-                sb.Append('\n');
-            }
-        }
-        return sb.ToString();
+        ModeStats st = _settings.StatsFor(mode); long mins = st.PlayMs / 60000; float acc = st.Shots > 0 ? 100f * st.Hits / st.Shots : 0;
+        sb.Append(name).Append(":  ").Append(st.Runs).Append(" games   ").Append(mins/60).Append('h').Append((mins%60).ToString("D2"))
+          .Append("m   ").Append(st.Kills).Append(" kills   ").Append(acc.ToString("F0")).Append("% acc");
+        if (mode is 1 or 2) sb.Append("   best ").Append(st.BestScore); sb.Append('\n');
     }
 }

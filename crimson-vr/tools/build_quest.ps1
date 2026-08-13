@@ -209,6 +209,17 @@ if ($Install) {
 
 New-Item -ItemType Directory -Force (Split-Path $apk) | Out-Null
 
+# The custom Android template is generated/ignored, so restore our tracked host
+# activity and native text-input plugin before every export (including CI).
+$androidJavaSource = Join-Path $repoRoot 'crimson-vr\tools\android'
+$androidJavaTarget = Join-Path $proj 'android\build\src\main\java\com\godot\game'
+if (-not (Test-Path $androidJavaTarget)) {
+    throw "Android build template missing: $androidJavaTarget (run with -InstallAndroidBuildTemplate once)"
+}
+Copy-Item (Join-Path $androidJavaSource 'GodotApp.java') $androidJavaTarget -Force
+Copy-Item (Join-Path $androidJavaSource 'CrimsonTextInputPlugin.java') $androidJavaTarget -Force
+Write-Host "    synced Quest native text-input bridge" -ForegroundColor DarkGray
+
 # A Godot editor open on this project would hold the OpenXR vendors plugin DLL
 # and fail the gradle export. Warn (don't kill — it might be another project).
 $running = Get-Process -Name 'Godot*' -ErrorAction SilentlyContinue

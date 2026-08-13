@@ -8,7 +8,7 @@ namespace CrimsonVR;
 /// game_update_victory_screen @ 0x00406350): a classic panel with the victory
 /// text — "Congratulations!" after a casual clear, "Incredible!" after a
 /// hardcore clear — and the mode shortcuts Survival / Rush / Typ'o'Shooter /
-/// Main Menu. Typo stays disabled until the VR input design exists.
+/// Main Menu.
 /// Uses the shared menu anchor plane.
 /// </summary>
 public sealed partial class EndNotePanel : Node3D
@@ -25,6 +25,7 @@ public sealed partial class EndNotePanel : Node3D
 
     public event Action? OnSurvival;
     public event Action? OnRush;
+    public event Action? OnTypo;
     public event Action? OnMainMenu;
 
     public void Build(float arenaSideMeters)
@@ -42,10 +43,7 @@ public sealed partial class EndNotePanel : Node3D
         float y0 = -s * 0.04f;
         _survival = MakeButton(w, h, y0, "Survival", () => OnSurvival?.Invoke());
         _rush = MakeButton(w, h, y0 - pitch, "Rush", () => OnRush?.Invoke());
-        // Inert until a VR typing input design exists: dimmed, no press handler,
-        // never polled.
-        _typo = MakeButton(w, h, y0 - pitch * 2.0f, "Typ'o'Shooter", null);
-        _typo.SetColor(new Color(0.45f, 0.45f, 0.5f));
+        _typo = MakeButton(w, h, y0 - pitch * 2.0f, "Typ'o'Shooter", () => OnTypo?.Invoke());
         _mainMenu = MakeButton(w, h, y0 - pitch * 3.0f, "Main Menu", () => OnMainMenu?.Invoke());
 
         Visible = false;
@@ -157,6 +155,7 @@ public sealed partial class EndNotePanel : Node3D
         }
         _survival.PollPoke(probes);
         _rush.PollPoke(probes);
+        _typo.PollPoke(probes);
         _mainMenu.PollPoke(probes);
     }
 }

@@ -4,11 +4,10 @@ using Godot;
 namespace CrimsonVR;
 
 /// <summary>
-/// M4 slice 5: the first-run prompt. On launch the arena shows at its default
-/// size with a poke prompt: Accept (play at the default) or Calibrate (fit the
-/// arena to your seated reach). The sim is held until the player accepts. The
-/// seated reach calibration itself is a later slice (PLAN §5), so Calibrate
-/// currently raises <see cref="OnCalibrate"/> and proceeds with the default.
+/// First-run interaction guide. It teaches the one action a new player must know
+/// before the main menu can make sense (direct-touch poke), names the recenter
+/// shortcut, and offers a direct route to the reach/layout controls. Returning
+/// players skip it through UserSettings.FirstRunDone.
 ///
 /// A child of ArenaRoot, hidden once dismissed. Layout first-pass; tune in-headset.
 /// </summary>
@@ -26,19 +25,45 @@ public sealed partial class StartPrompt : Node3D
     public void Build(float arenaSideMeters)
     {
         float s = arenaSideMeters;
-        Position = new Vector3(0.0f, s * 0.8f, 0.0f);
+        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
+
+        ClassicPanel.Build(this, s * 1.25f, s * 0.92f, z: -0.012f);
 
         var title = new Label3D
         {
-            Text = "Crimsonland VR",
-            FontSize = 130,
-            PixelSize = s / 240.0f,
+            Text = "Welcome to Crimsonland VR",
+            FontSize = 92,
+            PixelSize = s / 1250.0f,
             Modulate = new Color(0.9f, 0.85f, 0.4f),
-            Position = new Vector3(0.0f, s * 0.42f, 0.0f),
+            Position = new Vector3(0.0f, s * 0.34f, 0.002f),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Width = (s * 1.08f) / (s / 1250.0f),
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
             NoDepthTest = true,
+            RenderPriority = ClassicPanel.TextRenderPriority,
         };
         AddChild(title);
+
+        AddChild(new Label3D
+        {
+            Text = "Touch buttons with a fingertip or controller top.\n\n"
+                + "Hold Menu / A to recenter the arena.\n"
+                + "You can also use Recenter View in Pause.\n\n"
+                + "If controls are out of reach, choose Adjust Reach.",
+            FontSize = 58,
+            PixelSize = s / 1250.0f,
+            Modulate = new Color(0.92f, 0.93f, 0.98f),
+            OutlineSize = 18,
+            OutlineModulate = Colors.Black,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Width = (s * 1.04f) / (s / 1250.0f),
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            Position = new Vector3(0.0f, s * 0.09f, 0.002f),
+            NoDepthTest = true,
+            RenderPriority = ClassicPanel.TextRenderPriority,
+        });
 
         float bw = s * 0.4f;
         float bh = s * 0.16f;
@@ -46,14 +71,14 @@ public sealed partial class StartPrompt : Node3D
 
         _accept = new VrButton();
         AddChild(_accept);
-        _accept.Build(bw, bh, "Accept", new Color(0.4f, 0.8f, 0.45f));
-        _accept.Position = new Vector3(-(bw * 0.5f + gap * 0.5f), 0.0f, 0.0f);
+        _accept.BuildClassic(bw, bh, "Continue");
+        _accept.Position = new Vector3(-(bw * 0.5f + gap * 0.5f), -s * 0.22f, 0.0f);
         _accept.OnPress += () => Dismiss(calibrate: false);
 
         _calibrate = new VrButton();
         AddChild(_calibrate);
-        _calibrate.Build(bw, bh, "Calibrate", new Color(0.5f, 0.6f, 0.85f));
-        _calibrate.Position = new Vector3(bw * 0.5f + gap * 0.5f, 0.0f, 0.0f);
+        _calibrate.BuildClassic(bw, bh, "Adjust Reach");
+        _calibrate.Position = new Vector3(bw * 0.5f + gap * 0.5f, -s * 0.22f, 0.0f);
         _calibrate.OnPress += () => Dismiss(calibrate: true);
     }
 

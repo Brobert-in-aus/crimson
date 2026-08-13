@@ -9,6 +9,7 @@ from ..msgspec_types import NonNegativeInt, PlayerCount, PositiveInt, SignedInde
 from ..persistence.save_status import GameStatusData
 from ..quests.level import QuestLevel
 from ..replay.types import PackedPlayerInput
+from ..sim.input_providers import GameCommand
 from .lockstep_protocol import (
     INPUT_STALL_TIMEOUT_MS,
     MAX_PLAYERS,
@@ -78,6 +79,7 @@ class RoomReady(msgspec.Struct, tag="room_ready", forbid_unknown_fields=True):
 class RoomState(msgspec.Struct, tag="room_state", forbid_unknown_fields=True):
     room_code: RoomCode
     session_id: str = ""
+    local_slot_index: int = -1
     mode_id: GameMode = GameMode.DEMO
     player_count: PlayerCount = 1
     quest_level: QuestLevel | None = None
@@ -137,6 +139,15 @@ class RbInputBatch(msgspec.Struct, tag="rb_input_sample", forbid_unknown_fields=
     samples: list[RbInputSample] = msgspec.field(default_factory=list)
 
 
+class RbCommandRequest(msgspec.Struct, tag="rb_command_request", forbid_unknown_fields=True):
+    command: GameCommand
+
+
+class RbCanonicalCommand(msgspec.Struct, tag="rb_canonical_command", forbid_unknown_fields=True):
+    command: GameCommand
+    tick_index: NonNegativeInt = 0
+
+
 class RbResyncRequest(msgspec.Struct, tag="rb_resync_request", forbid_unknown_fields=True):
     request_id: str = ""
     from_tick: NonNegativeInt = 0
@@ -189,6 +200,8 @@ type NetMessage = (
     | Ping
     | Pong
     | RbInputBatch
+    | RbCommandRequest
+    | RbCanonicalCommand
     | RbResyncRequest
     | RbResyncBegin
     | RbResyncChunk
@@ -239,6 +252,8 @@ __all__ = [
     "PeerDisconnect",
     "Ping",
     "Pong",
+    "RbCanonicalCommand",
+    "RbCommandRequest",
     "RbInputBatch",
     "RbInputSample",
     "RbResyncBegin",

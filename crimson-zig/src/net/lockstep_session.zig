@@ -125,6 +125,15 @@ pub const HostSession = struct {
         try self.runtime.submitLocalInput(allocator, input);
     }
 
+    pub fn setLocalReady(self: *HostSession, allocator: std.mem.Allocator, io: Io, ready: bool, now_ms: i64) !void {
+        try self.runtime.setHostReady(allocator, ready, now_ms, &self.outbox);
+        _ = try lockstep_pump.flushOutbox(allocator, io, self.transport, &self.outbox);
+    }
+
+    pub fn submitLocalCommand(self: *HostSession, allocator: std.mem.Allocator, command: lockstep_protocol.GameCommand) !void {
+        try self.runtime.submitLocalCommand(allocator, command);
+    }
+
     pub fn popReadyFrames(
         self: *HostSession,
         allocator: std.mem.Allocator,
@@ -140,6 +149,14 @@ pub const HostSession = struct {
         now_ms: i64,
     ) !void {
         try self.runtime.broadcastTickFrame(allocator, frame, now_ms, &self.outbox);
+    }
+
+    pub fn takePendingCommands(self: *HostSession) []const lockstep_protocol.GameCommand {
+        return self.runtime.takePendingCommands();
+    }
+
+    pub fn clearPendingCommands(self: *HostSession, allocator: std.mem.Allocator) void {
+        self.runtime.clearPendingCommands(allocator);
     }
 };
 
@@ -186,6 +203,15 @@ pub const ClientSession = struct {
 
     pub fn boundPort(self: ClientSession) u16 {
         return self.transport.boundPort();
+    }
+
+    pub fn submitLocalCommand(self: *ClientSession, allocator: std.mem.Allocator, command: lockstep_protocol.GameCommand, now_ms: i64) !void {
+        try self.runtime.submitLocalCommand(allocator, command, now_ms, &self.outbox);
+    }
+
+    pub fn setLocalReady(self: *ClientSession, allocator: std.mem.Allocator, io: Io, ready: bool, now_ms: i64) !void {
+        try self.runtime.sendReady(allocator, ready, now_ms, &self.outbox);
+        _ = try lockstep_pump.flushOutbox(allocator, io, self.transport, &self.outbox);
     }
 
     pub fn update(self: *ClientSession, allocator: std.mem.Allocator, io: Io, now_ms: i64) !UpdateStats {
@@ -262,9 +288,10 @@ test "lockstep sessions handshake over udp" {
     try std.testing.expectEqual(@as(usize, 1), host.runtime.peerCount());
 
     const client_welcome = try client.update(allocator, io, 30);
-    try std.testing.expect(client_welcome.received >= 2);
-    try std.testing.expectEqual(@as(usize, 1), client_welcome.sent);
+    try std.testing.expect(client_welcome.received >= 1);
+    try std.testing.expectEqual(@as(usize, 0), client_welcome.sent);
     try std.testing.expect(client.runtime.lobby.joined());
+    try client.setLocalReady(allocator, io, true, 35);
 
     const host_ready = try host.update(allocator, io, 40);
     try std.testing.expectEqual(@as(usize, 1), host_ready.received);
@@ -298,6 +325,7 @@ test "lockstep host session starts single-player lobby on update" {
     defer host.deinit(allocator, io);
 
     try std.testing.expect(!host.runtime.started);
+    try host.setLocalReady(allocator, io, true, 19);
     const update = try host.update(allocator, io, 20);
     try std.testing.expectEqual(@as(usize, 0), update.received);
     try std.testing.expectEqual(@as(usize, 0), update.sent);
@@ -378,6 +406,8 @@ fn startSession(
     _ = try client.update(allocator, io, 10);
     _ = try host.update(allocator, io, 20);
     _ = try client.update(allocator, io, 30);
+    try host.setLocalReady(allocator, io, true, 35);
+    try client.setLocalReady(allocator, io, true, 35);
     _ = try host.update(allocator, io, 40);
     _ = try client.update(allocator, io, 50);
     try std.testing.expect(host.runtime.started);

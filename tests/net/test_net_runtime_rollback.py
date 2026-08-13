@@ -114,12 +114,26 @@ def test_runtime_tracks_prediction_mismatches_and_rollbacks(mocker) -> None:
     assert runtime.pop_rollback_from() == 1
 
 
-def test_runtime_requests_resync_when_correction_exceeds_rollback_cap(mocker) -> None:
+def test_host_runtime_pushes_resync_when_correction_exceeds_rollback_cap(mocker) -> None:
     runtime, send_packet = _start_runtime(mocker, rollback_max_ticks=2)
 
     for tick in range(6):
         runtime.queue_local_input([0.0, 0.0, 0.0, 0.0, tick], now_ms=1200 + tick)
         assert runtime.pop_tick_frame() is not None
+        runtime.store_local_snapshot(
+            tick,
+            encode_mode_snapshot(
+                snapshot=SurvivalStateSnapshotV2(
+                    tick_index=tick,
+                    runtime_state=SurvivalRuntimeSnapshotV2(
+                        elapsed_ms=float(tick),
+                        stage=0,
+                        spawn_cooldown_ms=0.0,
+                        perk_pending_count=0,
+                    ),
+                ),
+            ),
+        )
 
     runtime._handle_message(
         message=RbInputBatch(
@@ -130,8 +144,11 @@ def test_runtime_requests_resync_when_correction_exceeds_rollback_cap(mocker) ->
     )
 
     assert runtime.resync_count == 1
-    assert runtime.pop_tick_frame() is None
-    assert any(isinstance(message, RbResyncRequest) for message in _sent_messages(send_packet))
+    sent = _sent_messages(send_packet)
+    assert not runtime._paused_for_reconnect
+    assert not any(isinstance(message, RbResyncRequest) for message in sent)
+    assert any(isinstance(message, RbResyncBegin) for message in sent)
+    assert any(isinstance(message, RbResyncCommit) for message in sent)
 
 
 def test_runtime_accepts_resync_stream_and_exposes_pending_snapshot(mocker) -> None:
@@ -195,7 +212,7 @@ def test_runtime_prints_host_invite_code_once(mocker) -> None:
     print_mock.assert_called_once_with("[crimson] Invite code: ab12", flush=True)
 
 
-def test_client_sends_ready_only_after_room_state(mocker) -> None:
+def test_client_sends_ready_only_after_explicit_request(mocker) -> None:
     runtime = RollbackRuntime(
         JoinRollbackRuntimeConfig(
             mode_id=GameMode.SURVIVAL,
@@ -219,6 +236,11 @@ def test_client_sends_ready_only_after_room_state(mocker) -> None:
     send_packet.reset_mock()
     runtime._handle_message(message=RoomState(room_code="ab12", player_count=2), now_ms=1100)
     runtime.update(now_ms=1100)
+    second_wave = _sent_messages(send_packet)
+    assert not any(isinstance(message, RoomReady) for message in second_wave)
+
+    send_packet.reset_mock()
+    runtime.set_ready(True, now_ms=1101)
     second_wave = _sent_messages(send_packet)
     assert any(isinstance(message, RoomReady) for message in second_wave)
 

@@ -123,6 +123,17 @@ Text rules are forgettable; structural rules enforce themselves.
 2. When guidance repeats, encode it structurally (rules/tests) where possible.
 3. Run `just check`.
 
+### release preparation
+1. Start from the canonical
+   [`Release Preparation`](docs/contributor/project-tracking/release-preparation.md)
+   checklist; do not infer readiness from a successful build alone.
+2. Close every blocker with durable test, artifact, physical-validation, and
+   legal evidence from the exact candidate commit.
+3. Require a clean tree, a new package version, repeated networking stability,
+   and agreement between the tag, package metadata, manifests, and release notes.
+4. Keep Python publication and CrimsonVR personal-build authorization as
+   separate decisions.
+
 ## structural search / codemods: prefer ast-grep
 
 - Prefer `ast-grep` over regex-only edits for structural transformations.

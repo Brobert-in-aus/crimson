@@ -1799,6 +1799,12 @@ fn drivePairUntilStarted(
     for (0..64) |step| {
         if (host.session.started and guest.session.started) return packets_sent;
         const now_ms = start_ms + @as(i64, @intCast(step)) * 20;
+        if (host.session.saw_room_state and !host.session.sent_ready) {
+            try host.session.setLocalReady(allocator, true, now_ms);
+        }
+        if (guest.session.saw_room_state and !guest.session.sent_ready) {
+            try guest.session.setLocalReady(allocator, true, now_ms);
+        }
         packets_sent += try pumpRelayService(allocator, io, server, service, now_ms, null);
         try host.update(allocator, io, now_ms + 1);
         try guest.update(allocator, io, now_ms + 2);

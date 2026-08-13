@@ -17,12 +17,22 @@ public static partial class Sim
 
     public const uint SnapshotMagic = 0x31525643;
     public const int Ok = 0;
+    public const int ErrorNotReady = -7;
+
+    public const int NetPhaseConnecting = 0;
+    public const int NetPhaseLobby = 1;
+    public const int NetPhaseRunning = 2;
+    public const int NetPhaseReconnecting = 3;
+    public const int NetPhaseFailed = 4;
+    public const int NetCommandPerkMenuOpen = 1;
+    public const int NetCommandPerkPick = 2;
+    public const int NetCommandSetReady = 3;
 
     // Layout version this frontend was built against (crimson_host.h
     // CRIMSON_HOST_ABI_VERSION). The snapshot magic is unchanged across layout
     // revisions, so a stale native lib would be silently mis-decoded; the session
     // driver checks this against crimson_host_abi_version() at startup.
-    public const uint ExpectedAbiVersion = 23;
+    public const uint ExpectedAbiVersion = 27;
 
     // Save-status weapon usage table size (Zig state.weapon_count_size):
     // index = weapon id, slot 0 unused. The session-create JSON array must be
@@ -72,8 +82,32 @@ public static partial class Sim
         public int CreatureKillCount;   // ABI v10+: total kills this run (frags)
         public int MostUsedWeaponId;    // ABI v10+: argmax per-weapon shots, current weapon fallback
         public uint QuestCompleted;     // ABI v14+: quest timeline cleared (0 outside quests)
+        public int TutorialStageIndex;  // ABI v24+: native tutorial prompt stage, -1 outside tutorial
+        public float TutorialPromptAlpha;
+        public int TutorialHintIndex;   // ABI v24+: native tutorial bonus hint, -1 when hidden
+        public float TutorialHintAlpha;
 
         public readonly long ElapsedMsSim => (long)(((ulong)ElapsedMsSimHi << 32) | ElapsedMsSimLo);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NetworkUpdate
+    {
+        public uint FramesAdvanced;
+        public uint TicksAdvanced;
+        public int Phase;
+        public int LocalSlot;
+        public int LastTickIndex;
+        public uint PlayerCount;
+        public uint InputFlags0;
+        public uint InputFlags1;
+        public uint InputFlags2;
+        public uint InputFlags3;
+        public int LocalShotsFired;
+        public int LocalShotsHit;
+        public int CreatureKillCount;
+        public int LocalMostUsedWeaponId;
+        public int GameMode;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -455,6 +489,36 @@ public static partial class Sim
     [LibraryImport(LibName, EntryPoint = "crimson_host_terrain_fx")]
     public static partial int TerrainFx(ulong handle, Span<byte> buf, ref uint len);
 
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_create")]
+    private static partial int NetworkCreateNative(ReadOnlySpan<byte> configJson, uint configLen, out ulong handle);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_destroy")]
+    public static partial void NetworkDestroy(ulong handle);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_update")]
+    public static partial int NetworkUpdateNative(ulong handle, long nowMs, in HostInput localInput, out NetworkUpdate update);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_command")]
+    public static partial int NetworkCommand(ulong handle, int commandType, int playerIndex, int value);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_resume")]
+    public static partial int NetworkResume(ulong handle, long nowMs);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_status")]
+    public static partial int NetworkStatus(ulong handle, Span<byte> buf, ref uint len);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_snapshot")]
+    public static partial int NetworkSnapshot(ulong handle, Span<byte> buf, ref uint len);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_audio_events")]
+    public static partial int NetworkAudioEvents(ulong handle, Span<byte> buf, ref uint len);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_terrain_info")]
+    public static partial int NetworkTerrainInfo(ulong handle, out TerrainInfo info);
+
+    [LibraryImport(LibName, EntryPoint = "crimson_host_net_terrain_fx")]
+    public static partial int NetworkTerrainFx(ulong handle, Span<byte> buf, ref uint len);
+
     public static string LastError()
     {
         Span<byte> buf = stackalloc byte[1024];
@@ -469,6 +533,17 @@ public static partial class Sim
         if (rc != Ok)
         {
             throw new InvalidOperationException($"session create failed ({rc}): {LastError()}");
+        }
+        return handle;
+    }
+
+    public static ulong NetworkCreate(string configJson)
+    {
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(configJson);
+        int rc = NetworkCreateNative(bytes, (uint)bytes.Length, out ulong handle);
+        if (rc != Ok)
+        {
+            throw new InvalidOperationException($"network create failed ({rc}): {LastError()}");
         }
         return handle;
     }

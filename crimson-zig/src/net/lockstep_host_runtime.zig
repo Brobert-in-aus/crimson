@@ -39,6 +39,7 @@ pub const HostRuntime = struct {
     status: ?game_cfg.Status = null,
     host_capture_tick: i32 = 0,
     started: bool = false,
+    pending_commands: std.ArrayList(lockstep_protocol.GameCommand) = .empty,
 
     pub fn init(options: HostRuntimeOptions) HostRuntime {
         return .{
@@ -64,11 +65,21 @@ pub const HostRuntime = struct {
         for (self.peers.items) |*peer| peer.deinit(allocator);
         self.peers.deinit(allocator);
         if (self.lockstep) |*lockstep| lockstep.deinit(allocator);
+        for (self.pending_commands.items) |command| lockstep_protocol.deinitGameCommand(allocator, command);
+        self.pending_commands.deinit(allocator);
         self.* = undefined;
     }
 
     pub fn peerCount(self: HostRuntime) usize {
         return self.peers.items.len;
+    }
+
+    pub fn hasTimedOutPeer(self: HostRuntime, now_ms: i64) bool {
+        if (!self.started) return false;
+        for (self.peers.items) |peer| {
+            if (now_ms - peer.last_seen_ms >= lockstep_protocol.link_timeout_ms) return true;
+        }
+        return false;
     }
 
     pub fn handlePacket(
@@ -111,6 +122,19 @@ pub const HostRuntime = struct {
         self.host_capture_tick += 1;
     }
 
+    pub fn setHostReady(
+        self: *HostRuntime,
+        allocator: std.mem.Allocator,
+        ready: bool,
+        now_ms: i64,
+        outbox: *Outbox,
+    ) !void {
+        if (self.started) return error.MatchAlreadyStarted;
+        self.lobby.host_ready = ready;
+        try self.broadcastLobbyState(allocator, now_ms, outbox);
+        try self.startIfReady(allocator, now_ms, outbox);
+    }
+
     pub fn popReadyFrames(
         self: *HostRuntime,
         allocator: std.mem.Allocator,
@@ -118,6 +142,20 @@ pub const HostRuntime = struct {
     ) !std.ArrayList(lockstep_state.HostReadyTick) {
         const lockstep = if (self.lockstep) |*lockstep| lockstep else return .empty;
         return lockstep.popReadyFrames(allocator, now_ms);
+    }
+
+    pub fn submitLocalCommand(self: *HostRuntime, allocator: std.mem.Allocator, command: lockstep_protocol.GameCommand) !void {
+        if (!self.started or lockstep_protocol.commandPlayerIndex(command) != 0) return error.InvalidCommandPlayer;
+        try self.pending_commands.append(allocator, try lockstep_protocol.cloneGameCommand(allocator, command));
+    }
+
+    pub fn takePendingCommands(self: *HostRuntime) []const lockstep_protocol.GameCommand {
+        return self.pending_commands.items;
+    }
+
+    pub fn clearPendingCommands(self: *HostRuntime, allocator: std.mem.Allocator) void {
+        for (self.pending_commands.items) |command| lockstep_protocol.deinitGameCommand(allocator, command);
+        self.pending_commands.clearRetainingCapacity();
     }
 
     pub fn broadcastTickFrame(
@@ -194,6 +232,12 @@ pub const HostRuntime = struct {
                     .samples = batch.samples,
                 };
                 try self.lockstep.?.submitInputBatch(allocator, mapped);
+            },
+            .game_command => |request| {
+                var key_buf: [32]u8 = undefined;
+                const mapped_slot = self.lobby.slotForAddr(peerKey(&key_buf, addr)) orelse return;
+                if (lockstep_protocol.commandPlayerIndex(request.command) != mapped_slot) return;
+                try self.pending_commands.append(allocator, try lockstep_protocol.cloneGameCommand(allocator, request.command));
             },
             .debug_log_batch => {},
             else => {},

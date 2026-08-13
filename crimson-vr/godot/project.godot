@@ -18,6 +18,11 @@ config/features=PackedStringArray("4.7", "C#", "Mobile")
 
 project/assembly_name="CrimsonVR"
 
+[crimson]
+
+network/relay_host=""
+network/relay_port=31993
+
 [rendering]
 
 renderer/rendering_method="mobile"

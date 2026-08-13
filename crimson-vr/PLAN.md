@@ -293,8 +293,8 @@ still moves toward the clamped edge point.
 | Aim-hand reticle | `aim_x/aim_y` = reticle point, `aim_scheme = MOUSE` |
 | Aim-hand trigger | `fire_down` / `fire_pressed` |
 | Aim-hand **grip** squeeze | `reload_pressed` (grip chosen over A/X so A/X stays free for recenter) |
-| Either hand, menu / AX button | recenter arena (M0/M2); pause is M4 |
-| Perk menu open | reticle-over-card + aim-hand trigger selects → `perk_choice_index` |
+| Left Menu / right A (hold 700 ms) | recenter arena with head-relative progress feedback directly in front of the player; pause is a diegetic button |
+| Perk menu open | poke card to select/show info, then poke Confirm → `perk_choice_index` |
 | Settings toggle | swap hand roles (move ↔ aim/fire) |
 
 Notes:
@@ -579,12 +579,11 @@ gate for LLM-generated work.
        - Install/launch over network adb; the Quest gates adb launches with a
          "controllers required" dialog — **launch from the in-headset app
          library** (Unknown Sources).
-     **Known open issue:** the arena spawns at the OpenXR *stage* origin (play-
-     space center), not in front of a seated player, and OS recenter doesn't fix
-     it. Fix added (untested on Quest): `Main.cs` now places the arena in front
-     of the head on the first valid frame and on a menu/AX-button recenter
-     (PLAN §5). Verify next session; may also want to switch to `local` reference
-     space or expose a scale/height/recenter settings panel.
+     **Resolved:** `Main.cs` places the arena in front of the head on the first
+     valid frame and on a menu/AX-button recenter (PLAN §5). The hold-progress
+     popup is head-relative, so it appears in front of the player instead of in
+     front of a displaced menu. Arena & Layout now exposes scale, height,
+     distance, tilt, mode, and editable control placement.
 
 ### M1 — libcrimson host ABI
 - `crimson-zig/src/host_abi/` implementing §3; builds for win-x64 first.
@@ -592,12 +591,10 @@ gate for LLM-generated work.
 - ✅ *Verify*: new Zig test target replays ≥3 committed `.crd` fixtures
   through the C ABI and matches `replay verify` stats + checkpoint diffs
   exactly; `zig build test` green; ABI version handshake works.
-- Known Windows baseline (Zig 0.16.0, measured 2026-07): 18 upstream tests
-  fail on Windows — all UDP/lockstep/rollback networking tests
-  (`error.ConcurrencyUnavailable` from Zig std threaded IO on Windows) plus
-  one asset-extract path-conversion test. All deterministic runtime, replay,
-  and codec tests pass. "Green" for our gates means no regressions beyond
-  this baseline.
+- Zig 0.16's Windows threaded-I/O backend cannot time out a datagram receive.
+  The native transports now bypass that unsupported operation with bounded
+  receive workers, so UDP/lockstep/rollback tests run on Windows. The remaining
+  platform-specific baseline includes the asset-extract path-conversion test.
 
 ### M2 — Diorama skeleton (programmer art)
 - Godot project skeleton, P/Invoke bindings (`Sim.cs`), 60 Hz fixed-step
@@ -882,16 +879,18 @@ screen-space overlays:
    press depth; depresses to follow the tip, pressed colour, fires OnPress on the
    press-down edge; socket + proud face + label). Headless-verified (compiles,
    boots); feel/dimensions need in-headset tuning.
-2. **Perk menu — BUILT (2026-07-09, in-headset pending).** `PerkMenu` floats the
+2. **Perk menu — BUILT (updated 2026-08-11, in-headset pending).** `PerkMenu` floats the
    candidate perks above the arena as `VrButton` cards (labels from the baked
-   perk-id->name table, 58 perks). Poke -> `perk_choice_index`; Main pauses via
+   perk-id->name table, 58 perks). Poke selects and shows info; a spatially
+   separate Confirm button below the row -> `perk_choice_index`. Main pauses via
    `perk_menu_active` while `perk_pending_count > 0`. Headless can't trigger it
    (no XP/levels, no tracked hands) — needs in-headset validation of poke feel,
    card layout/reach, and the pause/resume flow.
 3. **Pause menu — BUILT (2026-07-09, in-headset pending).** `PauseMenu`: a flat
    (arena-parallel) pause toggle off the +x side, always pokeable; pauses by
-   freezing the sim (Main stops ticking) and raises a Resume / Settings / Quit
-   panel above the arena. Resume + Quit functional; Settings wired to `OnSettings`
+   freezing the sim (Main stops ticking) and raises a panel above the arena with
+   Resume / Settings / Exit to Main Menu; abandoning a run requires consequence
+   confirmation. Resume + exit functional; Settings wired to `OnSettings`
    but unhooked until slice 4. Headless-verified; poke feel/placement need eyes.
 4. **Settings (MVP) — BUILT (2026-07-09, in-headset pending).** `SettingsMenu`
    (opened from the pause Settings button, overlays the pause panel while staying
@@ -901,9 +900,10 @@ screen-space overlays:
    probes are a fixed `[left,right]` `HandProbe` span (tip + grip) so a grab keeps
    stable hand identity. Arena scale/height are their own deferred slices; not
    persisted yet (slice 9). Headless-verified; grab feel + layout need eyes.
-5. **First run — BUILT (2026-07-09).** `StartPrompt`: default arena + a poke
-   Accept/Calibrate prompt, holds the sim until accepted; Calibrate is a stub
-   (seated calibration is a later slice). Returning players skip it (persistence).
+5. **First run — BUILT (updated 2026-08-11).** `StartPrompt` teaches direct-touch
+   poke and hold-to-recenter before Main Menu. Continue persists completion;
+   Adjust Reach enters the normal Arena & Layout navigation stack. Returning
+   players skip it. Measured seated calibration remains a later slice.
 6. **Highscore name entry — BUILT (2026-07-09).** `VirtualKeyboard` (A-Z + Space/
    Del/Enter poke keys) on death; Enter submits the name (empty = skip) and
    restarts. Score = player_experience for now.
@@ -945,6 +945,11 @@ screen-space overlays:
    under user://): hand-swap, dead-zone, first-run state, highscores, display/
    comfort settings, arena placement, per-mode UI layout and validation results;
    loaded at startup and saved on change/edit exit.
+10. **Tutorial presentation — BUILT (updated 2026-08-11).** The prompt is a
+    sidecar outside the playfield sightline in both layouts, aimed toward the
+    recentered seat using the same stable upright-yaw rule as Cabinet power-up
+    information. Practice-round copy now states both advance conditions: clear
+    each wave and collect its dropped power-up.
 
 **M4 in-headset validation backlog (all slices 1-9 are headless-verified only):**
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,
@@ -966,19 +971,25 @@ reach-envelope calibration (§5) and the player-centered follow-mode toggle (§5
 - ✅ *Verify*: full survival run start→death→highscore entirely in-headset
   without touching desktop; recorded `.crd` verifies; settings persist.
 
-### M5 — Shell + builds (Quest personal-build path implemented)
+### M5 — Shell + builds (Quest and PCVR personal-build paths implemented)
 - VR-native minimal menu (start survival, settings, quit), version/about.
 - CI builds: Windows x64, Quest APK, Linux x64 (GitHub Actions; Zig cross-
-  compile + Godot headless export). Builds remain private until M6 clears.
-- The workflow must be **fork-runnable**: `workflow_dispatch` trigger, no
-  repo secrets required, APK signed with an auto-generated keystore — this is
-  the §10 worst-case distribution path, so it's a requirement, not a nicety.
-- ✅ *Verify*: clean-machine install test on PCVR and Quest; CI produces all
-  artifacts from one tag.
+  compile + Godot headless export). Quest and PCVR workflows are manually
+  dispatchable, secret-free and fail closed against public artifact upload;
+  downloadable packages remain private until redistribution is resolved.
+- The workflow must be **private-copy runnable**: `workflow_dispatch` trigger,
+  no repo secrets required, APK signed with an auto-generated keystore — this is
+  the §10 worst-case distribution path, so it's a requirement, not a nicety. A
+  public GitHub fork cannot be made private and must not publish the binary.
+- ⚠️ *Verify*: the local CI-equivalent Quest build/clean-install contract passed
+  on 2026-08-11. The actual private standalone GitHub workflow dispatch and the
+  clean-machine PCVR/package matrix remain release gates.
 
 ### M6 — Asset removal + licensing decoupling (runtime flow implemented;
 public-release gate remains)
 Nothing ships publicly until the remaining audit and legal scope are resolved.
+The canonical cross-project gate and evidence template now live in
+[`docs/contributor/project-tracking/release-preparation.md`](../docs/contributor/project-tracking/release-preparation.md).
 
 - **Remove all original-asset acquisition from distributed builds**: no
   bundled PAQs, no automatic download from the upstream project's channel
@@ -1051,7 +1062,14 @@ Nothing ships publicly until the remaining audit and legal scope are resolved.
   from the move-hand reticle and produces a verifying replay.
 
 ### M8 — Post-v1 (unordered backlog)
-- Rush/Quests/Typ-o modes (mostly shell work — sim already supports them).
+- Typo'Shooter controller-literacy mode is built: creature prompts teach face
+  buttons first, then triggers, grips, stick clicks and directions; the first
+  matching edge locks a target and every correct step fires a replayable shot.
+- Multiplayer/network play. The implementation design is now captured in
+  `notes/multiplayer-plan.md`: expose the existing Zig protocol-v6 live session
+  through the host ABI, use relay rollback by default and direct lockstep as an
+  advanced LAN path. Native-flatscreen cross-play comes first; Python-flatscreen
+  support is gated on cross-runtime determinism tests.
 - Steam Frame/arm64 Linux target when hardware exists.
 - Optional: grabbable arena experiment, giant room-scale mode polish,
   spectator flat-screen mirror, 3D creature models (big art project — this
@@ -1203,8 +1221,11 @@ verify itself*. Rules to keep it that way:
 
 ## 12. Immediate next steps
 
-**Updated 2026-08-09.** M0-M4 are built. M4 slice 8 replay recording is now
-confirmed by a real 6,256-tick ABI v21 Quest recording.
+**Updated 2026-08-13.** M0-M4 are built. The comprehensive parity review has
+been reconciled with the implementation: Tutorial, the local top-100 score
+browser, Credits, AlienZooKeeper and the VR controller-sequence Typo'Shooter are
+built. Multiplayer remains post-v1. Tutorial state uses append-only host ABI
+v24.
 
 **In flight: control modes (§4/§5).** Tabletop/Cabinet, the Arena & Layout
 screen, and UI edit mode all landed 2026-08-08 and are being validated
@@ -1216,24 +1237,41 @@ keys alongside the untested cases and new paged-settings/edit-preview/default-la
 
 Remaining, in rough order:
 
+**Release-readiness audit (2026-08-13): NO-GO.** Packaging builds succeeded, but
+the reordered rollback smoke failed, Windows native networking was flaky across
+lockstep/relay tests, `0.10.0` was still the already-published package version,
+and the candidate remained uncommitted. These are release blockers in addition
+to the physical, operational, and legal work below. Track closure in the
+[Release Preparation](../docs/contributor/project-tracking/release-preparation.md)
+document rather than treating successful compilation as readiness.
+
 1. **Finish validating the control-mode work.** The headset-authored Cabinet
    layout is now the clean-profile default (3.75x, 55 degrees, 1.40 m distance,
    0.95 m drop). Both logged Pause/Level Up layouts are baked as exact rounded
    mirror pairs; Cabinet's logged hand rectangle defaults to a 10-degree pitch,
    0.65x scale and its measured offset. Edit mode shows moving real sprites, a
    fixed perk offer and an x3 badge for clearance.
-2. **Clean-install asset rehearsal.** The asset-free Quest/PCVR bootstrap,
-   integrity-checked atomic importer, local helper, and no-launch ADB transfer
-   are built. Run the prepared destructive rehearsal once current headset
-   results have been collected; validate first launch, import, relaunch reuse,
-   and actionable failure recovery.
-3. **Finish M5 shell + CI builds.** The VR-native menu exists. Quest personal-build
-   CI is now specified as a manually dispatched, secret-free clean build with
-   an auto-generated keystore. Public repositories validate without uploading;
-   the downloadable APK/key bundle is restricted to a private standalone copy
-   (see `crimson-vr/notes/quest-ci.md`). Windows/Linux artifacts remain.
+2. **Finish clean-install validation.** The private-copy CI build contract was
+   reproduced locally on 2026-08-11; its fresh-key Release APK was clean-installed
+   on Quest, the known-good pack was staged, and the app was left stopped. Validate
+   first launch, import, relaunch reuse, and actionable failure recovery.
+3. **Exercise M5 CI on the eventual default branch.** Quest and Windows/Linux
+   PCVR personal-build workflows are implemented as manually dispatched,
+   secret-free clean builds. Public repositories validate without uploading;
+   downloadable APK/key or PCVR archive bundles are restricted to a private
+   standalone copy (see `notes/quest-ci.md` and `notes/pcvr-ci.md`). GitHub only
+   enables manual dispatch after the workflow file exists on the default branch.
 4. **Seated reach calibration (§5).** Now partly served by the Arena & Layout
    sliders; a measured calibration is still the stronger version.
-5. **Release/fork rehearsal.** Asset removal and licensing decoupling are built;
-   after the clean-install gate, exercise the documented fork/rebase and private
-   personal-build workflow end to end.
+5. **Release/private-copy rehearsal.** Asset removal and licensing decoupling are
+   built, and the local CI-equivalent build/install contract has been exercised.
+   Still exercise the documented import/rebase and actual private standalone
+   GitHub personal-build workflow end to end.
+6. **Validate multiplayer slices 3-6, then implement slice 7.** Direct-LAN
+   and relay Survival/Rush, negotiated-slot presentation/results, per-player
+   FX, canonical perks, network replays, DNS and reconnect/resync are
+   implemented. Provision the operated friends-only relay and test the 2-4
+   player native-PC/Quest matrix, including Quest in every slot plus headset
+   sleep/resume and Wi-Fi transitions. Then add casual network Quests with
+   host-owned progression. Windows uses the transport-owned receive worker
+   documented in `notes/multiplayer-implementation.md`.

@@ -622,7 +622,7 @@ fn resolveReplayPath(
     }
 
     if (!std.fs.path.isAbsolute(replay_file) and isSingleSegmentPath(replay_file)) {
-        const secondary = try std.fs.path.join(allocator, &.{ base_dir, "replays", replay_file });
+        const secondary = try std.fmt.allocPrint(allocator, "{s}/replays/{s}", .{ base_dir, replay_file });
         errdefer allocator.free(secondary);
         const secondary_exists = try isFile(secondary);
         return .{

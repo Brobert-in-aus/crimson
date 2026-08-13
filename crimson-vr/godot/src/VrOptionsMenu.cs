@@ -6,9 +6,9 @@ namespace CrimsonVR;
 /// <summary>
 /// The Options screen, rebuilt to mirror the original Crimsonland Options panel
 /// (src/crimson/screens/panels/options.py) as closely as VR allows: a ui_menuPanel
-/// background with Sound / Music / Graphics-detail segmented sliders (ui_rectOn/Off)
-/// and a "UI Info texts" checkbox (ui_checkOn/Off). Controls that don't apply to VR
-/// (resolution, mouse sensitivity) are dropped; the original "Controls" button is
+/// background with Sound / Music / Graphics-detail segmented sliders
+/// (ui_rectOn/Off). Controls that don't apply to VR (resolution, mouse sensitivity, and
+/// the currently unimplemented desktop hover-info toggle) are dropped; "Controls" is
 /// replaced by a VR Settings submenu (movement hand / dead zone / debug).
 ///
 /// A child of ArenaRoot, hidden until opened; faces the player above the arena like
@@ -22,7 +22,6 @@ public sealed partial class VrOptionsMenu : Node3D
     private VrSegmentedSlider _sfx = null!;
     private VrSegmentedSlider _music = null!;
     private VrSegmentedSlider _detail = null!;
-    private VrCheckbox _infoTexts = null!;
     private VrButton _controls = null!;
     private VrButton _vrSettings = null!;
     private VrButton _back = null!;
@@ -33,11 +32,10 @@ public sealed partial class VrOptionsMenu : Node3D
     public event Action<int>? OnSfxChanged;
     public event Action<int>? OnMusicChanged;
     public event Action<int>? OnDetailChanged;
-    public event Action<bool>? OnInfoTextsChanged;
 
     public void Build(
-        float s, int sfx, int music, int detail, bool infoTexts,
-        Texture2D? panelTex, Texture2D? rectOn, Texture2D? rectOff, Texture2D? checkOn, Texture2D? checkOff)
+        float s, int sfx, int music, int detail,
+        Texture2D? panelTex, Texture2D? rectOn, Texture2D? rectOff)
     {
         // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
         Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
@@ -71,14 +69,7 @@ public sealed partial class VrOptionsMenu : Node3D
         _music = AddSliderRow("Music volume", s, y, 0, 10, music, rectOn, rectOff, v => OnMusicChanged?.Invoke(v));
         y -= s * 0.18f;
         _detail = AddSliderRow("Graphics detail", s, y, 1, 5, detail, rectOn, rectOff, v => OnDetailChanged?.Invoke(v));
-        y -= s * 0.15f;
-
-        _infoTexts = new VrCheckbox();
-        AddChild(_infoTexts);
-        _infoTexts.Build(s * 0.045f, "UI Info texts", infoTexts, checkOn, checkOff);
-        _infoTexts.Position = new Vector3(-s * 0.16f, y, 0.0f);
-        _infoTexts.OnToggled += b => OnInfoTextsChanged?.Invoke(b);
-        y -= s * 0.12f;
+        y -= s * 0.18f;
 
         // Bottom row, three across: Controls (the base Options screen's
         // Controls button, as a VR reference card) / VR Settings / Back.
@@ -161,7 +152,6 @@ public sealed partial class VrOptionsMenu : Node3D
         _controls.ResetPress();
         _vrSettings.ResetPress();
         _back.ResetPress();
-        _infoTexts.ResetPress();
         _sfx.ResetPress();
         _music.ResetPress();
         _detail.ResetPress();
@@ -176,7 +166,6 @@ public sealed partial class VrOptionsMenu : Node3D
         _sfx.PollPoke(probes);
         _music.PollPoke(probes);
         _detail.PollPoke(probes);
-        _infoTexts.PollPoke(probes);
         _controls.PollPoke(probes);
         _vrSettings.PollPoke(probes);
         _back.PollPoke(probes);

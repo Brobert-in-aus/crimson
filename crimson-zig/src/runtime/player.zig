@@ -15,9 +15,9 @@ const Vec2 = state_mod.Vec2;
 const weapon_stats = weapon_data.weapon_stats;
 
 pub const GameInputFlags = struct {
-    fire_down: bool,
-    fire_pressed: bool,
-    reload_pressed: bool,
+    fire_down: bool = false,
+    fire_pressed: bool = false,
+    reload_pressed: bool = false,
     reload_down: bool = false,
     move_to_cursor_pressed: bool = false,
     move_mode: ?i32 = null,
@@ -29,11 +29,11 @@ pub const GameInputFlags = struct {
 };
 
 pub const GameInput = struct {
-    move_x: f32,
-    move_y: f32,
-    aim_x: f32,
-    aim_y: f32,
-    flags: GameInputFlags,
+    move_x: f32 = 0.0,
+    move_y: f32 = 0.0,
+    aim_x: f32 = 0.0,
+    aim_y: f32 = 0.0,
+    flags: GameInputFlags = .{},
 };
 
 pub fn weaponAssignPlayer(

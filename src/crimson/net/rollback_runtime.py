@@ -12,6 +12,7 @@ from ..game_modes import GameMode
 from ..persistence.save_status import GameStatusData
 from ..quests.level import QuestLevel
 from ..replay.types import PackedPlayerInput
+from ..sim.input_providers import GameCommand
 from .debug_log import lan_debug_log
 from .lockstep_protocol import TickFrame
 from .relay_protocol import (
@@ -29,6 +30,8 @@ from .relay_protocol import (
     PeerDisconnect,
     Ping,
     Pong,
+    RbCanonicalCommand,
+    RbCommandRequest,
     RbInputBatch,
     RbResyncBegin,
     RbResyncChunk,
@@ -117,6 +120,7 @@ class RollbackRuntime(msgspec.Struct):
 
     _rollback: RollbackController | None = None
     _frame_queue: deque[TickFrame] = msgspec.field(default_factory=deque)
+    _scheduled_commands: list[tuple[int, GameCommand]] = msgspec.field(default_factory=list)
     _remote_seen_slots: set[int] = msgspec.field(default_factory=set)
     _pending_rollback_from: int | None = None
 
@@ -149,6 +153,9 @@ class RollbackRuntime(msgspec.Struct):
     def local_slot_index(self) -> int:
         event = self.match_start_event
         if event is None:
+            state = self.lobby_state_latest
+            if state is not None and int(state.local_slot_index) >= 0:
+                return int(state.local_slot_index)
             return 0 if str(self.cfg.role) == "host" else -1
         return int(event.slot_index)
 
@@ -185,6 +192,7 @@ class RollbackRuntime(msgspec.Struct):
         self._announced_room_code = None
         self._rollback = None
         self._frame_queue.clear()
+        self._scheduled_commands.clear()
         self._remote_seen_slots.clear()
         self._pending_rollback_from = None
         self._local_snapshot_blobs.clear()
@@ -289,6 +297,16 @@ class RollbackRuntime(msgspec.Struct):
         self._send(batch, reliable=False, now_ms=(_now_ms() if now_ms is None else int(now_ms)))
         self._drain_frames()
 
+    def submit_local_command(self, command: GameCommand, *, now_ms: int | None = None) -> None:
+        controller = self._rollback
+        if controller is None or int(command.player_index) != int(controller.local_slot_index):
+            return
+        stamp = _now_ms() if now_ms is None else int(now_ms)
+        if str(self.cfg.role) == "host":
+            self._schedule_authoritative_command(command=command, now_ms=int(stamp))
+        else:
+            self._send(RbCommandRequest(command=command), reliable=True, now_ms=int(stamp))
+
     def pop_tick_frame(self) -> TickFrame | None:
         if bool(self._paused_for_reconnect):
             return None
@@ -329,10 +347,6 @@ class RollbackRuntime(msgspec.Struct):
                 continue
             self._last_send_ms = int(now)
 
-        if self._accepted and self._joined_room and (not self.started) and (not self._sent_ready):
-            self._send(RoomReady(slot_index=max(0, int(self.local_slot_index)), ready=True), reliable=True, now_ms=int(now))
-            self._sent_ready = True
-
         if self._accepted and (
             self._last_ping_ms <= 0 or (int(now) - int(self._last_ping_ms)) >= int(PING_INTERVAL_MS)
         ):
@@ -357,6 +371,17 @@ class RollbackRuntime(msgspec.Struct):
             )
 
         self._drain_frames()
+
+    def set_ready(self, ready: bool, *, now_ms: int | None = None) -> None:
+        if not self._accepted or not self._joined_room or self.started:
+            raise RuntimeError("network player is not readyable yet")
+        now = _now_ms() if now_ms is None else int(now_ms)
+        self._send(
+            RoomReady(slot_index=int(self.local_slot_index), ready=bool(ready)),
+            reliable=True,
+            now_ms=int(now),
+        )
+        self._sent_ready = bool(ready)
 
     def _send_hello_if_needed(self, *, now_ms: int) -> None:
         if self._accepted:
@@ -516,6 +541,26 @@ class RollbackRuntime(msgspec.Struct):
                     )
                 return
 
+            case RbCommandRequest():
+                controller = self._rollback
+                if str(self.cfg.role) != "host" or controller is None:
+                    return
+                player = int(message.command.player_index)
+                if player <= 0 or player >= int(controller.player_count):
+                    return
+                self._schedule_authoritative_command(command=message.command, now_ms=int(now_ms))
+                return
+
+            case RbCanonicalCommand():
+                controller = self._rollback
+                if str(self.cfg.role) == "host" or controller is None:
+                    return
+                self._scheduled_commands.append((int(message.tick_index), message.command))
+                if int(message.tick_index) < int(controller.next_emit_tick):
+                    pending = self._pending_rollback_from
+                    self._pending_rollback_from = int(message.tick_index) if pending is None else min(int(pending), int(message.tick_index))
+                return
+
             case RbResyncRequest():
                 self._handle_resync_request(message=message, now_ms=int(now_ms))
                 return
@@ -572,7 +617,7 @@ class RollbackRuntime(msgspec.Struct):
                 TickFrame(
                     tick_index=int(frame.tick_index),
                     frame_inputs=[list(item) for item in frame.frame_inputs],
-                    commands=[],
+                    commands=self._commands_for_tick(int(frame.tick_index)),
                 ),
             )
 
@@ -590,7 +635,10 @@ class RollbackRuntime(msgspec.Struct):
             self._pending_rollback_from = min(int(pending), int(tick))
 
         snapshot_tick = int(tick) - 1
-        if self._latest_snapshot_at_or_before(snapshot_tick) is None:
+        # Tick zero can be rebuilt from the pristine initial state by a live
+        # simulation host. The lightweight PC test host does not own a mode
+        # snapshot, so requesting one here leaves the Quest paused forever.
+        if tick > 0 and self._latest_snapshot_at_or_before(snapshot_tick) is None:
             self._send_resync_request(from_tick=int(tick), reason="rollback_snapshot_missing", now_ms=int(now_ms))
             return
 
@@ -602,7 +650,7 @@ class RollbackRuntime(msgspec.Struct):
                     TickFrame(
                         tick_index=int(frame.tick_index),
                         frame_inputs=[list(item) for item in frame.frame_inputs],
-                        commands=[],
+                        commands=self._commands_for_tick(int(frame.tick_index)),
                     ),
                 )
             self._frame_queue = rebuilt_queue
@@ -615,9 +663,47 @@ class RollbackRuntime(msgspec.Struct):
             rebuilt_frames=len(rebuilt),
         )
 
+    def _commands_for_tick(self, tick_index: int) -> list[GameCommand]:
+        return [command for tick, command in self._scheduled_commands if int(tick) == int(tick_index)]
+
+    def _schedule_authoritative_command(self, *, command: GameCommand, now_ms: int) -> None:
+        controller = self._rollback
+        if controller is None:
+            return
+        tick_index = int(controller.capture_tick) + int(controller.max_rollback_ticks) + 2
+        self._scheduled_commands.append((int(tick_index), command))
+        self._send(
+            RbCanonicalCommand(tick_index=int(tick_index), command=command),
+            reliable=True,
+            now_ms=int(now_ms),
+        )
+
     def _send_resync_request(self, *, from_tick: int, reason: str, now_ms: int) -> None:
         request_id = uuid.uuid4().hex[:12]
         self.resync_count = int(self.resync_count) + 1
+        if self._is_host_slot():
+            # The host is authoritative. If its rollback window overflows it
+            # must push its latest snapshot to the guests; asking a guest for
+            # state is both backwards and rejected by the relay.
+            self._handle_resync_request(
+                message=RbResyncRequest(
+                    request_id=str(request_id),
+                    from_tick=max(0, int(from_tick)),
+                    reason=str(reason),
+                    requested_by_slot=max(0, int(self.local_slot_index)),
+                ),
+                now_ms=int(now_ms),
+            )
+            lan_debug_log(
+                "resync_snapshot_sent",
+                role=str(self.cfg.role),
+                room_code=str(self.cfg.room_code or ""),
+                request_id=str(request_id),
+                from_tick=max(0, int(from_tick)),
+                reason=str(reason),
+            )
+            return
+
         self._paused_for_reconnect = True
         self._active_resync_request_id = str(request_id)
         self._send(

@@ -14,6 +14,26 @@ We go great lengths to achieve this goal, including a headless differential test
 
 The rewrite is a playable full game: boot, menus, Survival, Rush, Quests (5 tiers), Tutorial, and Typ-o-Shooter, with full weapon/creature/perk content, terrain/sprite/decal rendering, music, gameplay SFX, and even secrets. The simulation is fully deterministic, supporting seeded runs and headless verifiable replays.
 
+### CrimsonVR
+
+[`crimson-vr/`](crimson-vr/) contains the experimental OpenXR frontend for
+standalone Quest 3 and PCVR. It embeds the same deterministic simulation and
+currently surfaces Survival, Rush, Quests, and Tutorial in two seated layouts:
+Tabletop and Cabinet. Menus use direct controller/hand poke interaction; native
+replays remain compatible with the desktop verifier. Friends-only multiplayer
+is implemented but still undergoing deterministic and physical-device
+validation. The current candidate is not release-ready; maintainers should use
+the [Release Preparation](docs/contributor/project-tracking/release-preparation.md)
+checklist as the canonical go/no-go record.
+
+VR packages are deliberately asset-free. Players create a local pack from a
+user-owned GOG Crimsonland Classic 1.9.93 installation and import it on first
+launch; see the [asset-import guide](crimson-vr/notes/asset-import.md). Quest and
+PCVR personal builds are documented in the [Quest CI](crimson-vr/notes/quest-ci.md)
+and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides. Where binary redistribution is
+not authorized, the downloadable artifact flow requires a **private standalone
+repository**, not GitHub's Fork button or a public fork.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:

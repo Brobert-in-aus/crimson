@@ -85,6 +85,8 @@ pub fn handleMessage(
         .room_join => |join| try handleRoomJoin(allocator, core, peer_index, join, options, &outbox),
         .room_ready => |ready| try handleRoomReady(allocator, core, peer_index, ready, options, &outbox),
         .rb_input_sample,
+        .rb_command_request,
+        .rb_canonical_command,
         .rb_resync_request,
         .rb_resync_begin,
         .rb_resync_chunk,
@@ -274,6 +276,7 @@ fn appendRoomState(allocator: std.mem.Allocator, core: *relay_core.RelayCore, ro
         const dst_idx = core.findPeerById(slot.peer_id) orelse continue;
         var state = try room.roomState(allocator);
         errdefer state.deinit(allocator);
+        state.value.local_slot_index = slot.slot_index;
         try outbox.items.append(allocator, .{
             .peer_index = dst_idx,
             .message = .{ .room_state = state.value },
@@ -366,7 +369,11 @@ test "relay dispatch creates joins readies and starts room" {
     try std.testing.expectEqual(@as(i32, 1), core.peers.items[guest_idx].peer.slot_index);
     try std.testing.expectEqual(@as(usize, 2), joined.items.items.len);
 
-    var ready = try handleMessage(allocator, &core, guest_idx, .{ .room_ready = .{ .slot_index = 1, .ready = true } }, .{ .now_ms = 1004 });
+    var host_ready = try handleMessage(allocator, &core, host_idx, .{ .room_ready = .{ .slot_index = 0, .ready = true } }, .{ .now_ms = 1004 });
+    defer host_ready.deinit(allocator);
+    try std.testing.expect(!core.rooms.items[0].room.started);
+
+    var ready = try handleMessage(allocator, &core, guest_idx, .{ .room_ready = .{ .slot_index = 1, .ready = true } }, .{ .now_ms = 1005 });
     defer ready.deinit(allocator);
     try std.testing.expect(core.rooms.items[0].room.started);
     var room_start_count: usize = 0;

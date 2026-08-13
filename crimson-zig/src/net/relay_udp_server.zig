@@ -2,6 +2,7 @@ const std = @import("std");
 
 const relay_protocol = @import("relay_protocol.zig");
 const relay_service = @import("relay_service.zig");
+const windows_udp_receive = @import("windows_udp_receive.zig");
 
 const Io = std.Io;
 const IpAddress = std.Io.net.IpAddress;
@@ -58,14 +59,18 @@ pub fn serve(allocator: std.mem.Allocator, io: Io, config: Config) !void {
         .mode = .dgram,
         .protocol = .udp,
     });
-    defer socket.close(io);
+    var windows_receive: ?*windows_udp_receive.ReceiveQueue = null;
+    if (@import("builtin").os.tag == .windows) {
+        windows_receive = try windows_udp_receive.ReceiveQueue.init(socket, 64 * 1024);
+    }
+    defer if (windows_receive) |queue| queue.deinit() else socket.close(io);
 
     try printOpen(io, socket.address, config);
 
     var recv_buffer: [64 * 1024]u8 = undefined;
     while (true) {
         const now_ms = monotonicMs(io);
-        try drainPackets(allocator, io, &service, socket, &recv_buffer, now_ms, config);
+        try drainPackets(allocator, io, &service, socket, windows_receive, &recv_buffer, now_ms, config);
         try flushOutbox(allocator, io, socket, try service.pollResends(allocator, now_ms));
         try flushOutbox(allocator, io, socket, try service.pruneTimeouts(allocator, now_ms, config.link_timeout_ms));
     }
@@ -76,10 +81,20 @@ fn drainPackets(
     io: Io,
     service: *relay_service.RelayService,
     socket: Socket,
+    windows_receive: ?*windows_udp_receive.ReceiveQueue,
     recv_buffer: []u8,
     now_ms: i64,
     config: Config,
 ) !void {
+    if (windows_receive) |queue| {
+        var raw = try queue.take(allocator, io, config.max_packets, config.tick_ms);
+        defer raw.deinit(allocator);
+        for (raw.items.items) |packet| {
+            try processPacket(allocator, io, service, socket, packet.from, packet.data, now_ms, config);
+        }
+        return;
+    }
+
     var remaining = config.max_packets;
     while (remaining > 0) : (remaining -= 1) {
         const timeout: Io.Timeout = if (remaining == config.max_packets)
@@ -91,17 +106,30 @@ fn drainPackets(
             else => return err,
         };
         if (incoming.flags.trunc) continue;
-        const addr = peerAddrFromIp(incoming.from) orelse continue;
-        const decoded = relay_protocol.decodePacket(allocator, incoming.data) catch continue;
-        defer decoded.deinit();
-        try flushOutbox(allocator, io, socket, try service.receivePacket(allocator, addr, decoded.value, .{
-            .dispatch = .{
-                .now_ms = now_ms,
-                .reconnect_timeout_ms = config.reconnect_timeout_ms,
-                .max_rooms = config.max_rooms,
-            },
-        }));
+        try processPacket(allocator, io, service, socket, incoming.from, incoming.data, now_ms, config);
     }
+}
+
+fn processPacket(
+    allocator: std.mem.Allocator,
+    io: Io,
+    service: *relay_service.RelayService,
+    socket: Socket,
+    from: IpAddress,
+    data: []const u8,
+    now_ms: i64,
+    config: Config,
+) !void {
+    const addr = peerAddrFromIp(from) orelse return;
+    const decoded = relay_protocol.decodePacket(allocator, data) catch return;
+    defer decoded.deinit();
+    try flushOutbox(allocator, io, socket, try service.receivePacket(allocator, addr, decoded.value, .{
+        .dispatch = .{
+            .now_ms = now_ms,
+            .reconnect_timeout_ms = config.reconnect_timeout_ms,
+            .max_rooms = config.max_rooms,
+        },
+    }));
 }
 
 fn flushOutbox(allocator: std.mem.Allocator, io: Io, socket: Socket, outbox: relay_service.AddressedOutbox) !void {

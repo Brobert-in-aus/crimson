@@ -7,7 +7,8 @@ namespace CrimsonVR;
 /// M4 slice 3: pause. A small pause toggle sits FLAT (parallel to the arena) off
 /// to one side, pressable at any time during play (PLAN M4 UI model). Poking it
 /// pauses the sim (Main simply stops ticking) and raises a panel ABOVE the arena
-/// with Resume / Settings / Quit poke buttons; poking Resume (or the toggle again)
+/// with Resume / Recenter / Settings / Exit to Main Menu poke buttons; leaving a
+/// run uses a consequence confirmation, while Resume (or the toggle again)
 /// unpauses.
 ///
 /// A child of ArenaRoot, so everything is arena-local and inherits placement.
@@ -49,13 +50,17 @@ public sealed partial class PauseMenu : Node3D
     }
     private Node3D _panel = null!;
     private VrButton _resume = null!;
+    private VrButton _recenter = null!;
     private VrButton _settings = null!;
     private VrButton _quit = null!;
+    private Label3D _exitWarning = null!;
+    private bool _confirmExit;
 
     public bool IsPaused { get; private set; }
 
     public event Action? OnQuit;
     public event Action? OnSettings;
+    public event Action? OnRecenter;
     public event Action? OnLevelUp;
 
     public void Build(float arenaSideMeters)
@@ -130,7 +135,7 @@ public sealed partial class PauseMenu : Node3D
         _levelUp.AddChild(_levelUpBadge);
 
         // Pause panel above the arena, facing the player (same anchor style as the
-        // perk menu): Resume / Settings / Quit stacked vertically.
+        // perk menu): Resume / Recenter / Settings / Exit stacked vertically.
         _panel = new Node3D
         {
             // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
@@ -141,14 +146,29 @@ public sealed partial class PauseMenu : Node3D
         AddChild(_panel);
 
         float bw = s * 0.5f;
-        float bh = s * 0.16f;
-        float gap = s * 0.05f;
+        float bh = s * 0.13f;
+        float gap = s * 0.035f;
         _resume = MakeButton(_panel, "Resume", new Color(0.4f, 0.8f, 0.45f), bw, bh, 0, gap);
-        _settings = MakeButton(_panel, "Settings", new Color(0.5f, 0.6f, 0.85f), bw, bh, 1, gap);
-        _quit = MakeButton(_panel, "Quit", new Color(0.85f, 0.35f, 0.3f), bw, bh, 2, gap);
-        _resume.OnPress += () => SetPaused(false);
+        _recenter = MakeButton(_panel, "Recenter View", new Color(0.45f, 0.72f, 0.78f), bw, bh, 1, gap);
+        _settings = MakeButton(_panel, "Settings", new Color(0.5f, 0.6f, 0.85f), bw, bh, 2, gap);
+        _quit = MakeButton(_panel, "Exit to Main Menu", new Color(0.85f, 0.35f, 0.3f), bw, bh, 3, gap);
+        _exitWarning = new Label3D
+        {
+            Text = "Exit this run? Current progress will be lost.",
+            FontSize = 62,
+            PixelSize = s / 1200.0f,
+            Modulate = new Color(1.0f, 0.72f, 0.52f),
+            OutlineSize = 18,
+            OutlineModulate = Colors.Black,
+            Position = new Vector3(0.0f, s * 0.34f, 0.002f),
+            NoDepthTest = true,
+            Visible = false,
+        };
+        _panel.AddChild(_exitWarning);
+        _resume.OnPress += ResumeOrCancelExit;
+        _recenter.OnPress += () => OnRecenter?.Invoke();
         _settings.OnPress += () => OnSettings?.Invoke();
-        _quit.OnPress += () => OnQuit?.Invoke();
+        _quit.OnPress += RequestOrConfirmExit;
     }
 
     private static VrButton MakeButton(Node3D parent, string text, Color color, float w, float h, int row, float gap)
@@ -204,14 +224,51 @@ public sealed partial class PauseMenu : Node3D
 
     private void TogglePause() => SetPaused(!IsPaused);
 
+    private void ResumeOrCancelExit()
+    {
+        if (_confirmExit)
+        {
+            SetExitConfirmation(false);
+            return;
+        }
+        SetPaused(false);
+    }
+
+    private void RequestOrConfirmExit()
+    {
+        if (!_confirmExit)
+        {
+            SetExitConfirmation(true);
+            return;
+        }
+        SetExitConfirmation(false);
+        OnQuit?.Invoke();
+    }
+
+    private void SetExitConfirmation(bool confirm)
+    {
+        _confirmExit = confirm;
+        _exitWarning.Visible = confirm;
+        _resume.SetText(confirm ? "Keep Playing" : "Resume");
+        _settings.Visible = !confirm;
+        _recenter.Visible = !confirm;
+        _quit.SetText(confirm ? "Exit Run" : "Exit to Main Menu");
+        _resume.ResetPress();
+        _recenter.ResetPress();
+        _settings.ResetPress();
+        _quit.ResetPress();
+    }
+
     private void SetPaused(bool paused)
     {
         IsPaused = paused;
         _panel.Visible = paused;
         if (!paused)
         {
+            SetExitConfirmation(false);
             _resume.ResetPress();
             _settings.ResetPress();
+            _recenter.ResetPress();
             _quit.ResetPress();
         }
     }
@@ -236,7 +293,11 @@ public sealed partial class PauseMenu : Node3D
         if (IsPaused && _panel.Visible)
         {
             _resume.PollPoke(probes);
-            _settings.PollPoke(probes);
+            if (_recenter.Visible) _recenter.PollPoke(probes);
+            if (_settings.Visible)
+            {
+                _settings.PollPoke(probes);
+            }
             _quit.PollPoke(probes);
         }
     }

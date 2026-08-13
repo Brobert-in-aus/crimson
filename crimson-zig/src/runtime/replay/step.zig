@@ -1085,6 +1085,7 @@ test "ammunition within triggers final revenge inline with frame dt" {
     players[0].weapon.reload_active = true;
     players[0].weapon.reload_timer = 1.0;
     players[0].weapon.reload_timer_max = 1.0;
+    players[0].weapon.shot_cooldown = 0.0;
     players[0].perk_counts.set(perks.PerkId.ammunition_within, 1);
     players[0].perk_counts.set(perks.PerkId.final_revenge, 1);
 
@@ -1094,7 +1095,7 @@ test "ammunition within triggers final revenge inline with frame dt" {
         &[_]player_runtime.GameInput{.{
             .aim_x = 700.0,
             .aim_y = 512.0,
-            .flags = .{ .fire_down = true },
+            .flags = .{ .fire_down = true, .fire_pressed = true },
         }},
         &.{},
         0.05,

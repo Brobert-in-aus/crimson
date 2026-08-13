@@ -310,7 +310,7 @@ fn collectReplayRows(
         const rel_path = if (rel_prefix.len == 0)
             try allocator.dupe(u8, entry.name)
         else
-            try std.fs.path.join(allocator, &.{ rel_prefix, entry.name });
+            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ rel_prefix, entry.name });
         errdefer allocator.free(rel_path);
 
         const abs_path = try std.fs.path.join(allocator, &.{ dir_path, entry.name });

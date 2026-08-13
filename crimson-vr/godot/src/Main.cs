@@ -156,7 +156,10 @@ public partial class Main : Node3D
     private const int GameModeSurvival = 1;
     private const int GameModeRush = 2;
     private const int GameModeQuests = 3;
+    private const int GameModeTypo = 4;
+    private const int GameModeTutorial = 8;
     private int _gameMode = GameModeSurvival;
+    private int _runPlayerCount = 1;
     private int _questKey = 101;      // quest_level_key = stage*100 + index
     private string _questTitle = string.Empty;
     private bool _questEndShown;      // quest end panel shown for this run
@@ -181,6 +184,7 @@ public partial class Main : Node3D
     private Node3D _leftGuide = null!;
     private Node3D _rightGuide = null!;
     private Label3D _status = null!;
+    private Label3D _recenterFeedback = null!;
     private bool _assetBootstrapActive;
     private bool _assetBootstrapPlaced;
     private AssetBootstrapPanel? _assetBootstrapPanel;
@@ -194,8 +198,10 @@ public partial class Main : Node3D
     // the player was walking toward; it only has to mark a point.
     private const float ReticleSizeMeters = 0.005f;
 
-    private SimSession? _sim;
+    private IGameSession? _sim;
     private Diorama _diorama = null!;
+    private TypoPromptLayer _typoPromptLayer = null!;
+    private readonly TypoSequenceDirector _typoDirector = new();
     private AudioBank _audio = null!;
     private Hud _hud = null!;
     private Sim.PlayerSnap _lastPlayer;   // latest tick's player snap (aim overlays)
@@ -230,28 +236,38 @@ public partial class Main : Node3D
     private const int DeathZoomTicks = 48;
     private int _deathRank = int.MaxValue; // 0-based insertion rank of the death score
     private int _deathScore;               // score pinned when the death screen opened
+    private long _deathElapsedMs;
+    private int _deathKills, _deathShots, _deathHits;
 
     // ~1.2 s at 60 Hz between death and the results flow, standing in for the
     // base game's death VO + death-timer delay before the panel slides in
     // (player_damage.py). Tune in-headset.
     private const int DeathPacingTicks = 72;
-    private const int HighscoreTableMax = 10; // UserSettings.AddHighscore cap
+    private const int HighscoreTableMax = 100; // base browser capacity
     private readonly UserSettings _settings = new();
     private ValidationChecklist _checklist = null!;
     private DebugMenu _debugMenu = null!;
     private MainMenu _mainMenu = null!;
     private PlayGameMenu _playGameMenu = null!;
+    private MultiplayerLanMenu _multiplayerLanMenu = null!;
     private QuestSelectMenu _questSelect = null!;
     private QuestResultPanel _questPanel = null!;
     private EndNotePanel _endNote = null!;
     private StatsMenu _statsMenu = null!;
     private DatabaseMenu _databaseMenu = null!;
+    private HighScoresMenu _highScoresMenu = null!;
+    private CreditsMenu _creditsMenu = null!;
+    private AlienZooKeeper _alienZooKeeper = null!;
+    private TutorialPanel _tutorialPanel = null!;
+    private bool _scoresFromGameOver;
 
     /// <summary>The menu flow (main menu, or the options/VR-settings screens opened
     /// from it) owns the screen: the sim must not tick and gameplay input must not
     /// reach the game. Options opened from the pause menu is gated by IsPaused.</summary>
-    private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _questSelect.IsOpen
-        || _statsMenu.IsOpen || _databaseMenu.IsOpen
+    private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _multiplayerLanMenu.IsOpen || _questSelect.IsOpen
+        || _statsMenu.IsOpen || _databaseMenu.IsOpen || _highScoresMenu.IsOpen
+        || _creditsMenu.IsOpen || _alienZooKeeper.IsOpen
+        || _startPrompt is { Pending: true }
         || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen));
     private bool _debug;
     private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
@@ -262,6 +278,7 @@ public partial class Main : Node3D
     private bool _handSwap;
     private readonly bool[] _prevTrigger = new bool[2];
     private readonly bool[] _prevGrip = new bool[2];
+    private readonly bool[] _prevTypoControls = new bool[22];
 
     // Full optical hand tracking is registered separately from the action-map
     // left_hand/right_hand trackers. The former provides fingertip joints for
@@ -295,8 +312,24 @@ public partial class Main : Node3D
     private const float FogEndMeters = 8.0f;
 
     private bool _recenterPending = true;
-    private bool _prevRecenterHeld;
+    private readonly RecenterHold _recenterHold = new();
+    private bool _recenterFeedbackOnComplete;
+    private ulong _recenterFeedbackUntilMs;
     private int _framesSinceStart;
+
+    public override void _Notification(int what)
+    {
+        if (what != NotificationApplicationResumed || _sim is not NetworkSimSession network) return;
+        try
+        {
+            network.ResumeAfterSuspend();
+            if (_multiplayerLanMenu.IsOpen) _multiplayerLanMenu.ShowLobby(network.Status());
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"CrimsonVR: network resume failed: {e.Message}");
+        }
+    }
 
     public override void _Ready()
     {
@@ -347,6 +380,7 @@ public partial class Main : Node3D
         BuildArena();
         BuildReticles();
         BuildStatusLabel();
+        BuildRecenterFeedback();
 
         // Import must happen before StartSession: several UI classes cache
         // textures statically, so building gameplay first would leave those
@@ -544,6 +578,8 @@ public partial class Main : Node3D
         _diorama = new Diorama();
         _playfieldRoot.AddChild(_diorama);
         _diorama.Configure(ArenaSideMeters, GameWorldSize);
+        _typoPromptLayer = new TypoPromptLayer { Name = "TypoPrompts", Visible = false };
+        _playfieldRoot.AddChild(_typoPromptLayer);
 
         // Audio is anchored under the playfield so its players sit on the board
         // (positions are arena-local meters, like the diorama) and pan/attenuate
@@ -585,6 +621,7 @@ public partial class Main : Node3D
         // EdgeRoot is mounted by SetControlMode, once the mode is known.
         _pauseMenu.OnQuit += ReturnToMenu; // in-game Quit -> main menu (menu Quit exits the app)
         _pauseMenu.OnSettings += () => OpenOptions(fromMenu: false);
+        _pauseMenu.OnRecenter += RequestRecenter;
         // Level-up button (shown while a perk pick is pending) reveals the perk cards.
         _pauseMenu.OnLevelUp += () => _perkMenu.Open();
 
@@ -594,16 +631,14 @@ public partial class Main : Node3D
         _optionsMenu = new VrOptionsMenu();
         _arenaRoot.AddChild(_optionsMenu);
         _optionsMenu.Build(
-            ArenaSideMeters, _settings.SfxVolume, _settings.MusicVolume, _settings.GraphicsDetail, _settings.UiInfoTexts,
-            LoadReticleTex("ui_menuPanel.png"), LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"),
-            LoadReticleTex("ui_checkOn.png"), LoadReticleTex("ui_checkOff.png"));
+            ArenaSideMeters, _settings.SfxVolume, _settings.MusicVolume, _settings.GraphicsDetail,
+            LoadReticleTex("ui_menuPanel.png"), LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _optionsMenu.OnBack += CloseOptions;
         _optionsMenu.OnVrSettings += OpenVrSettings;
         _optionsMenu.OnControls += OpenControls;
         _optionsMenu.OnSfxChanged += v => { _settings.SfxVolume = v; _audio.SetSfxVolume(v); _settings.Save(); };
         _optionsMenu.OnMusicChanged += v => { _settings.MusicVolume = v; _audio.SetMusicVolume(v); _settings.Save(); };
         _optionsMenu.OnDetailChanged += v => { _settings.GraphicsDetail = v; _diorama.SetGraphicsDetail(v); _settings.Save(); };
-        _optionsMenu.OnInfoTextsChanged += v => { _settings.UiInfoTexts = v; _settings.Save(); };
 
         // VR Settings submenu (opened from Options): hand-swap + dead-zone + debug.
         _settingsMenu = new SettingsMenu();
@@ -709,6 +744,7 @@ public partial class Main : Node3D
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
         _arenaLayout.OnBack += CloseArenaLayout;
         _arenaLayout.OnReset += ResetUiLayout;
+        _arenaLayout.OnUndoReset += UndoUiLayoutReset;
 
         // A saved placement wins over the mode default: the player put the board
         // where they wanted it, and a mode they never switched should not undo
@@ -743,15 +779,32 @@ public partial class Main : Node3D
         }
         SetDebug(_settings.Debug); // apply the saved debug state to the diorama
 
-        // First-run prompt (accept/calibrate) is superseded by the main menu as the
-        // boot screen — the menu is now the first thing the player sees, and seated
-        // calibration is its own later slice (PLAN §5). Keep the node built for that
-        // future integration but always skip it so it never gates the sim.
+        // First-run interaction guide. It teaches the direct-touch control before
+        // Main Menu, then stays out of the returning-player path.
         _startPrompt = new StartPrompt();
         _arenaRoot.AddChild(_startPrompt);
         _startPrompt.Build(ArenaSideMeters);
-        _startPrompt.OnCalibrate += () => GD.Print("CrimsonVR: seated calibration is a later slice; using default arena");
-        _startPrompt.Skip();
+        _startPrompt.OnAccept += () =>
+        {
+            _settings.FirstRunDone = true;
+            _settings.Save();
+            _mainMenu.Open();
+        };
+        _startPrompt.OnCalibrate += () =>
+        {
+            // OnAccept runs immediately after this event and opens Main Menu.
+            // Defer the normal options stack until that navigation state exists.
+            Callable.From(() =>
+            {
+                OpenOptions(fromMenu: true);
+                OpenVrSettings();
+                OpenArenaLayout();
+            }).CallDeferred();
+        };
+        if (_settings.FirstRunDone)
+        {
+            _startPrompt.Skip();
+        }
 
         // Death flow: highscore name entry (virtual keyboard, when the score
         // ranks) then the game-over results panel.
@@ -786,6 +839,31 @@ public partial class Main : Node3D
         _statsMenu.Build(ArenaSideMeters, _settings);
         _statsMenu.OnBack += () => { _statsMenu.Close(); _mainMenu.Open(); };
 
+        _highScoresMenu = new HighScoresMenu();
+        _arenaRoot.AddChild(_highScoresMenu);
+        _highScoresMenu.Build(ArenaSideMeters, _settings);
+        _statsMenu.OnHighScores += () => { _scoresFromGameOver = false; _statsMenu.Close(); _highScoresMenu.Open(); };
+        _gameOverPanel.OnHighScores += () => { _scoresFromGameOver = true; _gameOverPanel.Dismiss(); _highScoresMenu.Open(_gameMode, _runPlayerCount); };
+        _highScoresMenu.OnBack += () =>
+        {
+            _highScoresMenu.Close();
+            if (_scoresFromGameOver && _sim != null) _gameOverPanel.Show(_sim.LastResult, _deathRank, _deathScore,
+                _gameMode == GameModeRush, ResultLocalSlot, _runPlayerCount);
+            else _statsMenu.Open();
+        };
+
+        _creditsMenu = new CreditsMenu();
+        _arenaRoot.AddChild(_creditsMenu);
+        _creditsMenu.Build(ArenaSideMeters);
+        _statsMenu.OnCredits += () => { _statsMenu.Close(); _creditsMenu.Open(); };
+        _creditsMenu.OnBack += () => { _creditsMenu.Close(); _statsMenu.Open(); };
+
+        _alienZooKeeper = new AlienZooKeeper();
+        _arenaRoot.AddChild(_alienZooKeeper);
+        _alienZooKeeper.Build(ArenaSideMeters);
+        _creditsMenu.OnSecret += () => { _creditsMenu.Close(); _alienZooKeeper.Open(); };
+        _alienZooKeeper.OnBack += () => { _alienZooKeeper.Close(); _creditsMenu.Open(); };
+
         // Unlocked Weapons/Perks Databases, behind Statistics like the flat
         // game (panels/stats.py -> panels/databases_*.py).
         _databaseMenu = new DatabaseMenu();
@@ -809,8 +887,29 @@ public partial class Main : Node3D
         _playGameMenu.Build(ArenaSideMeters);
         _playGameMenu.OnSurvival += () => StartRun(GameModeSurvival);
         _playGameMenu.OnRush += () => StartRun(GameModeRush);
+        _playGameMenu.OnTypo += () => StartRun(GameModeTypo);
+        _playGameMenu.OnTutorial += () => StartRun(GameModeTutorial);
         _playGameMenu.OnQuests += () => { _playGameMenu.Close(); _questSelect.Open(_settings.QuestUnlockIndex); };
+        _playGameMenu.OnMultiplayer += () => { _playGameMenu.Close(); _multiplayerLanMenu.Open(); };
         _playGameMenu.OnBack += () => { _playGameMenu.Close(); _mainMenu.Open(); };
+
+        _multiplayerLanMenu = new MultiplayerLanMenu();
+        _arenaRoot.AddChild(_multiplayerLanMenu);
+        _multiplayerLanMenu.Build(ArenaSideMeters);
+        _multiplayerLanMenu.OnHost += StartLanHost;
+        _multiplayerLanMenu.OnJoin += StartLanJoin;
+        _multiplayerLanMenu.OnHostRoom += StartRoomHost;
+        _multiplayerLanMenu.OnJoinRoom += StartRoomJoin;
+        _multiplayerLanMenu.OnReady += SetNetworkReady;
+        _multiplayerLanMenu.OnCancel += CancelLanSession;
+        _multiplayerLanMenu.OnBack += () => _playGameMenu.Open();
+
+        _tutorialPanel = new TutorialPanel();
+        _arenaRoot.AddChild(_tutorialPanel);
+        _tutorialPanel.Build(ArenaSideMeters);
+        _tutorialPanel.OnSkip += LeaveTutorial;
+        _tutorialPanel.OnPlay += LeaveTutorial;
+        _tutorialPanel.OnRepeat += () => StartRun(GameModeTutorial);
 
         // Quest stage/level select, gated by the persisted unlock index.
         _questSelect = new QuestSelectMenu();
@@ -851,6 +950,7 @@ public partial class Main : Node3D
         };
         _endNote.OnSurvival += () => { _endNote.Dismiss(); StartRun(GameModeSurvival); };
         _endNote.OnRush += () => { _endNote.Dismiss(); StartRun(GameModeRush); };
+        _endNote.OnTypo += () => { _endNote.Dismiss(); StartRun(GameModeTypo); };
         _endNote.OnMainMenu += () => { _endNote.Dismiss(); ReturnToMenu(); };
 
         try
@@ -886,9 +986,12 @@ public partial class Main : Node3D
             _settings.Save();
         }
 
-        // Boot into the main menu: show it, hide the gameplay chrome until PLAY,
-        // and play the menu theme (like the base game).
-        _mainMenu.Open();
+        // Returning players boot into Main Menu. First-time players remain on the
+        // guide until Continue/Adjust Reach; both paths eventually open Main Menu.
+        if (_settings.FirstRunDone)
+        {
+            _mainMenu.Open();
+        }
         SetGameplayVisible(false);
         _audio.PlayMusic("crimson_theme");
     }
@@ -913,6 +1016,12 @@ public partial class Main : Node3D
     private void StartRun(int gameMode, int questKey = 0)
     {
         _gameMode = gameMode;
+        _typoDirector.SetLayout(DetectTypoControllerLayout());
+        _typoPromptLayer.Clear();
+        Array.Clear(_prevTypoControls);
+        Array.Clear(_prevTrigger);
+        Array.Clear(_prevGrip);
+        _runPlayerCount = 1;
         // The base game persists the selected mode (config.gameplay.mode);
         // the weapons database evaluates availability under it.
         _settings.LastGameMode = gameMode;
@@ -922,21 +1031,267 @@ public partial class Main : Node3D
         }
         _mainMenu.Close();
         _playGameMenu.Close();
+        _multiplayerLanMenu.Close();
         _questSelect.Close();
         _questPanel.Dismiss();
         _questEndShown = false;
         RestartSession();
+        _tutorialPanel.SetActive(gameMode == GameModeTutorial);
         _hud.SetQuestTimeLimit(gameMode == GameModeQuests ? _questSelect.TimeLimitFor(_questKey) : 0);
         SetGameplayVisible(true);
         _audio.StopMusic();
+    }
+
+    private void StartLanHost(int players, int gameMode)
+    {
+        _runSeed = GD.Randi();
+        string config = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            role = "host",
+            netcode = "lockstep",
+            seed = unchecked((int)_runSeed),
+            mode_id = gameMode,
+            player_count = players,
+            port = 31993,
+            peer_name = LocalPeerName(),
+            session_id = $"vr-lan-{_runSeed:x8}",
+            // The host owns progression/drop status for the match. The legacy
+            // status wire has 53 weapon slots; the live runtime expands it to
+            // its current 54-slot table with a zero for any newer entry.
+            status = new
+            {
+                quest_unlock_index = (ushort)Math.Clamp(_settings.QuestUnlockIndex, 0, ushort.MaxValue),
+                quest_unlock_index_full = (ushort)Math.Clamp(_settings.QuestUnlockIndexFull, 0, ushort.MaxValue),
+                weapon_usage_counts = _settings.WeaponUsageCounts[..53],
+                quest_play_counts = new uint[91],
+                mode_play_survival = 0u,
+                mode_play_rush = 0u,
+                mode_play_typo = 0u,
+                mode_play_other = 0u,
+                play_time_ms = 0u,
+                // System.Text.Json serializes byte[] as a Base64 string. The
+                // native fixed [16]u8 field expects a JSON number array.
+                reserved_seed_words = new int[16],
+            },
+        });
+        BeginLanSession(config, gameMode, players);
+    }
+
+    private void StartLanJoin(string host, int players, int gameMode)
+    {
+        if (!System.Net.IPAddress.TryParse(host, out System.Net.IPAddress? parsed)
+            || parsed.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            _multiplayerLanMenu.ShowError("Enter a valid IPv4 address");
+            return;
+        }
+        string config = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            role = "join",
+            netcode = "lockstep",
+            seed = 1,
+            mode_id = gameMode,
+            player_count = players,
+            host,
+            port = 31993,
+            peer_name = LocalPeerName(),
+        });
+        BeginLanSession(config, gameMode, players);
+    }
+
+    private void StartRoomHost(int players, int gameMode)
+    {
+        if (!TryRelayEndpoint(out string relayHost, out int relayPort)) return;
+        _runSeed = GD.Randi();
+        string config = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            role = "host",
+            netcode = "rollback",
+            seed = unchecked((int)_runSeed),
+            mode_id = gameMode,
+            player_count = players,
+            host = relayHost,
+            port = relayPort,
+            peer_name = LocalPeerName(),
+            session_id = $"vr-room-{_runSeed:x8}",
+            status = new
+            {
+                quest_unlock_index = (ushort)Math.Clamp(_settings.QuestUnlockIndex, 0, ushort.MaxValue),
+                quest_unlock_index_full = (ushort)Math.Clamp(_settings.QuestUnlockIndexFull, 0, ushort.MaxValue),
+                weapon_usage_counts = _settings.WeaponUsageCounts[..53],
+                quest_play_counts = new uint[91],
+                mode_play_survival = 0u,
+                mode_play_rush = 0u,
+                mode_play_typo = 0u,
+                mode_play_other = 0u,
+                play_time_ms = 0u,
+                // Keep this a numeric array; byte[] becomes Base64 JSON and
+                // the native network config parser rejects it as LengthMismatch.
+                reserved_seed_words = new int[16],
+            },
+        });
+        BeginLanSession(config, gameMode, players);
+    }
+
+    private void StartRoomJoin(string roomCode)
+    {
+        if (!TryRelayEndpoint(out string relayHost, out int relayPort)) return;
+        string config = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            role = "join",
+            netcode = "rollback",
+            seed = 1,
+            mode_id = GameModeSurvival,
+            player_count = 2,
+            host = relayHost,
+            port = relayPort,
+            room_code = roomCode.ToLowerInvariant(),
+            peer_name = LocalPeerName(),
+        });
+        // The relay's RoomStart replaces these placeholders with host-owned
+        // mode/player settings before gameplay begins.
+        BeginLanSession(config, GameModeSurvival, 2);
+    }
+
+    private bool TryRelayEndpoint(out string host, out int port)
+    {
+        host = System.Environment.GetEnvironmentVariable("CRIMSON_RELAY_HOST")?.Trim() ?? "";
+        if (host.Length == 0)
+        {
+            host = Convert.ToString(ProjectSettings.GetSetting("crimson/network/relay_host", ""))?.Trim() ?? "";
+        }
+        string portText = System.Environment.GetEnvironmentVariable("CRIMSON_RELAY_PORT")?.Trim() ?? "";
+        port = int.TryParse(portText, out int configuredPort) && configuredPort is > 0 and <= 65535
+            ? configuredPort
+            : (int)ProjectSettings.GetSetting("crimson/network/relay_port", 31993);
+        if (host.Length != 0) return true;
+        _multiplayerLanMenu.ShowError("Online relay is not configured in this build. Use Advanced / Direct LAN.");
+        return false;
+    }
+
+    private string LocalPeerName()
+        => string.IsNullOrWhiteSpace(_settings.PlayerName) ? "VR Player" : _settings.PlayerName.Trim();
+
+    private void BeginLanSession(string configJson, int gameMode, int playerCount)
+    {
+        try
+        {
+            // Create first so an invalid address or occupied port leaves the
+            // offline session and menus usable.
+            var network = new NetworkSimSession(configJson);
+            CaptureWeaponUsage();
+            SaveReplay();
+            _sim?.Dispose();
+            _sim = network;
+            BeginReplayRecording();
+            _gameMode = gameMode;
+            _runPlayerCount = playerCount;
+            _settings.LastGameMode = gameMode;
+            _questEndShown = false;
+            _perkMenu.ForceHide();
+            _tutorialPanel.SetActive(false);
+            SetGameplayVisible(false);
+            _multiplayerLanMenu.ShowLobby(network.Status());
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr($"CrimsonVR: network create failed: {e.Message}");
+            _multiplayerLanMenu.ShowError(e.Message);
+        }
+    }
+
+    private void PumpLanLobby(NetworkSimSession network)
+    {
+        try
+        {
+            network.Tick(NeutralNetworkInput());
+            NetworkLobbyStatus status = network.Status();
+            _multiplayerLanMenu.ShowLobby(status);
+            if (status.Phase == "running") EnterLanGameplay(network, status);
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr($"CrimsonVR: network lobby failed: {e.Message}");
+            _multiplayerLanMenu.ShowError(e.Message);
+        }
+    }
+
+    private void EnterLanGameplay(NetworkSimSession network, NetworkLobbyStatus status)
+    {
+        if (status.ModeId is GameModeSurvival or GameModeRush) _gameMode = status.ModeId;
+        _runPlayerCount = Math.Clamp(status.Expected, 2, 4);
+        _multiplayerLanMenu.Close();
+        _diorama.ResetInterpolation();
+        _diorama.ApplyTerrainInfo(network.TerrainInfo());
+        _diorama.ResetTerrainFx();
+        _diorama.ResetViewZoom();
+        _hud.SetQuestTimeLimit(0);
+        _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
+        _prevPerkPending = 0;
+        _hasPlayerSnap = false;
+        SetGameplayVisible(true);
+        _audio.StopMusic();
+    }
+
+    private void CancelLanSession()
+    {
+        DestroyNetworkSession();
+        _multiplayerLanMenu.ReturnFromLobby();
+    }
+
+    private void SetNetworkReady(bool ready)
+    {
+        if (_sim is not NetworkSimSession network) return;
+        try
+        {
+            network.SetReady(ready);
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr($"CrimsonVR: network ready failed: {e.Message}");
+            _multiplayerLanMenu.ShowError(e.Message);
+        }
+    }
+
+    private void DestroyNetworkSession()
+    {
+        if (_sim?.IsNetwork != true) return;
+        _sim.Dispose();
+        _sim = null;
+        _runPlayerCount = 1;
+        _hasPlayerSnap = false;
+    }
+
+    private Sim.HostInput NeutralNetworkInput()
+    {
+        float aimX = _hasPlayerSnap ? _lastPlayer.AimX : _playerGame.X;
+        float aimY = _hasPlayerSnap ? _lastPlayer.AimY : _playerGame.Y;
+        return new Sim.HostInput
+        {
+            MoveX = _playerGame.X,
+            MoveY = _playerGame.Y,
+            AimX = aimX,
+            AimY = aimY,
+            MoveMode = -1,
+            AimScheme = -1,
+            PerkChoiceIndex = -1,
+        };
     }
 
     /// <summary>Recreate the sim with the CURRENT mode config and reset the
     /// per-run frontend state (terrain look, decals, player position).</summary>
     private void RestartSession()
     {
+        _runSeed = GD.Randi();
         if (_sim == null)
         {
+            _sim = new SimSession(SessionConfig);
+            BeginReplayRecording();
+            _diorama.ResetInterpolation();
+            _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
+            _diorama.ResetTerrainFx();
+            _diorama.ResetViewZoom();
+            _playerGame = new Vector2(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
             return;
         }
         // Harvest the outgoing session's weapon usage before it's destroyed —
@@ -946,8 +1301,15 @@ public partial class Main : Node3D
         // Same reason, same moment: the recording belongs to the run that just
         // ended and the native capture is discarded by Restart.
         SaveReplay();
-        _runSeed = GD.Randi();
-        _sim.Restart(SessionConfig);
+        if (_sim.IsNetwork)
+        {
+            _sim.Dispose();
+            _sim = new SimSession(SessionConfig);
+        }
+        else
+        {
+            _sim.Restart(SessionConfig);
+        }
         BeginReplayRecording();
         _diorama.ResetInterpolation();
         _diorama.ApplyTerrainInfo(_sim.TerrainInfo());
@@ -1194,16 +1556,26 @@ public partial class Main : Node3D
     /// Quit exits the app; every in-game Quit routes here instead.</summary>
     private void ReturnToMenu()
     {
+        bool leavingNetwork = _sim?.IsNetwork == true;
+        _tutorialPanel.SetActive(false);
         _keyboard.Dismiss();
         _gameOverPanel.Dismiss();
         _questPanel.Dismiss();
         _perkMenu.ForceHide(); // don't leave perk cards floating over the main menu
         _pauseMenu.ForceResume();
         _questEndShown = false;
-        RestartSession();
+        if (leavingNetwork) DestroyNetworkSession();
+        else RestartSession();
         _mainMenu.Open();
         SetGameplayVisible(false);
         _audio.PlayMusic("crimson_theme");
+    }
+
+    private void LeaveTutorial()
+    {
+        ReturnToMenu();
+        _mainMenu.Close();
+        _playGameMenu.Open();
     }
 
     // ---- Options / VR Settings navigation ----
@@ -1889,12 +2261,39 @@ public partial class Main : Node3D
         AddChild(_status);
     }
 
+    private void BuildRecenterFeedback()
+    {
+        _recenterFeedback = new Label3D
+        {
+            Text = string.Empty,
+            // A transient, head-relative status surface. Recenter exists for the
+            // exact case where ArenaRoot/menu placement is wrong, so feedback
+            // parented to that root can be off-axis or hidden behind the menu.
+            Position = new Vector3(0.0f, -0.12f, -0.65f),
+            FontSize = 72,
+            PixelSize = ArenaSideMeters / 1200.0f,
+            Modulate = new Color(0.65f, 0.84f, 1.0f),
+            OutlineSize = 20,
+            OutlineModulate = Colors.Black,
+            Billboard = BaseMaterial3D.BillboardModeEnum.Disabled,
+            NoDepthTest = true,
+            Visible = false,
+        };
+        _camera.AddChild(_recenterFeedback);
+    }
+
     // ---- Simulation: fixed 60 Hz tick ----
 
     public override void _PhysicsProcess(double delta)
     {
         if (_sim == null)
         {
+            return;
+        }
+
+        if (_multiplayerLanMenu.IsLobby && _sim is NetworkSimSession networkLobby)
+        {
+            PumpLanLobby(networkLobby);
             return;
         }
 
@@ -1948,7 +2347,7 @@ public partial class Main : Node3D
         {
             // A pause opened just before death keeps the screen until resolved
             // (Resume resumes the death flow; Quit already routes to the menu).
-            if (_pauseMenu.IsPaused)
+            if (_pauseMenu.IsPaused && !_sim.IsNetwork)
             {
                 return;
             }
@@ -1990,11 +2389,15 @@ public partial class Main : Node3D
                     _questPanel.Show(completed: false, _questTitle, _sim.LastResult.ElapsedMsSim, hasNext: false);
                     return;
                 }
-                int score = _sim.LastResult.PlayerExperience;
+                int score = ScoreForCurrentMode(_sim.LastResult);
                 // Pin the score now: the sim keeps ticking under the death
                 // screen, and posthumous kills must not drift the saved entry
                 // away from the rank/panel computed here.
                 _deathScore = score;
+                _deathElapsedMs = _sim.LastResult.ElapsedMsSim;
+                _deathKills = _sim.LastResult.CreatureKillCount;
+                _deathShots = _sim.LastResult.ShotsFired;
+                _deathHits = _sim.LastResult.ShotsHit;
                 _deathRank = HighscoreRank(score);
                 // One composite death screen (base game_over.py two-phase panel):
                 // the results panel appears immediately; a ranking score raises it
@@ -2002,12 +2405,14 @@ public partial class Main : Node3D
                 // it opens straight in the buttons phase.
                 if (_deathRank < HighscoreTableMax)
                 {
-                    _gameOverPanel.ShowForNameEntry(_sim.LastResult, _deathRank);
+                    _gameOverPanel.ShowForNameEntry(_sim.LastResult, _deathRank, score,
+                        _gameMode == GameModeRush, ResultLocalSlot, _runPlayerCount);
                     _keyboard.Show(score);
                 }
                 else
                 {
-                    _gameOverPanel.Show(_sim.LastResult, _deathRank);
+                    _gameOverPanel.Show(_sim.LastResult, _deathRank, score,
+                        _gameMode == GameModeRush, ResultLocalSlot, _runPlayerCount);
                 }
                 return;
             }
@@ -2028,6 +2433,12 @@ public partial class Main : Node3D
             {
                 _questEndShown = true;
                 RecordRunStats();
+                Sim.TickResult completed = _sim.LastResult;
+                _settings.AddHighscore(
+                    string.IsNullOrWhiteSpace(_settings.PlayerName) ? "Player" : _settings.PlayerName,
+                    (int)Math.Min(int.MaxValue, completed.ElapsedMsSim), GameModeQuests,
+                    completed.ElapsedMsSim, completed.CreatureKillCount, completed.ShotsFired,
+                    completed.ShotsHit, questKey: _questKey);
                 int gi = QuestGlobalIndex(_questKey);
                 // advance_quest_unlocks (quests/results.py): completion always
                 // raises the casual unlock; a HARDCORE completion additionally
@@ -2066,15 +2477,38 @@ public partial class Main : Node3D
 
         // Paused: freeze the sim (stop advancing). _Process still renders the last
         // frame and polls the pause panel so Resume/Quit work.
-        if (_pauseMenu.IsPaused)
+        if (_pauseMenu.IsPaused && !_sim.IsNetwork)
         {
             return;
         }
 
-        HandSample left = SampleHand(_leftHand, 0);
-        HandSample right = SampleHand(_rightHand, 1);
-        (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
-        Sim.HostInput input = VrInput.Build(move, aim, _playerGame, _deadZone);
+        Sim.HostInput input;
+        if (_pauseMenu.IsPaused)
+        {
+            input = NeutralNetworkInput();
+        }
+        else if (_gameMode == GameModeTypo)
+        {
+            input = NeutralNetworkInput();
+            TypoControl? pressed = PollTypoControl();
+            if (pressed is TypoControl step)
+            {
+                TypoPrompt? target = _typoDirector.Press(step, _playerGame);
+                if (target != null)
+                {
+                    input.AimX = target.Position.X;
+                    input.AimY = target.Position.Y;
+                    input.Flags = Sim.HostInput.FlagFireDown | Sim.HostInput.FlagFirePressed;
+                }
+            }
+        }
+        else
+        {
+            HandSample left = SampleHand(_leftHand, 0);
+            HandSample right = SampleHand(_rightHand, 1);
+            (HandSample move, HandSample aim) = VrInput.ResolveRoles(left, right, _handSwap);
+            input = VrInput.Build(move, aim, _playerGame, _deadZone);
+        }
 
         // Perk pick: a level-up leaves the pick PENDING but the game keeps running
         // (the Level Up! button shows) — the sim only pauses (perk_menu_active) once
@@ -2094,6 +2528,14 @@ public partial class Main : Node3D
         }
 
         Sim.TickResult result = _sim.Tick(input);
+        if (_sim is NetworkSimSession failedNetwork
+            && !string.IsNullOrWhiteSpace(failedNetwork.ConnectionFailure))
+        {
+            SetGameplayVisible(false);
+            _multiplayerLanMenu.ShowLobby(failedNetwork.Status());
+            return;
+        }
+        _tutorialPanel.Update(result);
 
         // Level-up cue: a new pending pick appeared this tick -> play the UI sound.
         if (result.PerkPendingCount > _prevPerkPending)
@@ -2107,7 +2549,8 @@ public partial class Main : Node3D
         bool reloadActive = _prevReloadActive;
         if (snap.Header.PlayerCount > 0)
         {
-            Sim.PlayerSnap p = snap.Players[0];
+            int localSlot = Math.Clamp(_sim.LocalPlayerSlot, 0, snap.Players.Length - 1);
+            Sim.PlayerSnap p = snap.Players[localSlot];
             _playerGame = new Vector2(p.X, p.Y);
             _hud.Update(result, p, snap.Header);
             _lastPlayer = p;
@@ -2116,7 +2559,19 @@ public partial class Main : Node3D
             reloadActive = p.ReloadActive != 0;
         }
         _perkMenu.Update(snap);
-        _diorama.PushSnapshot(snap);
+        _diorama.PushSnapshot(snap, _sim.LocalPlayerSlot);
+        if (_gameMode == GameModeTypo)
+        {
+            var creatures = new TypoCreature[snap.Creatures.Length];
+            for (int i = 0; i < snap.Creatures.Length; i++)
+            {
+                Sim.CreatureSnap c = snap.Creatures[i];
+                long identity = unchecked((long)(((ulong)c.Generation << 32) | (uint)c.PoolIndex));
+                creatures[i] = new TypoCreature(identity, c.PoolIndex, new Vector2(c.X, c.Y));
+            }
+            _typoDirector.Sync(creatures, result.ElapsedMsSim);
+            _typoPromptLayer.Render(_typoDirector, ArenaSideMeters, GameWorldSize);
+        }
         _diorama.UpdateBorderProximity(_playerGame);
 
         // Accumulate this tick's blood/scorch splats + corpse stamps (ABI v3).
@@ -2187,6 +2642,72 @@ public partial class Main : Node3D
             TriggerPressed = triggerPressed,
             ReloadPressed = reloadPressed,
         };
+    }
+
+    private TypoControl? PollTypoControl()
+    {
+        RefreshTypoControllerLayout();
+        Span<bool> down = stackalloc bool[22];
+        bool left = _leftHand.GetHasTrackingData();
+        bool right = _rightHand.GetHasTrackingData();
+        down[(int)TypoControl.A] = right && _rightHand.IsButtonPressed("ax_button");
+        down[(int)TypoControl.B] = right && _rightHand.IsButtonPressed("by_button");
+        down[(int)TypoControl.X] = left && _leftHand.IsButtonPressed("ax_button");
+        down[(int)TypoControl.Y] = left && _leftHand.IsButtonPressed("by_button");
+        down[(int)TypoControl.LT] = left && _leftHand.GetFloat("trigger") > TriggerThreshold;
+        down[(int)TypoControl.RT] = right && _rightHand.GetFloat("trigger") > TriggerThreshold;
+        down[(int)TypoControl.LG] = left && _leftHand.GetFloat("grip") > GripThreshold;
+        down[(int)TypoControl.RG] = right && _rightHand.GetFloat("grip") > GripThreshold;
+        down[(int)TypoControl.LS] = left && _leftHand.IsButtonPressed("primary_click");
+        down[(int)TypoControl.RS] = right && _rightHand.IsButtonPressed("primary_click");
+        down[(int)TypoControl.LExtra1] = left && _leftHand.IsButtonPressed("aux_button_1");
+        down[(int)TypoControl.LExtra2] = left && _leftHand.IsButtonPressed("aux_button_2");
+        down[(int)TypoControl.RExtra1] = right && _rightHand.IsButtonPressed("aux_button_1");
+        down[(int)TypoControl.RExtra2] = right && _rightHand.IsButtonPressed("aux_button_2");
+        if (left) SetStickDirections(down, _leftHand.GetVector2("primary"), (int)TypoControl.LUp);
+        if (right) SetStickDirections(down, _rightHand.GetVector2("primary"), (int)TypoControl.RUp);
+
+        TypoControl? pressed = null;
+        for (int i = 0; i < down.Length; i++)
+        {
+            if (pressed == null && down[i] && !_prevTypoControls[i]) pressed = (TypoControl)i;
+            _prevTypoControls[i] = down[i];
+        }
+        return pressed;
+    }
+
+    private TypoControllerLayout DetectTypoControllerLayout()
+    {
+        static string Profile(string trackerName)
+            => XRServer.GetTracker(trackerName) is XRPositionalTracker tracker
+                ? tracker.Profile.ToString()
+                : string.Empty;
+        return TypoControllerLayout.FromProfiles(Profile("left_hand"), Profile("right_hand"));
+    }
+
+    private void RefreshTypoControllerLayout()
+    {
+        TypoControllerLayout current = DetectTypoControllerLayout();
+        if (current.Kind == _typoDirector.Layout.Kind
+            && current.ProfilePath == _typoDirector.Layout.ProfilePath) return;
+        _typoDirector.SetLayout(current);
+        _typoPromptLayer.Clear();
+        Array.Clear(_prevTypoControls);
+        GD.Print($"CrimsonVR: Typ-o controller layout {current.Kind} ({current.ProfilePath})");
+    }
+
+    private static void SetStickDirections(Span<bool> down, Vector2 stick, int first)
+    {
+        const float threshold = 0.72f;
+        if (stick.Length() < threshold) return;
+        if (Mathf.Abs(stick.Y) >= Mathf.Abs(stick.X))
+        {
+            down[first + (stick.Y < 0.0f ? 0 : 2)] = true;
+        }
+        else
+        {
+            down[first + (stick.X > 0.0f ? 1 : 3)] = true;
+        }
     }
 
     // ---- Rendering: reticles + interpolated diorama at headset refresh ----
@@ -2328,6 +2849,11 @@ public partial class Main : Node3D
             _playGameMenu.PollPoke(p);
             return;
         }
+        if (_multiplayerLanMenu.IsOpen)
+        {
+            _multiplayerLanMenu.PollPoke(p);
+            return;
+        }
         if (_questSelect.IsOpen)
         {
             _questSelect.PollPoke(p);
@@ -2341,6 +2867,21 @@ public partial class Main : Node3D
         if (_databaseMenu.IsOpen)
         {
             _databaseMenu.PollPoke(p);
+            return;
+        }
+        if (_highScoresMenu.IsOpen)
+        {
+            _highScoresMenu.PollPoke(p);
+            return;
+        }
+        if (_creditsMenu.IsOpen)
+        {
+            _creditsMenu.PollPoke(p);
+            return;
+        }
+        if (_alienZooKeeper.IsOpen)
+        {
+            _alienZooKeeper.PollPoke(p);
             return;
         }
         // Options / VR Settings / Controls opened from the main menu (sim gated
@@ -2381,6 +2922,12 @@ public partial class Main : Node3D
         {
             _endNote.PollPoke(p);
             return;
+        }
+        // This overlay deliberately does not own the screen: the native
+        // tutorial advances from normal movement, firing and perk input.
+        if (_tutorialPanel.Active)
+        {
+            _tutorialPanel.PollPoke(p);
         }
         // Death screen: keyboard (name-entry phase) and panel can be up together.
         if (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active))
@@ -2493,6 +3040,7 @@ public partial class Main : Node3D
         int rank = 0;
         foreach (HighscoreEntry e in _settings.HighscoresFor(_gameMode))
         {
+            if (e.PlayerCount != _runPlayerCount) continue;
             if (e.Score >= score)
             {
                 rank++;
@@ -2500,6 +3048,13 @@ public partial class Main : Node3D
         }
         return rank;
     }
+
+    private int ScoreForCurrentMode(in Sim.TickResult result)
+        => _gameMode == GameModeRush
+            ? (int)Math.Min(int.MaxValue, result.ElapsedMsSim)
+            : result.PlayerExperience;
+
+    private int ResultLocalSlot => _sim == null ? 0 : Math.Clamp(_sim.LocalPlayerSlot, 0, _runPlayerCount - 1);
 
     /// <summary>Name-entry phase done: record the name (empty = skip saving, like
     /// the base game's blank-name guard) and reveal the panel's buttons phase.</summary>
@@ -2515,7 +3070,9 @@ public partial class Main : Node3D
         int score = _deathScore;
         if (!string.IsNullOrEmpty(name))
         {
-            _settings.AddHighscore(name, score, _gameMode);
+            _settings.PlayerName = name;
+            _settings.AddHighscore(name, score, _gameMode, _deathElapsedMs,
+                _deathKills, _deathShots, _deathHits, playerCount: _runPlayerCount);
         }
         GD.Print($"CrimsonVR: highscore {(string.IsNullOrEmpty(name) ? "(skipped)" : name)} - {score}");
         _keyboard.Dismiss();
@@ -2531,6 +3088,15 @@ public partial class Main : Node3D
             return;
         }
         _gameOverPanel.Dismiss();
+        if (_sim.IsNetwork)
+        {
+            DestroyNetworkSession();
+            _pauseMenu.ForceResume();
+            SetGameplayVisible(false);
+            _multiplayerLanMenu.Open();
+            _audio.PlayMusic("crimson_theme");
+            return;
+        }
         _questEndShown = false;
         RestartSession();
         // Fresh run: fade the old tune out; the first hit rolls a new one.
@@ -2802,6 +3368,8 @@ public partial class Main : Node3D
     private readonly System.Collections.Generic.List<UiEditable> _editables = new();
     private readonly System.Collections.Generic.Dictionary<string, Transform3D> _uiDefaults = new();
     private readonly System.Collections.Generic.Dictionary<string, Node3D> _uiEditTargets = new();
+    private Dictionary<string, Transform3D>? _lastResetUiLayout;
+    private ControlMode _lastResetUiLayoutMode;
     private bool _uiEditMode;
 
     /// <summary>Headset-authored clean-profile placements from the durable
@@ -2921,15 +3489,39 @@ public partial class Main : Node3D
     /// what the player is looking at when they press this.</summary>
     private void ResetUiLayout()
     {
+        _lastResetUiLayout = new Dictionary<string, Transform3D>();
+        _lastResetUiLayoutMode = _controlMode;
         foreach (string id in _uiEditTargets.Keys)
         {
-            _settings.UiLayout.Remove(LayoutKey(id));
+            string key = LayoutKey(id);
+            if (_settings.UiLayout.TryGetValue(key, out Transform3D saved))
+            {
+                _lastResetUiLayout[key] = saved;
+            }
+            _settings.UiLayout.Remove(key);
         }
         ApplyUiLayoutForMode();
 
         _settings.Save();
         _uiLayoutDirty = false;
         GD.Print($"[layout] {_controlMode} reset to built-in placements");
+    }
+
+    private void UndoUiLayoutReset()
+    {
+        if (_lastResetUiLayout == null || _lastResetUiLayoutMode != _controlMode)
+        {
+            return;
+        }
+        foreach (KeyValuePair<string, Transform3D> saved in _lastResetUiLayout)
+        {
+            _settings.UiLayout[saved.Key] = saved.Value;
+        }
+        ApplyUiLayoutForMode();
+        _settings.Save();
+        _lastResetUiLayout = null;
+        _uiLayoutDirty = false;
+        GD.Print($"[layout] {_controlMode} reset undone");
     }
 
     /// <summary>Hang grab handles on the repositionable widgets and restore any
@@ -3174,9 +3766,12 @@ public partial class Main : Node3D
     private void ApplyHudLayout(ControlMode mode)
     {
         bool cabinet = mode == ControlMode.Cabinet;
-        _hud.SetCabinetLayout(cabinet);
+        // Health belongs beside the arena in both presentation modes. XP only
+        // moves onto the opposite board edge in Cabinet; Tabletop keeps it in
+        // the standing HUD with its backing and upright labels.
+        _hud.SetBoardLayout(healthOnBoard: true, xpOnBoard: cabinet);
         _controlsScreen?.SetControlMode(mode);
-        Node3D host = cabinet ? _playfieldRoot : (Node3D)_hud;
+        Node3D xpHost = cabinet ? _playfieldRoot : (Node3D)_hud;
 
         // Lay a group's XY page into the board's XZ plane, turned so its length
         // (group +x) runs along the board's +z, near to far. Columns are the
@@ -3189,9 +3784,9 @@ public partial class Main : Node3D
         // clear of the terrain decals so it never z-fights them.
         float edgeX = ArenaSideMeters * 0.5f * (1.0f + (Diorama.FloorMarginScale - 1.0f) * 0.5f);
 
-        PlaceHudGroup(_hud.HealthRoot, host, cabinet, basis, -edgeX, _hud.HealthContentCentreLocal);
+        PlaceHudGroup(_hud.HealthRoot, _playfieldRoot, true, basis, -edgeX, _hud.HealthContentCentreLocal);
         // XP on the far side from health, so the two frame the playfield.
-        PlaceHudGroup(_hud.XpRoot, host, cabinet, basis, edgeX, _hud.XpContentCentreLocal);
+        PlaceHudGroup(_hud.XpRoot, xpHost, cabinet, basis, edgeX, _hud.XpContentCentreLocal);
 
         // Bonus rows ride the board too, but standing rather than in-plane.
         Node3D bonus = _hud.BonusRoot;
@@ -3246,14 +3841,7 @@ public partial class Main : Node3D
             half * BonusForwardFactor);
 
         Basis boardRot = _playfieldRoot.GlobalBasis.Orthonormalized();
-        Vector3 toSeat = _recenterHeadPos - _playfieldRoot.GlobalTransform * anchor;
-        toSeat.Y = 0.0f;
-        // Degenerate only if the seat is directly above the panel; keep the
-        // previous aim rather than snapping to an arbitrary one.
-        if (toSeat.LengthSquared() > 1e-6f)
-        {
-            _bonusYaw = Mathf.Atan2(toSeat.X, toSeat.Z);
-        }
+        UpdateSeatFacingYaw(_playfieldRoot.GlobalTransform * anchor, ref _bonusYaw);
 
         // Cancelling the board's rotation and substituting a pure yaw leaves the
         // group standing world-vertical however far the board is tilted. Uniform
@@ -3267,6 +3855,35 @@ public partial class Main : Node3D
     }
 
     private float _bonusYaw;
+
+    /// <summary>Aim the tutorial sidecar at the recentered seat using the same
+    /// stable, world-upright yaw rule as Cabinet's power-up rows. It updates on
+    /// recenter rather than following every head movement, avoiding a restless
+    /// peripheral panel while still pointing at the player from its side offset.</summary>
+    private void ApplyTutorialPlacement()
+    {
+        if (_tutorialPanel == null)
+        {
+            return;
+        }
+        UpdateSeatFacingYaw(_tutorialPanel.GlobalPosition, ref _tutorialYaw);
+        _tutorialPanel.GlobalBasis = Basis.FromEuler(new Vector3(0.0f, _tutorialYaw, 0.0f));
+    }
+
+    private float _tutorialYaw;
+
+    /// <summary>Shared seat-facing rule for stable peripheral information:
+    /// flatten the look vector, preserve the previous yaw if degenerate, and
+    /// update only when placement/recenter explicitly calls the owner.</summary>
+    private void UpdateSeatFacingYaw(Vector3 worldPosition, ref float yaw)
+    {
+        Vector3 toSeat = _recenterHeadPos - worldPosition;
+        toSeat.Y = 0.0f;
+        if (toSeat.LengthSquared() > 1e-6f)
+        {
+            yaw = Mathf.Atan2(toSeat.X, toSeat.Z);
+        }
+    }
 
     /// <param name="contentCentreLocal">Offset from the group's origin to the
     /// middle of its content, in its own (panel) coordinates. Subtracting the
@@ -3288,17 +3905,30 @@ public partial class Main : Node3D
 
     private void HandleRecenter()
     {
-        // Request a recenter on the rising edge of either hand's menu/AX button.
-        // The initial _recenterPending places the table on the first valid head
-        // frame (PLAN §5). Reload uses grip, so AX stays free for recenter.
+        // Semantic OpenXR action: each interaction profile chooses its own
+        // suitable physical control. The pause panel calls RequestRecenter
+        // directly, which also covers optical hands and reserved system keys.
         _framesSinceStart++;
-        bool held = (_leftHand.GetHasTrackingData() && _leftHand.IsButtonPressed("menu_button"))
-                    || (_rightHand.GetHasTrackingData() && _rightHand.IsButtonPressed("ax_button"));
-        if (held && !_prevRecenterHeld)
+        bool held = (_leftHand.GetHasTrackingData() && _leftHand.IsButtonPressed("recenter"))
+                    || (_rightHand.GetHasTrackingData() && _rightHand.IsButtonPressed("recenter"));
+        ulong now = Time.GetTicksMsec();
+        RecenterHoldState hold = _recenterHold.Update(held, now);
+        // Once the one-shot has fired, keep the completion message visible
+        // until release instead of replacing it with a full progress bar.
+        if (hold.Holding && hold.Progress < 1.0f)
         {
-            _recenterPending = true;
+            int filled = Mathf.Clamp((int)Mathf.Floor(hold.Progress * 5.0f), 0, 5);
+            _recenterFeedback.Text = $"Hold to recenter  [{new string('#', filled)}{new string('-', 5 - filled)}]";
+            _recenterFeedback.Visible = true;
         }
-        _prevRecenterHeld = held;
+        if (hold.Triggered)
+        {
+            RequestRecenter();
+        }
+        else if (!hold.Holding && now >= _recenterFeedbackUntilMs)
+        {
+            _recenterFeedback.Visible = false;
+        }
 
         if (!_recenterPending || !_xrActive || _framesSinceStart < 15)
         {
@@ -3306,6 +3936,21 @@ public partial class Main : Node3D
         }
         RecenterArena();
         _recenterPending = false;
+        if (_recenterFeedbackOnComplete)
+        {
+            _recenterFeedback.Text = "Recentered";
+            _recenterFeedback.Visible = true;
+            _recenterFeedbackUntilMs = now + 900;
+            _recenterFeedbackOnComplete = false;
+            Pulse(_leftHand, 0.35f, 0.05f);
+            Pulse(_rightHand, 0.35f, 0.05f);
+        }
+    }
+
+    private void RequestRecenter()
+    {
+        _recenterPending = true;
+        _recenterFeedbackOnComplete = true;
     }
 
     private void RecenterArena()
@@ -3348,6 +3993,7 @@ public partial class Main : Node3D
         _recenterHeadPos = headPos;
         _recenterForward = forward;
         _hasRecentered = true;
+        ApplyTutorialPlacement();
         ApplyPlayfieldPlacement();
     }
 

@@ -24,6 +24,7 @@ public sealed partial class VirtualKeyboard : Node3D
     private readonly List<VrButton> _keys = new();
     private Label3D _display = null!;
     private Label3D _prompt = null!;
+    private VrButton _nativeOpenButton = null!;
     private readonly StringBuilder _text = new();
 
     public bool Active { get; private set; }
@@ -66,6 +67,14 @@ public sealed partial class VirtualKeyboard : Node3D
         AddKey("Del", kw * 1.6f, kh, startX + kw * 3.4f, ctrlY, Backspace, new Color(0.6f, 0.5f, 0.5f), AudioBank.UiType);
         AddKey("Enter", kw * 2.0f, kh, startX + kw * 5.4f, ctrlY, Submit, new Color(0.4f, 0.7f, 0.45f), AudioBank.UiEnter);
 
+        _nativeOpenButton = new VrButton();
+        AddChild(_nativeOpenButton);
+        _nativeOpenButton.Build(s * 0.56f, s * 0.13f, "Open Keyboard", new Color(0.5f, 0.55f, 0.66f));
+        _nativeOpenButton.ClickSound = AudioBank.UiType;
+        _nativeOpenButton.Position = new Vector3(0.0f, s * 0.30f, 0.0f);
+        _nativeOpenButton.OnPress += OpenNativeKeyboard;
+        _nativeOpenButton.Visible = false;
+
         Visible = false;
     }
 
@@ -81,13 +90,19 @@ public sealed partial class VirtualKeyboard : Node3D
         foreach (VrButton k in _keys)
         {
             k.ResetPress();
+            k.Visible = !QuestTextInput.IsAvailable;
         }
+        _nativeOpenButton.ResetPress();
+        _nativeOpenButton.Visible = QuestTextInput.IsAvailable;
         Active = true;
         Visible = true;
+        if (QuestTextInput.IsAvailable)
+            Callable.From(OpenNativeKeyboard).CallDeferred();
     }
 
     public void Dismiss()
     {
+        QuestTextInput.Hide();
         Active = false;
         Visible = false;
     }
@@ -102,6 +117,16 @@ public sealed partial class VirtualKeyboard : Node3D
         {
             k.PollPoke(probes);
         }
+        if (_nativeOpenButton.Visible) _nativeOpenButton.PollPoke(probes);
+    }
+
+    public override void _Process(double delta)
+    {
+        _ = delta;
+        if (!Active || !QuestTextInput.IsAvailable) return;
+        if (!QuestTextInput.Poll(out string text, out bool submitted)) return;
+        NativeTextChanged(text);
+        if (submitted) NativeTextSubmitted(text);
     }
 
     private void AddKey(string text, float w, float h, float x, float y, Action onPress, Color? color = null, int clickSound = AudioBank.UiButton)
@@ -150,6 +175,25 @@ public sealed partial class VirtualKeyboard : Node3D
     }
 
     private void Submit() => OnSubmit?.Invoke(_text.ToString().Trim());
+
+    private void OpenNativeKeyboard()
+    {
+        QuestTextInput.Show(_text.ToString(), MaxLen, roomCode: false);
+    }
+
+    private void NativeTextChanged(string text)
+    {
+        string bounded = text.Length > MaxLen ? text[..MaxLen] : text;
+        _text.Clear();
+        _text.Append(bounded);
+        UpdateDisplay();
+    }
+
+    private void NativeTextSubmitted(string text)
+    {
+        NativeTextChanged(text);
+        Submit();
+    }
 
     private void UpdateDisplay()
         => _display.Text = _text.Length > 0 ? _text.ToString() : "_";

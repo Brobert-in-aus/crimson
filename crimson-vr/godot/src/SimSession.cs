@@ -4,6 +4,24 @@ using System.Runtime.InteropServices;
 
 namespace CrimsonVR;
 
+public interface IGameSession : IDisposable
+{
+    ulong Handle { get; }
+    Sim.TickResult LastResult { get; }
+    bool GameOver { get; }
+    bool IsNetwork { get; }
+    int LocalPlayerSlot { get; }
+    Sim.TickResult Tick(in Sim.HostInput input);
+    SnapshotView CaptureSnapshot();
+    AudioEventsView CaptureAudio();
+    TerrainFxView CaptureTerrainFx();
+    Sim.TerrainInfo TerrainInfo();
+    uint[]? WeaponUsageCounts();
+    void ReplayBegin();
+    ulong ReplayDetach();
+    void Restart(string configJson);
+}
+
 /// <summary>
 /// A zero-copy view over one packed snapshot payload (see crimson_host.h and
 /// Sim.cs). Entity spans alias the underlying byte buffer, which stays valid
@@ -147,7 +165,7 @@ public readonly ref struct TerrainFxView
 /// ping-pongs between two reusable buffers so the caller can hold last-tick and
 /// this-tick snapshots at once (needed for render interpolation, PLAN.md §4).
 /// </summary>
-public sealed class SimSession : IDisposable
+public sealed class SimSession : IGameSession
 {
     private string _configJson;
     private readonly byte[][] _bufs = new byte[2][];
@@ -158,6 +176,8 @@ public sealed class SimSession : IDisposable
     public ulong Handle { get; private set; }
     public Sim.TickResult LastResult { get; private set; }
     public bool GameOver => LastResult.AllPlayersDead != 0;
+    public bool IsNetwork => false;
+    public int LocalPlayerSlot => 0;
 
     public SimSession(string configJson)
     {

@@ -10,7 +10,7 @@ namespace CrimsonVR;
 /// VR panel: the Reaper banner over a score card — Score, Rank, Game time with
 /// the analog ui_clockTable/ui_clockPointer gauge (pointer = 6 deg per second,
 /// like the base game), most-used weapon icon + name (ABI v10), Frags and
-/// Hit % — plus Play Again / Main Menu poke buttons.
+/// Hit % — plus Play Again / High Scores / Main Menu poke buttons.
 ///
 /// Flow (driven by Main, matching the base game's two-phase panel): death →
 /// short pacing delay → the panel appears immediately. If the score ranks, the
@@ -18,19 +18,19 @@ namespace CrimsonVR;
 /// keyboard sits in front of it (the base game's "State your name, trooper!"
 /// input lives on the same panel) with the buttons hidden; Enter drops it to
 /// the standard spot and reveals the buttons. Unranked deaths skip straight to
-/// the buttons phase. The base game's High-scores button is omitted until the
-/// high-scores browser screen exists.
+/// the buttons phase.
 ///
 /// A child of ArenaRoot; inherits arena placement/scale/yaw.
 /// </summary>
 public sealed partial class GameOverPanel : Node3D
 {
     private const int WeaponGrid = 8;    // ui_wicons is 8x8; icon spans 2 cells
-    private const int TableMax = 10;     // UserSettings keeps a local top-10
+    private const int TableMax = 100;
 
     public bool Active { get; private set; }
     public event Action? OnPlayAgain;
     public event Action? OnMainMenu;
+    public event Action? OnHighScores;
 
     private bool _buttonsShown;
     private readonly List<VrButton> _buttons = new();
@@ -92,9 +92,9 @@ public sealed partial class GameOverPanel : Node3D
         _frags = AddLabel("Frags: 0", s * 0.28f, s * 0.005f, s / 1150.0f, new Color(0.9f, 0.9f, 0.92f));
         _hitRatio = AddLabel("Hit %: 0%", s * 0.28f, -s * 0.125f, s / 1150.0f, new Color(0.9f, 0.9f, 0.92f));
 
-        // Buttons: Play Again / Main Menu (High scores needs the browser screen).
-        AddButton("Play Again", -s * 0.26f, -s * 0.34f, () => OnPlayAgain?.Invoke(), new Color(0.35f, 0.55f, 0.4f));
-        AddButton("Main Menu", s * 0.26f, -s * 0.34f, () => OnMainMenu?.Invoke(), new Color(0.45f, 0.45f, 0.55f));
+        AddButton("Play Again", -s * 0.42f, -s * 0.34f, () => OnPlayAgain?.Invoke(), new Color(0.35f, 0.55f, 0.4f));
+        AddButton("High Scores", 0.0f, -s * 0.34f, () => OnHighScores?.Invoke(), new Color(0.4f, 0.5f, 0.65f));
+        AddButton("Main Menu", s * 0.42f, -s * 0.34f, () => OnMainMenu?.Invoke(), new Color(0.45f, 0.45f, 0.55f));
 
         Visible = false;
     }
@@ -106,9 +106,10 @@ public sealed partial class GameOverPanel : Node3D
     /// off to the player's right (arena -x, mirroring the checklist on the
     /// left), angled toward the seat — and all panel elements depth-test, so
     /// any overlap resolves like real geometry.</summary>
-    public void ShowForNameEntry(in Sim.TickResult result, int rank)
+    public void ShowForNameEntry(in Sim.TickResult result, int rank, int score, bool timeScore,
+        int localPlayerSlot = 0, int playerCount = 1)
     {
-        Show(result, rank);
+        Show(result, rank, score, timeScore, localPlayerSlot, playerCount);
         _buttonsShown = false;
         foreach (VrButton b in _buttons)
         {
@@ -137,11 +138,13 @@ public sealed partial class GameOverPanel : Node3D
     /// <summary>Fill the card from the final tick stats and show the panel in
     /// the buttons phase. <paramref name="rank"/> is the 0-based insertion index
     /// into the local highscore table (TableMax = didn't rank).</summary>
-    public void Show(in Sim.TickResult result, int rank)
+    public void Show(in Sim.TickResult result, int rank, int score, bool timeScore,
+        int localPlayerSlot = 0, int playerCount = 1)
     {
-        _score.Text = $"Score: {result.PlayerExperience}";
+        _score.Text = timeScore ? $"Score: {score / 1000f:F2} secs" : $"Score: {score}";
         bool ranked = rank < TableMax;
-        _rank.Text = ranked ? $"Rank: {Ordinal(rank + 1)}" : "Rank: -";
+        string player = playerCount > 1 ? $"Player {localPlayerSlot + 1}/{playerCount}   " : string.Empty;
+        _rank.Text = player + (ranked ? $"Rank: {Ordinal(rank + 1)}" : "Rank: -");
         _tooLow.Visible = !ranked;
 
         long ms = result.ElapsedMsSim;
@@ -293,7 +296,7 @@ public sealed partial class GameOverPanel : Node3D
         _ = color; // classic plate skin: colour no longer differentiates buttons
         var b = new VrButton();
         AddChild(b);
-        b.BuildClassic(_side * 0.44f, _side * 0.13f, text);
+        b.BuildClassic(_side * 0.36f, _side * 0.13f, text);
         b.Position = new Vector3(x, y, 0.004f);
         b.OnPress += onPress;
         _buttons.Add(b);

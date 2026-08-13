@@ -31,6 +31,9 @@ Classic.
    broken or old installation; a failed replacement preserves the working copy.
 4. If the helper was not used, an asset-free desktop launch offers a `.pack`
    picker as a recovery path.
+5. Personal-build archives are produced without assets. Extract the whole
+   archive first; the executable, PCK, .NET data directory and `native/<rid>`
+   library must stay together. See `pcvr-ci.md` for the private-build workflow.
 
 ### Quest
 
@@ -86,6 +89,13 @@ atomic swap ensures a failed import preserves the last working installation.
 
 ## Verification log
 
+- 2026-08-13: release audit confirmed that the source payload guard rejects the
+  ignored development `godot/assets/` tree. No files from that tree are tracked,
+  but release evidence must come from an asset-free clean checkout rather than a
+  developer workspace. Payload inspection remains part of the canonical
+  [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
+  gate.
+
 - 2026-08-09: two independent builds of a 258-file local pack were byte-for-byte
   deterministic; installer traversal, rollback, schema, and SHA-256 failure
   paths pass in the frontend test suite.
@@ -105,6 +115,15 @@ atomic swap ensures a failed import preserves the last working installation.
   app storage and `clean_install_quest.ps1` now preflights the exact APK, pack,
   and target before its explicit `-Execute` clean-install mode; it never launches
   the app.
+- 2026-08-11: the private-copy CI build contract was reproduced locally with a
+  fresh CI signing key and an asset-free Release APK. The guarded Quest rehearsal
+  clean-installed that package, staged the known-good pack in its external inbox,
+  verified both, and deliberately left the app `stopped=true, notLaunched=true`.
+  APK SHA-256 is `9612C1D62AEBD0C462E2206472887C26E6C35DB4413954EEB6906B6675CAB6C4`;
+  the local and remote pack SHA-256 both equal
+  `B43B203B70C3DD181E90EC19F32F6BB620DD89A2DB662292E23BDADF95F0736F`.
+  First-launch consumption and relaunch reuse remain the next physical-headset
+  checks.
 
 The supported clone-first implementation can be exercised end to end today:
 

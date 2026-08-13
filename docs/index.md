@@ -40,3 +40,5 @@ uvx crimsonland@latest
 - [Verification](verification/index.md): differential testing, evidence
   ledger, and parity matrices that connect claims to proof.
 - [Contributor](contributor/index.md): setup, workflows, and project tracking.
+  The [Release Preparation](contributor/project-tracking/release-preparation.md)
+  page is the canonical go/no-go checklist for maintainers.

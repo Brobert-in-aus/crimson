@@ -224,7 +224,7 @@ pub const RelayService = struct {
     }
 
     fn allocRoomCode(self: *RelayService) !room_code.RoomCode {
-        for (0..36 * 36 * 36 * 36) |_| {
+        for (0..room_code_alphabet.len * room_code_alphabet.len * room_code_alphabet.len * room_code_alphabet.len) |_| {
             const code = roomCodeFromOrdinal(self.next_room_code);
             self.next_room_code +%= 1;
             if (self.core.findRoomByCode(code) == null) return code;
@@ -293,20 +293,33 @@ fn isDefaultRoomCode(code: room_code.RoomCode) bool {
 }
 
 fn roomCodeFromOrdinal(ordinal: u32) room_code.RoomCode {
-    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-    var value = ordinal % (36 * 36 * 36 * 36);
+    var value = ordinal % (room_code_alphabet.len * room_code_alphabet.len * room_code_alphabet.len * room_code_alphabet.len);
     var out: room_code.RoomCode = .{ .bytes = .{ 'a', 'a', 'a', 'a' } };
     var idx: usize = 4;
     while (idx > 0) {
         idx -= 1;
-        out.bytes[idx] = alphabet[value % alphabet.len];
-        value /= alphabet.len;
+        out.bytes[idx] = room_code_alphabet[value % room_code_alphabet.len];
+        value /= room_code_alphabet.len;
     }
     return out;
 }
 
+// Upper-case display characters selected to avoid common visual collisions:
+// I/L/1, O/0/Q, B/8, S/5, Z/2, G/6, and U/V.
+const room_code_alphabet = "acdefhjkmnprtvwxy347";
+
 fn testAddr(port: u16) PeerAddr {
     return .{ .host = .{ 127, 0, 0, 1 }, .port = port };
+}
+
+test "relay room-code generation uses unambiguous alphabet" {
+    var ordinal: u32 = 0;
+    while (ordinal < 10_000) : (ordinal += 1) {
+        const code = roomCodeFromOrdinal(ordinal);
+        for (code.bytes) |character| {
+            try std.testing.expect(std.mem.indexOfScalar(u8, room_code_alphabet, character) != null);
+        }
+    }
 }
 
 test "relay service drops unregistered non-hello packets" {

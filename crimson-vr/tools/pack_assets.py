@@ -48,7 +48,7 @@ def build_pack(asset_root: Path, output: Path) -> None:
         for path in files
     }
     content_hash = hashlib.sha256(
-        "".join(f"{name}\0{digest}\n" for name, digest in hashes.items()).encode()
+        "".join(f"{name}\0{digest}\n" for name, digest in hashes.items()).encode(),
     ).hexdigest()
     marker = json.dumps(
         {

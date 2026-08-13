@@ -224,6 +224,7 @@ nav = [
     ]},
     { "Project tracking" = [
       { "Overview" = "contributor/project-tracking/index.md" },
+      { "Release preparation" = "contributor/project-tracking/release-preparation.md" },
       { "Build provenance and hashes" = "contributor/project-tracking/provenance.md" },
       { "Third-party libraries" = "contributor/project-tracking/third-party-libs.md" },
     ]},

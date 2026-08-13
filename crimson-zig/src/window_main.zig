@@ -42,15 +42,10 @@ const bonuses_runtime = cz.bonuses;
 const game_ids = cz.game_ids;
 const live_runner = cz.live_runner;
 const lockstep_input_adapter = cz.net.lockstep_input_adapter;
-const lockstep_live_bridge = cz.net.lockstep_live_bridge;
-const lockstep_live_session = cz.net.lockstep_live_session;
 const lockstep_session = cz.net.lockstep_session;
-const packed_input = cz.net.packed_input;
 const relay_reliable = cz.net.relay_reliable;
 const relay_protocol = cz.net.relay_protocol;
 const relay_transport = cz.net.relay_transport;
-const rollback_live_bridge = cz.net.rollback_live_bridge;
-const rollback_live_session = cz.net.rollback_live_session;
 const room_code = cz.net.room_code;
 const schema_shared = cz.net.schema_shared;
 const runtime_perks = cz.perks;
@@ -234,263 +229,9 @@ const GameplayScreen = struct {
     }
 };
 
-const NetworkLiveRuntime = union(enum) {
-    host: lockstep_live_session.HostLiveSession,
-    client: lockstep_live_session.ClientLiveSession,
-    rollback: rollback_live_session.LiveSession,
-
-    fn init(request: window_misc_panels.NetworkLaunchRequest, seed: i32) !NetworkLiveRuntime {
-        return initWithStatus(request, seed, null);
-    }
-
-    fn initWithStatus(request: window_misc_panels.NetworkLaunchRequest, seed: i32, status: ?formats.game_cfg.Status) !NetworkLiveRuntime {
-        const host_status = if (request.role == .host) status else null;
-        return switch (request.netcode) {
-            .lockstep => switch (request.role) {
-                .host => .{
-                    .host = try lockstep_live_session.HostLiveSession.init(.{
-                        .bind_host = request.bind_host,
-                        .bind_port = request.port,
-                        .mode_id = request.mode_id,
-                        .player_count = request.player_count,
-                        .build_id = cz.version,
-                        .session_id = "window-lockstep",
-                        .seed = seed,
-                        .input_delay_ticks = 0,
-                        .quest_level = request.quest_level,
-                        .status = host_status,
-                        .host_ready = true,
-                        .pump_options = .{ .first_timeout_ms = 0 },
-                    }),
-                },
-                .join => .{
-                    .client = lockstep_live_session.ClientLiveSession.init(.{
-                        .bind_host = "0.0.0.0",
-                        .bind_port = 0,
-                        .mode_id = request.mode_id,
-                        .player_count = request.player_count,
-                        .build_id = cz.version,
-                        .host_addr = try parseNetworkPeerAddr(request.host, request.port),
-                        .input_delay_ticks = 0,
-                        .quest_level = request.quest_level,
-                        .pump_options = .{ .first_timeout_ms = 0 },
-                    }),
-                },
-            },
-            .rollback => .{
-                .rollback = rollback_live_session.LiveSession.init(.{
-                    .server_addr = try parseRelayPeerAddr(request.host, request.port),
-                    .bind_host = request.bind_host,
-                    .session = .{
-                        .role = switch (request.role) {
-                            .host => .host,
-                            .join => .join,
-                        },
-                        .mode_id = request.mode_id,
-                        .player_count = request.player_count,
-                        .build_id = cz.version,
-                        .peer_name = "window",
-                        .room_code = if (request.room_code_text) |code_text|
-                            try cz.net.room_code.parseRoomCode(code_text)
-                        else
-                            null,
-                        .quest_level = request.quest_level,
-                        .input_delay_ticks = 0,
-                        .status = host_status,
-                    },
-                }),
-            },
-        };
-    }
-
-    fn deinit(self: *NetworkLiveRuntime, allocator: std.mem.Allocator, io: std.Io) void {
-        switch (self.*) {
-            .host => |*host| host.deinit(allocator, io),
-            .client => |*client| client.deinit(allocator, io),
-            .rollback => |*rollback| rollback.deinit(allocator, io),
-        }
-        self.* = undefined;
-    }
-
-    fn open(self: *NetworkLiveRuntime, io: std.Io) !void {
-        switch (self.*) {
-            .host => |*host| try host.open(io),
-            .client => |*client| try client.open(io),
-            .rollback => |*rollback| try rollback.open(io),
-        }
-    }
-
-    fn start(self: *NetworkLiveRuntime, allocator: std.mem.Allocator, io: std.Io, now_ms: i64) !void {
-        try self.open(io);
-        switch (self.*) {
-            .host => {},
-            .client => |*client| try client.sendHello(allocator, now_ms),
-            .rollback => |*rollback| try rollback.update(allocator, io, now_ms),
-        }
-    }
-
-    fn update(self: *NetworkLiveRuntime, allocator: std.mem.Allocator, io: std.Io, now_ms: i64) !NetworkLiveUpdate {
-        return switch (self.*) {
-            .host => |*host| blk: {
-                const stats = try host.update(allocator, io, now_ms);
-                const step_summary = if (host.session.runtime.started)
-                    try host.stepReadyFrames(allocator, now_ms)
-                else
-                    lockstep_live_session.HostStepSummary{};
-                break :blk .{
-                    .stats = stats,
-                    .frames_advanced = step_summary.frames_advanced,
-                    .ticks_advanced = step_summary.ticks_advanced,
-                    .last_tick_index = step_summary.last_tick_index,
-                    .last_player_count = step_summary.last_player_count,
-                    .last_input_flags = step_summary.last_input_flags,
-                    .last_frame_update = step_summary.last_update,
-                };
-            },
-            .client => |*client| blk: {
-                const stats = try client.update(allocator, io, now_ms);
-                if (client.runner == null) _ = try client.ensureLiveRunner();
-                const step_summary = if (client.runner != null)
-                    try client.stepCanonicalFrames(allocator)
-                else
-                    lockstep_live_session.ClientStepSummary{};
-                break :blk .{
-                    .stats = stats,
-                    .frames_advanced = step_summary.frames_advanced,
-                    .ticks_advanced = step_summary.ticks_advanced,
-                    .last_tick_index = step_summary.last_tick_index,
-                    .last_player_count = step_summary.last_player_count,
-                    .last_input_flags = step_summary.last_input_flags,
-                    .last_frame_update = step_summary.last_update,
-                };
-            },
-            .rollback => |*rollback| blk: {
-                try rollback.update(allocator, io, now_ms);
-                const step_summary = if (rollback.hostRemoteInputsReady())
-                    try rollback.stepFrames(allocator)
-                else
-                    rollback_live_session.StepSummary{};
-                break :blk .{
-                    .frames_advanced = step_summary.frames_advanced,
-                    .ticks_advanced = step_summary.ticks_advanced,
-                    .last_tick_index = step_summary.last_tick_index,
-                    .last_player_count = step_summary.last_player_count,
-                    .last_input_flags = step_summary.last_input_flags,
-                    .last_frame_update = step_summary.last_update,
-                };
-            },
-        };
-    }
-
-    fn submitLocalInput(self: *NetworkLiveRuntime, allocator: std.mem.Allocator, io: std.Io, input: packed_input.PackedPlayerInput, now_ms: i64) !void {
-        switch (self.*) {
-            .host => |*host| try host.submitLocalInput(allocator, input),
-            .client => |*client| try client.queueLocalInput(allocator, input, now_ms),
-            .rollback => |*rollback| try rollback.queueLocalInput(allocator, io, input, now_ms),
-        }
-    }
-
-    fn hostRemoteInputsReady(self: *const NetworkLiveRuntime) bool {
-        return switch (self.*) {
-            .host, .client => true,
-            .rollback => |*rollback| rollback.hostRemoteInputsReady(),
-        };
-    }
-
-    fn submitLocalFrameInput(self: *NetworkLiveRuntime, allocator: std.mem.Allocator, io: std.Io, frame_input: live_runner.FrameInput, now_ms: i64) !bool {
-        const slot = self.localInputSlot() orelse return false;
-        if (frame_input.player_count != 0 and slot >= frame_input.player_count) return false;
-        const local_input_value = if (frame_input.player_count == 0 and slot == 0)
-            frame_input.player
-        else
-            frame_input.players[slot];
-        try self.submitLocalInput(allocator, io, lockstep_input_adapter.packGameInput(local_input_value), now_ms);
-        return true;
-    }
-
-    fn runnerForLocalInput(self: *NetworkLiveRuntime) ?*live_runner.LiveRunner {
-        return switch (self.*) {
-            .host => |*host| if (host.session.runtime.started and host.session.runtime.lockstep != null)
-                &host.runner
-            else
-                null,
-            .client => |*client| if (client.runner) |*runner| runner else null,
-            .rollback => |*rollback| if (rollback.runner) |*runner| runner else null,
-        };
-    }
-
-    fn runConfigForResults(self: *const NetworkLiveRuntime) ?live_runner.LiveModeConfig {
-        return switch (self.*) {
-            .host => |host| lockstep_live_bridge.liveConfigFromHostRuntime(host.session.runtime) catch null,
-            .client => |client| blk: {
-                const maybe_config = lockstep_live_bridge.liveConfigFromClientRuntime(client.session.runtime) orelse break :blk null;
-                break :blk maybe_config catch null;
-            },
-            .rollback => |rollback| blk: {
-                const match_config = rollback.session.match_config orelse break :blk null;
-                break :blk rollback_live_bridge.liveConfigFromMatchConfig(match_config) catch null;
-            },
-        };
-    }
-
-    fn localInputSlot(self: *const NetworkLiveRuntime) ?usize {
-        return switch (self.*) {
-            .host => 0,
-            .client => |client| blk: {
-                const lockstep = client.session.runtime.lockstep orelse break :blk null;
-                if (lockstep.local_slot_index < 0) break :blk null;
-                const slot: usize = @intCast(lockstep.local_slot_index);
-                if (slot >= state_mod.max_players) break :blk null;
-                break :blk slot;
-            },
-            .rollback => |rollback| blk: {
-                if (rollback.session.local_slot_index < 0) break :blk null;
-                const slot: usize = @intCast(rollback.session.local_slot_index);
-                if (slot >= state_mod.max_players) break :blk null;
-                break :blk slot;
-            },
-        };
-    }
-
-    fn boundPort(self: *const NetworkLiveRuntime) u16 {
-        return switch (self.*) {
-            .host => |host| host.session.boundPort(),
-            .client => |client| client.session.boundPort(),
-            .rollback => |rollback| rollback.boundPort(),
-        };
-    }
-
-    fn rollbackRoomCode(self: *const NetworkLiveRuntime) ?room_code.RoomCode {
-        return switch (self.*) {
-            .host, .client => null,
-            .rollback => |rollback| rollback.session.room_code_latest,
-        };
-    }
-
-    fn lobbySummary(self: *const NetworkLiveRuntime) ?NetworkLobbySummary {
-        return switch (self.*) {
-            .host => |host| blk: {
-                const lobby = host.session.runtime.lobby;
-                const slots = lockstepHostLobbySlots(lobby);
-                const endpoint = networkLobbyEndpointFromTextPort(host.session.transport.bind_host, host.session.boundPort());
-                break :blk .{
-                    .connected = @min(expectedPlayerCount(lobby.player_count), 1 + lobby.peers.items.len),
-                    .expected = expectedPlayerCount(lobby.player_count),
-                    .ready = lockstepHostReadyCount(lobby),
-                    .local_slot = 0,
-                    .endpoint_bytes = endpoint.bytes,
-                    .endpoint_len = endpoint.len,
-                    .session_id = lobby.session_id,
-                    .started = host.session.runtime.started,
-                    .slots = slots.slots,
-                    .slot_count = slots.count,
-                };
-            },
-            .client => |client| lockstepClientLobbySummary(client.session.runtime),
-            .rollback => |rollback| rollbackLobbySummary(rollback.session, rollback.server_addr),
-        };
-    }
-};
+const network_live_runtime = cz.net.network_live_runtime;
+const NetworkLiveRuntime = network_live_runtime.NetworkLiveRuntime;
+const NetworkLiveUpdate = network_live_runtime.Update;
 
 const NetworkLobbySummary = struct {
     const max_slot_rows = state_mod.max_players;
@@ -659,6 +400,53 @@ fn rollbackLobbySummary(session: cz.net.rollback_session.Session, server_addr: r
     };
 }
 
+fn networkLiveLobbySummary(runtime: *const NetworkLiveRuntime) ?NetworkLobbySummary {
+    return switch (runtime.*) {
+        .host => |host| blk: {
+            const lobby = host.session.runtime.lobby;
+            const slots = lockstepHostLobbySlots(lobby);
+            const endpoint = networkLobbyEndpointFromTextPort(host.session.transport.bind_host, host.session.boundPort());
+            break :blk .{
+                .connected = @min(expectedPlayerCount(lobby.player_count), 1 + lobby.peers.items.len),
+                .expected = expectedPlayerCount(lobby.player_count),
+                .ready = lockstepHostReadyCount(lobby),
+                .local_slot = 0,
+                .endpoint_bytes = endpoint.bytes,
+                .endpoint_len = endpoint.len,
+                .session_id = lobby.session_id,
+                .started = host.session.runtime.started,
+                .slots = slots.slots,
+                .slot_count = slots.count,
+            };
+        },
+        .client => |client| lockstepClientLobbySummary(client.session.runtime),
+        .rollback => |rollback| rollbackLobbySummary(rollback.session, rollback.server_addr),
+    };
+}
+
+fn networkLaunchConfig(request: window_misc_panels.NetworkLaunchRequest) network_live_runtime.LaunchConfig {
+    return .{
+        .role = switch (request.role) {
+            .host => .host,
+            .join => .join,
+        },
+        .mode_id = request.mode_id,
+        .player_count = request.player_count,
+        .quest_level = request.quest_level,
+        .netcode = switch (request.netcode) {
+            .rollback => .rollback,
+            .lockstep => .lockstep,
+        },
+        .bind_host = request.bind_host,
+        .host = request.host,
+        .port = request.port,
+        .room_code_text = request.room_code_text,
+        .build_id = cz.version,
+        .peer_name = "window",
+        .session_id = "window-lockstep",
+    };
+}
+
 fn networkLaunchNetcodeLabel(netcode: window_misc_panels.NetworkLaunchNetcode) []const u8 {
     return switch (netcode) {
         .lockstep => "Lockstep",
@@ -710,42 +498,6 @@ fn networkLobbySlotStateColor(slot: schema_shared.SlotState) rl.Color {
     if (slot.connected) return rl.Color.init(225, 235, 247, 255);
     return rl.Color.init(155, 175, 200, 255);
 }
-
-fn parseNetworkPeerAddr(host: []const u8, port: u16) !lockstep_session.PeerAddr {
-    var parts: [4]u8 = undefined;
-    var iter = std.mem.splitScalar(u8, host, '.');
-    var idx: usize = 0;
-    while (iter.next()) |part| {
-        if (idx >= parts.len or part.len == 0) return error.InvalidNetworkHost;
-        parts[idx] = std.fmt.parseInt(u8, part, 10) catch return error.InvalidNetworkHost;
-        idx += 1;
-    }
-    if (idx != parts.len) return error.InvalidNetworkHost;
-    return .{ .host = parts, .port = port };
-}
-
-fn parseRelayPeerAddr(host: []const u8, port: u16) !relay_transport.PeerAddr {
-    var parts: [4]u8 = undefined;
-    var iter = std.mem.splitScalar(u8, host, '.');
-    var idx: usize = 0;
-    while (iter.next()) |part| {
-        if (idx >= parts.len or part.len == 0) return error.InvalidNetworkHost;
-        parts[idx] = std.fmt.parseInt(u8, part, 10) catch return error.InvalidNetworkHost;
-        idx += 1;
-    }
-    if (idx != parts.len) return error.InvalidNetworkHost;
-    return .{ .host = parts, .port = port };
-}
-
-const NetworkLiveUpdate = struct {
-    stats: lockstep_session.UpdateStats = .{},
-    frames_advanced: usize = 0,
-    ticks_advanced: usize = 0,
-    last_tick_index: ?i32 = null,
-    last_player_count: usize = 0,
-    last_input_flags: [state_mod.max_players]u32 = [_]u32{0} ** state_mod.max_players,
-    last_frame_update: ?live_runner.FrameUpdate = null,
-};
 
 fn networkLiveTerminalReason(game_mode: game_ids.GameModeId, quest_completed: bool, all_players_dead: bool) ?ResultsReason {
     if (game_mode == .quests and quest_completed) return .completed;
@@ -1065,6 +817,7 @@ const App = struct {
     network_live_input_interpreter: local_input.LocalInputInterpreter = .{},
     network_live_camera: state_mod.Vec2 = .{ .x = -1.0, .y = -1.0 },
     network_live_input_ready: bool = false,
+    network_local_ready: bool = false,
     network_live_render_time_s: f32 = 0.0,
     network_live_hud_state: HudRuntimeState = .{},
     network_live_last_update: ?live_runner.FrameUpdate = null,
@@ -1661,6 +1414,19 @@ const App = struct {
                     self.setScreen(.play_game_menu);
                     return;
                 }
+                if (window_ui.confirmPressed()) {
+                    const next_ready = !self.network_local_ready;
+                    const io = std.Io.Threaded.global_single_threaded.io();
+                    if (self.network_live_session) |*session| {
+                        session.setLocalReady(self.allocator, io, next_ready, monotonicMs(io)) catch |err| {
+                            self.network_session.setErrorFmt("Ready change failed: {s}", .{@errorName(err)});
+                            self.updateNetworkLiveSession(frame_dt);
+                            return;
+                        };
+                        self.network_local_ready = next_ready;
+                        self.audio.playUiButtonClick();
+                    }
+                }
             }
             self.updateNetworkLiveSession(frame_dt);
             return;
@@ -1695,7 +1461,7 @@ const App = struct {
         const io = std.Io.Threaded.global_single_threaded.io();
         const seed: i32 = @bitCast(self.takeRunSeed());
         const launch_label = networkLaunchNetcodeLabel(request.netcode);
-        var session = NetworkLiveRuntime.initWithStatus(request, seed, self.runtime.status) catch |err| {
+        var session = NetworkLiveRuntime.initWithStatus(networkLaunchConfig(request), seed, self.runtime.status) catch |err| {
             self.network_session.setErrorFmt("{s} init failed: {s}", .{ launch_label, @errorName(err) });
             return;
         };
@@ -1772,7 +1538,7 @@ const App = struct {
             } else {
                 self.network_session.setStatusFmt("{s} frames={d} ticks={d}.", .{ label, net_update.frames_advanced, net_update.ticks_advanced });
             }
-        } else if (session.lobbySummary()) |lobby| {
+        } else if (networkLiveLobbySummary(session)) |lobby| {
             const slot = lobby.local_slot orelse 0;
             const phase = if (lobby.started) "match" else "lobby";
             if (lobby.room_code) |code| {
@@ -1919,6 +1685,7 @@ const App = struct {
         self.network_live_input_interpreter = .{};
         self.network_live_camera = .{ .x = -1.0, .y = -1.0 };
         self.network_live_input_ready = false;
+        self.network_local_ready = false;
         self.network_live_render_time_s = 0.0;
         self.network_live_hud_state = .{};
         self.network_live_last_update = null;
@@ -2752,7 +2519,7 @@ const App = struct {
             return;
         };
         const session = if (self.network_live_session) |*session| session else return;
-        const summary = session.lobbySummary() orelse NetworkLobbySummary{};
+        const summary = networkLiveLobbySummary(session) orelse NetworkLobbySummary{};
 
         const panel = window_misc_panels.drawNetworkLobbyShell(&self.network_session, assets);
         const label_color = rl.Color.init(190, 190, 200, 230);
@@ -2761,7 +2528,8 @@ const App = struct {
         const dim_color = rl.Color.init(155, 175, 200, 255);
 
         window_ui.drawSmallText(assets, "Network Lobby", panel.x + 174.0, panel.y + 40.0, rl.Color.white);
-        window_ui.drawSmallText(assets, "Waiting for peers to connect and ready up.", panel.x + 106.0, panel.y + 78.0, body_color);
+        const ready_prompt = if (self.network_local_ready) "ENTER: Unready" else "ENTER: Ready up";
+        window_ui.drawSmallText(assets, ready_prompt, panel.x + 106.0, panel.y + 78.0, body_color);
 
         const label_x = panel.x + 136.0;
         const value_x = panel.x + 248.0;
@@ -6043,6 +5811,7 @@ test "window network live runtime starts single-player lockstep host on update" 
 
     try runtime.start(std.testing.allocator, io, 10);
     try std.testing.expect(runtime.runnerForLocalInput() == null);
+    try runtime.setLocalReady(std.testing.allocator, io, true, 15);
     _ = try runtime.update(std.testing.allocator, io, 20);
     try std.testing.expect(runtime.runnerForLocalInput() != null);
 }
@@ -6352,17 +6121,17 @@ test "window network live runtime summarizes lockstep host lobby state" {
     }, 123);
     defer runtime.deinit(std.testing.allocator, std.Io.Threaded.global_single_threaded.io());
 
-    const summary = runtime.lobbySummary() orelse return error.ExpectedLobbySummary;
+    const summary = networkLiveLobbySummary(&runtime) orelse return error.ExpectedLobbySummary;
     try std.testing.expectEqual(@as(usize, 1), summary.connected);
     try std.testing.expectEqual(@as(usize, 2), summary.expected);
-    try std.testing.expectEqual(@as(usize, 1), summary.ready);
+    try std.testing.expectEqual(@as(usize, 0), summary.ready);
     try std.testing.expectEqual(@as(?usize, 0), summary.local_slot);
     try std.testing.expectEqualStrings("127.0.0.1:31993", summary.endpointText());
     try std.testing.expectEqualStrings("window-lockstep", summary.session_id);
     try std.testing.expectEqual(@as(usize, 2), summary.slot_count);
     try std.testing.expectEqual(@as(i32, 0), summary.slots[0].slot_index);
     try std.testing.expect(summary.slots[0].connected);
-    try std.testing.expect(summary.slots[0].ready);
+    try std.testing.expect(!summary.slots[0].ready);
     try std.testing.expect(summary.slots[0].is_host);
     try std.testing.expectEqualStrings("host", networkLobbySlotLabel(summary.slots[0]));
     try std.testing.expectEqual(@as(i32, 1), summary.slots[1].slot_index);
@@ -6397,7 +6166,7 @@ test "window network live runtime summarizes rollback room slots" {
         .host, .client => return error.TestUnexpectedResult,
     }
 
-    const summary = runtime.lobbySummary() orelse return error.ExpectedLobbySummary;
+    const summary = networkLiveLobbySummary(&runtime) orelse return error.ExpectedLobbySummary;
     try std.testing.expectEqual(@as(usize, 2), summary.connected);
     try std.testing.expectEqual(@as(usize, 2), summary.expected);
     try std.testing.expectEqual(@as(usize, 1), summary.ready);

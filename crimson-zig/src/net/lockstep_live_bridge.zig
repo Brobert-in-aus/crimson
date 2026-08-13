@@ -307,7 +307,7 @@ test "lockstep live bridge advances live runner from canonical frame" {
         },
         .{
             .move_x = 0.0,
-            .move_y = 1.0,
+            .move_y = -1.0,
             .aim_x = 512.0,
             .aim_y = 700.0,
             .flags = lockstep_input_adapter.move_mode_present_flag |
