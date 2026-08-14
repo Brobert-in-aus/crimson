@@ -66,6 +66,12 @@ public sealed class UserSettings
     /// on as part of showing every dev overlay.</summary>
     public bool PokeMarkers = true;
 
+    /// <summary>Show the hardware model supplied by the active OpenXR runtime.
+    /// Off remains the clean-profile default because the existing poke markers
+    /// are the lower-occlusion interaction aid; players can opt into the more
+    /// immersive full controller geometry from VR Display settings.</summary>
+    public bool ControllerModels;
+
     /// <summary>Which <see cref="CrimsonVR.ControlMode"/> the hands act in.
     /// Stored as an int so an unknown future value degrades to a number rather
     /// than throwing on load. Defaults to Cabinet, the mode the playfield's
@@ -175,6 +181,7 @@ public sealed class UserSettings
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
         PokeMarkers = cf.GetValue("input", "poke_markers", PokeMarkers).AsBool();
+        ControllerModels = cf.GetValue("video", "controller_models", ControllerModels).AsBool();
         ControlMode = cf.GetValue("input", "control_mode", ControlMode).AsInt32();
         ArenaScale = cf.GetValue("arena", "scale", ArenaScale).AsSingle();
         ArenaPitch = cf.GetValue("arena", "pitch", ArenaPitch).AsSingle();
@@ -320,6 +327,7 @@ public sealed class UserSettings
         cf.SetValue("video", "render_scale", RenderScale);
         cf.SetValue("video", "msaa", Msaa);
         cf.SetValue("video", "mixed_reality", MixedReality);
+        cf.SetValue("video", "controller_models", ControllerModels);
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "weapon_showcase", WeaponShowcase);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));

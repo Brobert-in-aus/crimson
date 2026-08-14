@@ -31,6 +31,7 @@ public sealed partial class SettingsMenu : Node3D
     private VrButton _uiEdit = null!;
     private VrButton _aa = null!;
     private VrButton _mixedReality = null!;
+    private VrButton _controllerModels = null!;
     private VrButton _pokeMarkers = null!;
     private VrButton _debug = null!;
     private VrButton _back = null!;
@@ -44,6 +45,7 @@ public sealed partial class SettingsMenu : Node3D
     private bool _pokeMarkersState;
     private bool _mixedRealityState;
     private bool _mixedRealitySupported;
+    private bool _controllerModelsState;
     private int _msaaState;
     private ControlMode _controlModeState;
 
@@ -57,8 +59,10 @@ public sealed partial class SettingsMenu : Node3D
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
     public event Action<bool>? OnMixedRealityChanged;
+    public event Action<bool>? OnControllerModelsChanged;
 
     public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers,
+        bool controllerModels,
         ControlMode controlMode, float renderScale, int msaa, bool mixedReality,
         bool mixedRealitySupported, Texture2D? rectOn, Texture2D? rectOff)
     {
@@ -67,6 +71,7 @@ public sealed partial class SettingsMenu : Node3D
         _swapState = handSwap;
         _debugState = debug;
         _pokeMarkersState = pokeMarkers;
+        _controllerModelsState = controllerModels;
         _mixedRealityState = mixedReality && mixedRealitySupported;
         _mixedRealitySupported = mixedRealitySupported;
         _msaaState = msaa;
@@ -175,6 +180,16 @@ public sealed partial class SettingsMenu : Node3D
         _mixedReality.OnPress += ToggleMixedReality;
         y -= pitch;
 
+        // Runtime-supplied controller geometry is a display preference rather
+        // than an input requirement. Unsupported runtimes simply supply no
+        // model; the setting stays reversible and poke markers still work.
+        _controllerModels = new VrButton();
+        AddChild(_controllerModels);
+        _controllerModels.Build(bw, bh, ControllerModelsText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _controllerModels.Position = new Vector3(0.0f, y, 0.0f);
+        _controllerModels.OnPress += ToggleControllerModels;
+        y -= pitch;
+
         // Poke-tip markers, standalone. Sits above Debug because it is a normal
         // comfort/visibility option now, not a dev switch: the tips hover over
         // the control rectangle rather than the playfield, so leaving them on
@@ -262,6 +277,7 @@ public sealed partial class SettingsMenu : Node3D
         _back.ResetPress();
         _aa.ResetPress();
         _mixedReality.ResetPress();
+        _controllerModels.ResetPress();
         _deadZone.ResetPress();
         _renderScale.ResetPress();
         _pageButton.ResetPress();
@@ -285,6 +301,7 @@ public sealed partial class SettingsMenu : Node3D
         {
             _debug.PollPoke(probes);
             _aa.PollPoke(probes);
+            _controllerModels.PollPoke(probes);
             if (_mixedRealitySupported)
             {
                 _mixedReality.PollPoke(probes);
@@ -319,6 +336,7 @@ public sealed partial class SettingsMenu : Node3D
         _renderScaleLabel.Visible = !controls;
         _aa.Visible = !controls;
         _mixedReality.Visible = !controls;
+        _controllerModels.Visible = !controls;
         _debug.Visible = !controls;
 
         if (controls)
@@ -336,7 +354,8 @@ public sealed partial class SettingsMenu : Node3D
             _renderScale.Position = new Vector3(0.0f, s * 0.26f, 0.0f);
             _aa.Position = new Vector3(0.0f, s * 0.10f, 0.0f);
             _mixedReality.Position = new Vector3(0.0f, -s * 0.04f, 0.0f);
-            _debug.Position = new Vector3(0.0f, -s * 0.18f, 0.0f);
+            _controllerModels.Position = new Vector3(0.0f, -s * 0.18f, 0.0f);
+            _debug.Position = new Vector3(0.0f, -s * 0.32f, 0.0f);
         }
 
         _pageButton.SetText(controls ? "Display >" : "< Controls");
@@ -371,6 +390,17 @@ public sealed partial class SettingsMenu : Node3D
         _mixedRealityState = !_mixedRealityState;
         _mixedReality.SetText(MixedRealityText());
         OnMixedRealityChanged?.Invoke(_mixedRealityState);
+    }
+
+    private string ControllerModelsText() => _controllerModelsState
+        ? "Controller models: On"
+        : "Controller models: Off";
+
+    private void ToggleControllerModels()
+    {
+        _controllerModelsState = !_controllerModelsState;
+        _controllerModels.SetText(ControllerModelsText());
+        OnControllerModelsChanged?.Invoke(_controllerModelsState);
     }
 
     private string ControlModeText() =>

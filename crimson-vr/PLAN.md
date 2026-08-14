@@ -961,6 +961,10 @@ screen-space overlays:
 12. **Poke-point discoverability — BUILT (2026-08-13).** Clean profiles default
     controller/hand poke-tip markers on; the existing VR Settings toggle remains
     available for players who prefer an unmarked view.
+13. **Runtime controller models — BUILT (2026-08-14).** VR Display now persists
+    an opt-in controller-model toggle. Quest uses Meta's runtime GLTF and other
+    supporting runtimes use Godot's standard OpenXR render-model manager, so the
+    geometry follows the actual hardware without bundling device-specific art.
 
 **M4 in-headset validation backlog (remaining checks after slices 1-11):**
 the whole poke-menu interaction (perk pick, pause, settings, first-run prompt,

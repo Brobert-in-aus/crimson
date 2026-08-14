@@ -119,7 +119,10 @@ release approval.
 - **Controller and optical-hand input**: menus use fingertip poke rather than a
   laser; left hand moves, right hand aims/fires with pinch, and the weapon-swap
   perk has a reload gesture. Controller poke markers sit at the controller tip
-  and default on for clean profiles; VR Settings can hide them.
+  and default on for clean profiles; VR Settings can hide them. VR Display can
+  also show the active runtime's hardware-specific controller models (Meta's
+  render-model extension on Quest, standard OpenXR render models elsewhere),
+  while unsupported runtimes retain the existing marker/reticle presentation.
 - **Arena & Layout editor**: Cabinet placement exposes arena scale/tilt/
   distance/drop; Tabletop enforces flat/reachable geometry and uses one cycling
   Small/Medium/Large button (0.75x/1.0x/1.25x). Both expose sprite height,

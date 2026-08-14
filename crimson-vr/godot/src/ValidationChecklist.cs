@@ -36,6 +36,7 @@ public sealed partial class ValidationChecklist : Node3D
         ("edittabletop-v3", "Tabletop edit: size button; flat, no distance"),
         ("editrotation-v2", "Edit: button pitch follows controller rotation"),
         ("cabinetbuttons-v2", "Cabinet reset uses Tabletop button positions"),
+        ("controllermodels-v1", "Display: controller models toggle and track hands"),
         ("layoutdefaults", "Clean profile starts at the tuned arena layout"),
         ("lan-survival", "LAN Survival: PC/Quest host + join both work"),
         ("lan-rush", "LAN Rush: PC/Quest host + join both work"),

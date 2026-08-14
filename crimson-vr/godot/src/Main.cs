@@ -169,6 +169,7 @@ public partial class Main : Node3D
     private XRCamera3D _camera = null!;
     private XRController3D _leftHand = null!;
     private XRController3D _rightHand = null!;
+    private readonly Node3D?[] _controllerModels = new Node3D?[2];
     private Node3D _arenaRoot = null!;
     // Sibling of _arenaRoot, not a child: the playfield carries its own scale,
     // pitch and placement so growing/tilting the board never drags the menus
@@ -571,6 +572,7 @@ public partial class Main : Node3D
         _settings.Load();
         _handSwap = _settings.HandSwap;
         _deadZone = _settings.DeadZone;
+        SetControllerModelsVisible(_settings.ControllerModels);
 
         // The playfield and everything registered TO it (terrain, entities,
         // positional audio, the scoreboard) hang off PlayfieldRoot, so they
@@ -644,7 +646,7 @@ public partial class Main : Node3D
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
-            _settings.PokeMarkers, (ControlMode)_settings.ControlMode,
+            _settings.PokeMarkers, _settings.ControllerModels, (ControlMode)_settings.ControlMode,
             _settings.RenderScale, _settings.Msaa, _settings.MixedReality,
             _mixedRealitySupported,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
@@ -670,6 +672,12 @@ public partial class Main : Node3D
             {
                 HidePokeMarkers();
             }
+        };
+        _settingsMenu.OnControllerModelsChanged += v =>
+        {
+            _settings.ControllerModels = v;
+            SetControllerModelsVisible(v);
+            _settings.Save();
         };
         _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
         _settingsMenu.OnMsaaChanged += v => { _settings.Msaa = v; ApplyRenderQuality(); _settings.Save(); };
@@ -1868,10 +1876,56 @@ public partial class Main : Node3D
         _origin.AddChild(_leftHand);
         _origin.AddChild(_rightHand);
 
+        BuildControllerModels();
+
         _handMarkers[0] = MakeHandMarker(new Color(0.2f, 0.5f, 1.0f));
         _handMarkers[1] = MakeHandMarker(new Color(1.0f, 0.3f, 0.25f));
         _leftHand.AddChild(_handMarkers[0]);
         _rightHand.AddChild(_handMarkers[1]);
+    }
+
+    /// <summary>Use the model supplied by the active runtime rather than baking
+    /// Quest-specific geometry into the app. Meta's vendor extension remains the
+    /// reliable Quest path; Godot's standard manager covers OpenXR runtimes that
+    /// implement the promoted render-model extensions.</summary>
+    private void BuildControllerModels()
+    {
+        XRController3D[] hands = { _leftHand, _rightHand };
+        bool useMetaModels = OS.GetName() == "Android" && ClassDB.ClassExists("OpenXRFbRenderModel");
+        for (int i = 0; i < hands.Length; i++)
+        {
+            Node3D? model = null;
+            if (useMetaModels)
+            {
+                model = ClassDB.Instantiate("OpenXRFbRenderModel").AsGodotObject() as Node3D;
+                model?.Set("render_model_type", i);
+            }
+            if (model == null)
+            {
+                model = new OpenXRRenderModelManager
+                {
+                    Tracker = i == 0
+                        ? OpenXRRenderModelManager.RenderModelTracker.LeftHand
+                        : OpenXRRenderModelManager.RenderModelTracker.RightHand,
+                    MakeLocalToPose = "grip",
+                };
+            }
+            model.Name = i == 0 ? "LeftControllerModel" : "RightControllerModel";
+            model.Visible = false;
+            hands[i].AddChild(model);
+            _controllerModels[i] = model;
+        }
+    }
+
+    private void SetControllerModelsVisible(bool visible)
+    {
+        for (int i = 0; i < _controllerModels.Length; i++)
+        {
+            if (_controllerModels[i] is { } model)
+            {
+                model.Visible = visible;
+            }
+        }
     }
 
     // The physical poke spheres on the controllers. Shown only when a poke UI is up
@@ -1894,6 +1948,10 @@ public partial class Main : Node3D
 
         void Update(int index, XRController3D hand)
         {
+            if (_controllerModels[index] is { } controllerModel)
+            {
+                controllerModel.Visible = _settings.ControllerModels && hand.GetHasTrackingData();
+            }
             // Guarded because the array holds nullable refs and is populated in
             // BuildRig: safe today, but a marker built behind any condition
             // (skipped in MR, say) would turn a hidden marker into a crash on
