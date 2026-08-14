@@ -127,11 +127,14 @@ Text rules are forgettable; structural rules enforce themselves.
 1. Start from the canonical
    [`Release Preparation`](docs/contributor/project-tracking/release-preparation.md)
    checklist; do not infer readiness from a successful build alone.
-2. Close every blocker with durable test, artifact, physical-validation, and
+2. Select the increment using the
+   [`Versioning Policy`](docs/contributor/project-tracking/versioning.md); choose
+   the highest impact in the frozen release scope.
+3. Close every blocker with durable test, artifact, physical-validation, and
    legal evidence from the exact candidate commit.
-3. Require a clean tree, a new package version, repeated networking stability,
+4. Require a clean tree, a new package version, repeated networking stability,
    and agreement between the tag, package metadata, manifests, and release notes.
-4. Keep Python publication and CrimsonVR personal-build authorization as
+5. Keep Python publication and CrimsonVR personal-build authorization as
    separate decisions.
 
 ## structural search / codemods: prefer ast-grep

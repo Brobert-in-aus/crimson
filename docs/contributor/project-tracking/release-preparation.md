@@ -15,9 +15,10 @@ that were previously distributed across the VR plan and platform-specific notes.
 
     The 2026-08-13 engineering remediation closed the rollback recovery and
     Windows networking defects found by the initial audit. Publication remains
-    blocked by the unchanged already-published package version and unresolved
-    CrimsonVR legal, clean-machine, relay-operations, and physical-device gates.
-    Do not create or push a release tag yet.
+    Version `0.11.0` has been selected and applied locally. Publication remains
+    blocked by the final clean-commit validation and unresolved CrimsonVR legal,
+    clean-machine, relay-operations, and physical-device gates. Do not create or
+    push a release tag yet.
 
 ## Release surfaces
 
@@ -25,7 +26,7 @@ Treat these as separate deliverables with separate publication decisions:
 
 | Surface | Publication path | Current status |
 |---|---|---|
-| Python desktop package | Tag-triggered PyPI and GitHub release | Automated gates pass; blocked by version selection and final clean-commit rerun |
+| Python desktop package | Tag-triggered PyPI and GitHub release | Automated gates pass; version selected as `0.11.0`; final clean-commit rerun pending |
 | Zig runtime/build targets | Built and tested as part of the source release | Automated and repeated networking gates pass on Windows |
 | CrimsonVR Quest and PCVR | Asset-free personal builds from manual workflows | Build paths exist; operational, physical-device, and legal gates remain |
 
@@ -107,8 +108,8 @@ All blockers must be closed with evidence, not merely marked understood.
 |---|---|---|---|
 | RP-01 | Closed locally | Reordered rollback input smoke returned `RollbackHostInputMismatch` | State-driven catch-up implemented; 20/20 reorder smokes and full Python suite pass |
 | RP-02 | Closed locally | Windows native networking was nondeterministic across lockstep handshake and rollback relay tests | Repeated Windows suites and smokes pass without retry-dependent acceptance |
-| RP-03 | Open | `pyproject.toml` is still `0.10.0`, which is already tagged/published | Version and lockfile bumped; intended tag exactly matches the package version |
-| RP-04 | Remediation committed; final rerun pending | The original release candidate existed only as a large dirty worktree | Run every required gate from the clean, versioned release commit |
+| RP-03 | Closed locally | `0.10.0` was already tagged/published | Minor bump selected for the substantial new VR, multiplayer, replay, and tooling capabilities; package and lockfile now use `0.11.0`; intended tag is `v0.11.0` |
+| RP-04 | Release-prep remediation committed; version commit and final rerun pending | The original release candidate existed only as a large dirty worktree | Commit the version/policy update, then run every required gate from the clean, versioned release commit |
 | RP-05 | Open | Public CrimsonVR derived-content and upstream-code scope is unresolved | Written licensing decision and completed repository/output audit, or release scope reduced accordingly |
 | RP-06 | Open | Private-copy workflows, clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Workflow URLs/artifact manifests and signed physical-validation record attached to the release evidence |
 
@@ -210,8 +211,8 @@ After every blocker above is closed:
 
 1. Freeze the release scope and update this audit baseline with the candidate
    commit, intended version, platform matrix, and evidence links.
-2. Choose the new version. The package version must not already exist on PyPI or
-   as a repository tag.
+2. Choose the new version using the [Versioning Policy](versioning.md). The
+   package version must not already exist on PyPI or as a repository tag.
 3. Bump `pyproject.toml` and refresh `uv.lock`.
 4. Re-run every automated, packaging, and applicable VR gate from the clean
    release commit.
