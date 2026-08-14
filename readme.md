@@ -20,7 +20,10 @@ The rewrite is a playable full game: boot, menus, Survival, Rush, Quests (5 tier
 standalone Quest 3 and PCVR. It embeds the same deterministic simulation and
 currently surfaces Survival, Rush, Quests, and Tutorial in two seated layouts:
 Tabletop and Cabinet. Menus use direct controller/hand poke interaction; native
-replays remain compatible with the desktop verifier. Friends-only multiplayer
+replays remain compatible with the desktop verifier. VR Display separately
+chooses poke or animated controller models and one of two Godot XR Tools Tac
+Glove skins; optical hand tracking swaps to the selected glove automatically and
+follows reported joints one-for-one. Friends-only multiplayer
 is implemented but still undergoing deterministic and physical-device
 validation. The current candidate is not release-ready; maintainers should use
 the [Release Preparation](docs/contributor/project-tracking/release-preparation.md)
@@ -30,7 +33,10 @@ VR packages are deliberately asset-free. Players create a local pack from a
 user-owned GOG Crimsonland Classic 1.9.93 installation and import it on first
 launch; see the [asset-import guide](crimson-vr/notes/asset-import.md). Quest and
 PCVR personal builds are documented in the [Quest CI](crimson-vr/notes/quest-ci.md)
-and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides. Where binary redistribution is
+and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides. The Quest-specific runtime
+controller model and animation integration is documented in the
+[Godot controller-model guide](crimson-vr/notes/godot-quest-controller-models.md).
+Where binary redistribution is
 not authorized, the downloadable artifact flow requires a **private standalone
 repository**, not GitHub's Fork button or a public fork.
 

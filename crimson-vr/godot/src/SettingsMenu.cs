@@ -31,8 +31,8 @@ public sealed partial class SettingsMenu : Node3D
     private VrButton _uiEdit = null!;
     private VrButton _aa = null!;
     private VrButton _mixedReality = null!;
-    private VrButton _controllerModels = null!;
-    private VrButton _pokeMarkers = null!;
+    private VrButton _controllerDisplay = null!;
+    private VrButton _handModel = null!;
     private VrButton _debug = null!;
     private VrButton _back = null!;
     private VrButton _pageButton = null!;
@@ -42,10 +42,10 @@ public sealed partial class SettingsMenu : Node3D
 
     private bool _swapState;
     private bool _debugState;
-    private bool _pokeMarkersState;
     private bool _mixedRealityState;
     private bool _mixedRealitySupported;
-    private bool _controllerModelsState;
+    private ControllerDisplayMode _controllerDisplayState;
+    private int _handModelState;
     private int _msaaState;
     private ControlMode _controlModeState;
 
@@ -53,16 +53,16 @@ public sealed partial class SettingsMenu : Node3D
     public event Action<bool>? OnHandSwapChanged;
     public event Action<float>? OnDeadZoneChanged;
     public event Action<bool>? OnDebugChanged;
-    public event Action<bool>? OnPokeMarkersChanged;
+    public event Action<ControllerDisplayMode>? OnControllerDisplayChanged;
+    public event Action<int>? OnHandModelChanged;
     public event Action<ControlMode>? OnControlModeChanged;
     public event Action? OnArenaLayout;
     public event Action<float>? OnRenderScaleChanged;
     public event Action<int>? OnMsaaChanged;
     public event Action<bool>? OnMixedRealityChanged;
-    public event Action<bool>? OnControllerModelsChanged;
 
-    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug, bool pokeMarkers,
-        bool controllerModels,
+    public void Build(float arenaSideMeters, bool handSwap, float deadZone, bool debug,
+        ControllerDisplayMode controllerDisplay, int handModel,
         ControlMode controlMode, float renderScale, int msaa, bool mixedReality,
         bool mixedRealitySupported, Texture2D? rectOn, Texture2D? rectOff)
     {
@@ -70,8 +70,8 @@ public sealed partial class SettingsMenu : Node3D
         _arenaSide = s;
         _swapState = handSwap;
         _debugState = debug;
-        _pokeMarkersState = pokeMarkers;
-        _controllerModelsState = controllerModels;
+        _controllerDisplayState = controllerDisplay;
+        _handModelState = Mathf.Clamp(handModel, 1, 2);
         _mixedRealityState = mixedReality && mixedRealitySupported;
         _mixedRealitySupported = mixedRealitySupported;
         _msaaState = msaa;
@@ -180,25 +180,21 @@ public sealed partial class SettingsMenu : Node3D
         _mixedReality.OnPress += ToggleMixedReality;
         y -= pitch;
 
-        // Runtime-supplied controller geometry is a display preference rather
-        // than an input requirement. Unsupported runtimes simply supply no
-        // model; the setting stays reversible and poke markers still work.
-        _controllerModels = new VrButton();
-        AddChild(_controllerModels);
-        _controllerModels.Build(bw, bh, ControllerModelsText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
-        _controllerModels.Position = new Vector3(0.0f, y, 0.0f);
-        _controllerModels.OnPress += ToggleControllerModels;
+        // Controller presentation applies while Touch controllers are active.
+        // Optical tracking switches to gloves automatically; this second row
+        // only chooses the glove skin, it does not force hands on.
+        _controllerDisplay = new VrButton();
+        AddChild(_controllerDisplay);
+        _controllerDisplay.Build(bw, bh, ControllerDisplayText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _controllerDisplay.Position = new Vector3(0.0f, y, 0.0f);
+        _controllerDisplay.OnPress += CycleControllerDisplay;
         y -= pitch;
 
-        // Poke-tip markers, standalone. Sits above Debug because it is a normal
-        // comfort/visibility option now, not a dev switch: the tips hover over
-        // the control rectangle rather than the playfield, so leaving them on
-        // costs the player nothing.
-        _pokeMarkers = new VrButton();
-        AddChild(_pokeMarkers);
-        _pokeMarkers.Build(bw, bh, PokeMarkersText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
-        _pokeMarkers.Position = new Vector3(0.0f, y, 0.0f);
-        _pokeMarkers.OnPress += TogglePokeMarkers;
+        _handModel = new VrButton();
+        AddChild(_handModel);
+        _handModel.Build(bw, bh, HandModelText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _handModel.Position = new Vector3(0.0f, y, 0.0f);
+        _handModel.OnPress += CycleHandModel;
         y -= pitch;
 
         // Debug-overlay toggle (validation checklist, status line, debug FX menu,
@@ -273,11 +269,11 @@ public sealed partial class SettingsMenu : Node3D
         _controlMode.ResetPress();
         _uiEdit.ResetPress();
         _debug.ResetPress();
-        _pokeMarkers.ResetPress();
         _back.ResetPress();
         _aa.ResetPress();
         _mixedReality.ResetPress();
-        _controllerModels.ResetPress();
+        _controllerDisplay.ResetPress();
+        _handModel.ResetPress();
         _deadZone.ResetPress();
         _renderScale.ResetPress();
         _pageButton.ResetPress();
@@ -294,14 +290,14 @@ public sealed partial class SettingsMenu : Node3D
             _handSwap.PollPoke(probes);
             _controlMode.PollPoke(probes);
             _uiEdit.PollPoke(probes);
-            _pokeMarkers.PollPoke(probes);
             _deadZone.PollPoke(probes);
         }
         else
         {
             _debug.PollPoke(probes);
             _aa.PollPoke(probes);
-            _controllerModels.PollPoke(probes);
+            _controllerDisplay.PollPoke(probes);
+            _handModel.PollPoke(probes);
             if (_mixedRealitySupported)
             {
                 _mixedReality.PollPoke(probes);
@@ -330,13 +326,13 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.Visible = controls;
         _deadZone.Visible = controls;
         _deadZoneLabel.Visible = controls;
-        _pokeMarkers.Visible = controls;
 
         _renderScale.Visible = !controls;
         _renderScaleLabel.Visible = !controls;
         _aa.Visible = !controls;
         _mixedReality.Visible = !controls;
-        _controllerModels.Visible = !controls;
+        _controllerDisplay.Visible = !controls;
+        _handModel.Visible = !controls;
         _debug.Visible = !controls;
 
         if (controls)
@@ -346,21 +342,21 @@ public sealed partial class SettingsMenu : Node3D
             _handSwap.Position = new Vector3(0.0f, s * 0.06f, 0.0f);
             _deadZoneLabel.Position = new Vector3(0.0f, -s * 0.08f, 0.002f);
             _deadZone.Position = new Vector3(0.0f, -s * 0.14f, 0.0f);
-            _pokeMarkers.Position = new Vector3(0.0f, -s * 0.28f, 0.0f);
         }
         else
         {
-            _renderScaleLabel.Position = new Vector3(0.0f, s * 0.32f, 0.002f);
-            _renderScale.Position = new Vector3(0.0f, s * 0.26f, 0.0f);
-            _aa.Position = new Vector3(0.0f, s * 0.10f, 0.0f);
-            _mixedReality.Position = new Vector3(0.0f, -s * 0.04f, 0.0f);
-            _controllerModels.Position = new Vector3(0.0f, -s * 0.18f, 0.0f);
-            _debug.Position = new Vector3(0.0f, -s * 0.32f, 0.0f);
+            _renderScaleLabel.Position = new Vector3(0.0f, s * 0.36f, 0.002f);
+            _renderScale.Position = new Vector3(0.0f, s * 0.30f, 0.0f);
+            _aa.Position = new Vector3(0.0f, s * 0.16f, 0.0f);
+            _mixedReality.Position = new Vector3(0.0f, s * 0.03f, 0.0f);
+            _controllerDisplay.Position = new Vector3(0.0f, -s * 0.10f, 0.0f);
+            _handModel.Position = new Vector3(0.0f, -s * 0.23f, 0.0f);
+            _debug.Position = new Vector3(0.0f, -s * 0.36f, 0.0f);
         }
 
         _pageButton.SetText(controls ? "Display >" : "< Controls");
-        _pageButton.Position = new Vector3(-s * 0.19f, -s * 0.43f, 0.0f);
-        _back.Position = new Vector3(s * 0.19f, -s * 0.43f, 0.0f);
+        _pageButton.Position = new Vector3(-s * 0.19f, -s * 0.47f, 0.0f);
+        _back.Position = new Vector3(s * 0.19f, -s * 0.47f, 0.0f);
     }
 
     private void ToggleHandSwap()
@@ -392,15 +388,24 @@ public sealed partial class SettingsMenu : Node3D
         OnMixedRealityChanged?.Invoke(_mixedRealityState);
     }
 
-    private string ControllerModelsText() => _controllerModelsState
-        ? "Controller models: On"
-        : "Controller models: Off";
+    private string ControllerDisplayText() => _controllerDisplayState == ControllerDisplayMode.ControllerModels
+        ? "Controller display: Models" : "Controller display: Poke markers";
 
-    private void ToggleControllerModels()
+    private void CycleControllerDisplay()
     {
-        _controllerModelsState = !_controllerModelsState;
-        _controllerModels.SetText(ControllerModelsText());
-        OnControllerModelsChanged?.Invoke(_controllerModelsState);
+        _controllerDisplayState = _controllerDisplayState == ControllerDisplayMode.ControllerModels
+            ? ControllerDisplayMode.PokeMarkers : ControllerDisplayMode.ControllerModels;
+        _controllerDisplay.SetText(ControllerDisplayText());
+        OnControllerDisplayChanged?.Invoke(_controllerDisplayState);
+    }
+
+    private string HandModelText() => $"Optical hands: Hand Model {_handModelState}";
+
+    private void CycleHandModel()
+    {
+        _handModelState = _handModelState == 1 ? 2 : 1;
+        _handModel.SetText(HandModelText());
+        OnHandModelChanged?.Invoke(_handModelState);
     }
 
     private string ControlModeText() =>
@@ -413,15 +418,6 @@ public sealed partial class SettingsMenu : Node3D
             : ControlMode.Cabinet;
         _controlMode.SetText(ControlModeText());
         OnControlModeChanged?.Invoke(_controlModeState);
-    }
-
-    private string PokeMarkersText() => _pokeMarkersState ? "Poke markers: On" : "Poke markers: Off";
-
-    private void TogglePokeMarkers()
-    {
-        _pokeMarkersState = !_pokeMarkersState;
-        _pokeMarkers.SetText(PokeMarkersText());
-        OnPokeMarkersChanged?.Invoke(_pokeMarkersState);
     }
 
     /// <summary>A dark translucent backing strip behind a title, sized from the

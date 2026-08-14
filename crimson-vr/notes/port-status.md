@@ -118,11 +118,21 @@ release approval.
   changed behavior receives fresh persistence keys.
 - **Controller and optical-hand input**: menus use fingertip poke rather than a
   laser; left hand moves, right hand aims/fires with pinch, and the weapon-swap
-  perk has a reload gesture. Controller poke markers sit at the controller tip
-  and default on for clean profiles; VR Settings can hide them. VR Display can
-  also show the active runtime's hardware-specific controller models (Meta's
-  render-model extension on Quest, standard OpenXR render models elsewhere),
-  while unsupported runtimes retain the existing marker/reticle presentation.
+  perk has a reload gesture. VR Display separately persists the controller
+  presentation (poke orbs or models) and optical-hand skin: Glove Caucasian
+  Green Camo (Hand Model 1, the clean-profile default) or Glove African Dark
+  Camo (Hand Model 2). Tac Gloves are suppressed while controllers are in use
+  and appear automatically when unobstructed optical tracking becomes active;
+  Godot's
+  full hand-skeleton modifier applies every reported joint position and rotation.
+  Controller presentation follows Godot's official render-model demo on runtimes
+  supporting `XR_EXT_interaction_render_model`. Quest instead supplies its accurate
+  Touch model through `XR_FB_render_model`; Crimson loads that runtime glTF and
+  drives its trigger, grip, thumbstick, and button skeleton bones from the same
+  live OpenXR actions as gameplay. A separate-part Touch-style model remains the
+  fallback when neither runtime path supplies a model. The Tac Glove skeleton is
+  renamed from its Blender convention to the
+  exact Godot humanoid bone names required by XRHandModifier3D before binding.
 - **Arena & Layout editor**: Cabinet placement exposes arena scale/tilt/
   distance/drop; Tabletop enforces flat/reachable geometry and uses one cycling
   Small/Medium/Large button (0.75x/1.0x/1.25x). Both expose sprite height,

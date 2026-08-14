@@ -58,19 +58,13 @@ public sealed class UserSettings
     /// Read once at session create, so a change takes effect on the next run.</summary>
     public bool WeaponShowcase;
 
-    /// <summary>Show a marker at each controller's poke tip. Previously reachable
-    /// only via the Debug flag, because the markers hovered over the playfield and
-    /// obscured it during play. With the control rectangle split from the arena
-    /// the tips sit over the control surface instead, so they no longer cover
-    /// anything and are worth having as a standalone aid. Debug still forces them
-    /// on as part of showing every dev overlay.</summary>
-    public bool PokeMarkers = true;
+    /// <summary>Controller representation. Optical hands replace this
+    /// automatically; they are not a controller-display choice.</summary>
+    public int ControllerDisplay = (int)ControllerDisplayMode.PokeMarkers;
 
-    /// <summary>Show the hardware model supplied by the active OpenXR runtime.
-    /// Off remains the clean-profile default because the existing poke markers
-    /// are the lower-occlusion interaction aid; players can opt into the more
-    /// immersive full controller geometry from VR Display settings.</summary>
-    public bool ControllerModels;
+    /// <summary>Skin used automatically while unobstructed hand tracking is
+    /// active. 1 = Caucasian Green Camo, 2 = African Dark Camo.</summary>
+    public int HandModel = 1;
 
     /// <summary>Which <see cref="CrimsonVR.ControlMode"/> the hands act in.
     /// Stored as an int so an unknown future value degrades to a number rather
@@ -180,8 +174,32 @@ public sealed class UserSettings
         MusicVolume = cf.GetValue("audio", "music_volume", MusicVolume).AsInt32();
         GraphicsDetail = cf.GetValue("video", "graphics_detail", GraphicsDetail).AsInt32();
         UiInfoTexts = cf.GetValue("game", "ui_info_texts", UiInfoTexts).AsBool();
-        PokeMarkers = cf.GetValue("input", "poke_markers", PokeMarkers).AsBool();
-        ControllerModels = cf.GetValue("video", "controller_models", ControllerModels).AsBool();
+        if (cf.HasSectionKey("video", "controller_display"))
+        {
+            ControllerDisplay = Mathf.Clamp(cf.GetValue("video", "controller_display", ControllerDisplay).AsInt32(),
+                (int)ControllerDisplayMode.PokeMarkers, (int)ControllerDisplayMode.ControllerModels);
+            HandModel = Mathf.Clamp(cf.GetValue("video", "hand_model", HandModel).AsInt32(), 1, 2);
+        }
+        else
+        {
+            // Migrate both the recent four-way setting and the older pair of
+            // booleans. A hand selection becomes its skin; controllers fall
+            // back to poke markers instead of rendering no representation.
+            int oldDisplay = cf.GetValue("video", "hand_display", -1).AsInt32();
+            if (oldDisplay >= 0)
+            {
+                ControllerDisplay = oldDisplay == 1
+                    ? (int)ControllerDisplayMode.ControllerModels
+                    : (int)ControllerDisplayMode.PokeMarkers;
+                HandModel = oldDisplay == 3 ? 2 : 1;
+            }
+            else
+            {
+                ControllerDisplay = cf.GetValue("video", "controller_models", false).AsBool()
+                    ? (int)ControllerDisplayMode.ControllerModels
+                    : (int)ControllerDisplayMode.PokeMarkers;
+            }
+        }
         ControlMode = cf.GetValue("input", "control_mode", ControlMode).AsInt32();
         ArenaScale = cf.GetValue("arena", "scale", ArenaScale).AsSingle();
         ArenaPitch = cf.GetValue("arena", "pitch", ArenaPitch).AsSingle();
@@ -295,7 +313,6 @@ public sealed class UserSettings
         var cf = new ConfigFile();
         cf.SetValue("input", "hand_swap", HandSwap);
         cf.SetValue("input", "dead_zone", DeadZone);
-        cf.SetValue("input", "poke_markers", PokeMarkers);
         cf.SetValue("input", "control_mode", ControlMode);
         if (HasArenaPlacement)
         {
@@ -327,7 +344,8 @@ public sealed class UserSettings
         cf.SetValue("video", "render_scale", RenderScale);
         cf.SetValue("video", "msaa", Msaa);
         cf.SetValue("video", "mixed_reality", MixedReality);
-        cf.SetValue("video", "controller_models", ControllerModels);
+        cf.SetValue("video", "controller_display", ControllerDisplay);
+        cf.SetValue("video", "hand_model", HandModel);
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "weapon_showcase", WeaponShowcase);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));

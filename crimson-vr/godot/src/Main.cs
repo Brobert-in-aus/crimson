@@ -170,6 +170,8 @@ public partial class Main : Node3D
     private XRController3D _leftHand = null!;
     private XRController3D _rightHand = null!;
     private readonly Node3D?[] _controllerModels = new Node3D?[2];
+    private readonly XRNode3D?[] _trackedHandNodes = new XRNode3D?[2];
+    private readonly Node3D?[] _gloveHands = new Node3D?[2];
     private Node3D _arenaRoot = null!;
     // Sibling of _arenaRoot, not a child: the playfield carries its own scale,
     // pitch and placement so growing/tilting the board never drags the menus
@@ -271,7 +273,6 @@ public partial class Main : Node3D
         || _startPrompt is { Pending: true }
         || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen));
     private bool _debug;
-    private readonly MeshInstance3D[] _pokeMarkers = new MeshInstance3D[2];
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
 
     // Hand roles: default left = movement, right = aim/fire (PLAN §1); swap is a
@@ -572,7 +573,7 @@ public partial class Main : Node3D
         _settings.Load();
         _handSwap = _settings.HandSwap;
         _deadZone = _settings.DeadZone;
-        SetControllerModelsVisible(_settings.ControllerModels);
+        ApplyHandAppearance();
 
         // The playfield and everything registered TO it (terrain, entities,
         // positional audio, the scoreboard) hang off PlayfieldRoot, so they
@@ -646,7 +647,8 @@ public partial class Main : Node3D
         _settingsMenu = new SettingsMenu();
         _arenaRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
-            _settings.PokeMarkers, _settings.ControllerModels, (ControlMode)_settings.ControlMode,
+            (ControllerDisplayMode)_settings.ControllerDisplay, _settings.HandModel,
+            (ControlMode)_settings.ControlMode,
             _settings.RenderScale, _settings.Msaa, _settings.MixedReality,
             _mixedRealitySupported,
             LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
@@ -662,21 +664,16 @@ public partial class Main : Node3D
         _settingsMenu.OnDebugChanged += SetDebug;
         _settingsMenu.OnControlModeChanged += m => SetControlMode(m);
         _settingsMenu.OnArenaLayout += OpenArenaLayout;
-        _settingsMenu.OnPokeMarkersChanged += v =>
+        _settingsMenu.OnControllerDisplayChanged += mode =>
         {
-            _settings.PokeMarkers = v;
+            _settings.ControllerDisplay = (int)mode;
+            ApplyHandAppearance();
             _settings.Save();
-            // Turning it off must clear them now: the per-frame updater simply
-            // stops running, so a stale marker would otherwise hang in the air.
-            if (!PokeMarkersVisible)
-            {
-                HidePokeMarkers();
-            }
         };
-        _settingsMenu.OnControllerModelsChanged += v =>
+        _settingsMenu.OnHandModelChanged += model =>
         {
-            _settings.ControllerModels = v;
-            SetControllerModelsVisible(v);
+            _settings.HandModel = model;
+            ApplyHandAppearance();
             _settings.Save();
         };
         _settingsMenu.OnRenderScaleChanged += v => { _settings.RenderScale = v; ApplyRenderQuality(); _settings.Save(); };
@@ -774,23 +771,6 @@ public partial class Main : Node3D
         BuildUiEditables();
         SetLogButtonsVisible(_settings.Debug);
 
-        // Poke-tip markers (world-space). Clean profiles default them on so the
-        // otherwise invisible contact point is discoverable; the player-facing
-        // toggle can hide them, while Debug still forces them visible.
-        for (int i = 0; i < _pokeMarkers.Length; i++)
-        {
-            _pokeMarkers[i] = new MeshInstance3D
-            {
-                Mesh = new SphereMesh { Radius = 0.008f, Height = 0.016f },
-                MaterialOverride = new StandardMaterial3D
-                {
-                    AlbedoColor = new Color(1.0f, 0.9f, 0.2f),
-                    ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                },
-                Visible = false,
-            };
-            AddChild(_pokeMarkers[i]);
-        }
         SetDebug(_settings.Debug); // apply the saved debug state to the diorama
 
         // First-run interaction guide. It teaches the direct-touch control before
@@ -1876,7 +1856,7 @@ public partial class Main : Node3D
         _origin.AddChild(_leftHand);
         _origin.AddChild(_rightHand);
 
-        BuildControllerModels();
+        BuildHandRepresentations();
 
         _handMarkers[0] = MakeHandMarker(new Color(0.2f, 0.5f, 1.0f));
         _handMarkers[1] = MakeHandMarker(new Color(1.0f, 0.3f, 0.25f));
@@ -1884,46 +1864,208 @@ public partial class Main : Node3D
         _rightHand.AddChild(_handMarkers[1]);
     }
 
-    /// <summary>Use the model supplied by the active runtime rather than baking
-    /// Quest-specific geometry into the app. Meta's vendor extension remains the
-    /// reliable Quest path; Godot's standard manager covers OpenXR runtimes that
-    /// implement the promoted render-model extensions.</summary>
-    private void BuildControllerModels()
+    /// <summary>Build every selectable representation once, then switch by
+    /// visibility. Godot's standard render-model manager applies the runtime's
+    /// per-frame component transforms, so triggers and buttons move with input.</summary>
+    private void BuildHandRepresentations()
     {
         XRController3D[] hands = { _leftHand, _rightHand };
-        bool useMetaModels = OS.GetName() == "Android" && ClassDB.ClassExists("OpenXRFbRenderModel");
         for (int i = 0; i < hands.Length; i++)
         {
-            Node3D? model = null;
-            if (useMetaModels)
+            string handTracker = i == 0 ? LeftHandTrackerPath : RightHandTrackerPath;
+            var trackedHand = new XRNode3D
             {
-                model = ClassDB.Instantiate("OpenXRFbRenderModel").AsGodotObject() as Node3D;
-                model?.Set("render_model_type", i);
-            }
-            if (model == null)
+                Name = i == 0 ? "LeftTrackedHand" : "RightTrackedHand",
+                Tracker = handTracker,
+                Pose = "default",
+                ShowWhenTracked = true,
+            };
+            _origin.AddChild(trackedHand);
+            _trackedHandNodes[i] = trackedHand;
+
+            if (_xrActive)
             {
-                model = new OpenXRRenderModelManager
+                // Match Godot's official render-model demo: one manager lives
+                // under each grip-tracked controller, filtered to that
+                // controller and localized back to its grip pose. Generated
+                // OpenXRRenderModel children own placement and animation.
+                var renderManager = new OpenXRRenderModelManager
                 {
+                    Name = "OpenXRRenderManager",
                     Tracker = i == 0
                         ? OpenXRRenderModelManager.RenderModelTracker.LeftHand
                         : OpenXRRenderModelManager.RenderModelTracker.RightHand,
                     MakeLocalToPose = "grip",
                 };
+
+                if (OS.GetName() == "Android")
+                {
+                    var container = new Node3D
+                    {
+                        Name = i == 0 ? "LeftControllerModel" : "RightControllerModel",
+                        Visible = false,
+                    };
+                    hands[i].AddChild(container);
+                    container.AddChild(renderManager);
+
+                    Node3D? metaModel = null;
+                    MetaControllerAnimator? metaAnimator = null;
+                    if (ClassDB.ClassExists("OpenXRFbRenderModel") &&
+                        ClassDB.Instantiate("OpenXRFbRenderModel").AsGodotObject() is Node3D fbModel)
+                    {
+                        metaModel = fbModel;
+                        metaModel.Name = i == 0 ? "LeftMetaRenderModel" : "RightMetaRenderModel";
+                        metaModel.Set("render_model_type", i);
+                        container.AddChild(metaModel);
+
+                        metaAnimator = new MetaControllerAnimator();
+                        container.AddChild(metaAnimator);
+                        metaAnimator.Configure(metaModel, hands[i], i == 0);
+                    }
+
+                    // Keep a graceful fallback, hidden automatically as soon
+                    // as either standards path creates a runtime model.
+                    var touchFallback = new QuestTouchControllerModel
+                    {
+                        Name = "AnimatedTouchFallback",
+                    };
+                    container.AddChild(touchFallback);
+                    touchFallback.Configure(hands[i], i == 0);
+                    var fallback = new RenderModelFallback();
+                    container.AddChild(fallback);
+                    fallback.Configure(renderManager, metaModel, metaAnimator, touchFallback);
+                    _controllerModels[i] = container;
+                }
+                else
+                {
+                    renderManager.Name = i == 0 ? "LeftControllerModel" : "RightControllerModel";
+                    renderManager.Visible = false;
+                    hands[i].AddChild(renderManager);
+                    _controllerModels[i] = renderManager;
+                }
             }
-            model.Name = i == 0 ? "LeftControllerModel" : "RightControllerModel";
-            model.Visible = false;
-            hands[i].AddChild(model);
-            _controllerModels[i] = model;
+
+            BuildTacGlove(i, trackedHand, handTracker);
         }
     }
 
-    private void SetControllerModelsVisible(bool visible)
+    private void BuildTacGlove(int index, XRNode3D trackedHand, string handTracker)
     {
-        for (int i = 0; i < _controllerModels.Length; i++)
+        string side = index == 0 ? "L" : "R";
+        var packed = GD.Load<PackedScene>($"res://third_party/tac_gloves/model/Hand_Glove_low_{side}.gltf");
+        if (packed?.Instantiate<Node3D>() is not { } model)
         {
-            if (_controllerModels[i] is { } model)
+            GD.PushWarning($"CrimsonVR: Tac Glove {side} could not be loaded");
+            return;
+        }
+        var root = new Node3D { Name = index == 0 ? "LeftTacGlove" : "RightTacGlove", Visible = false };
+        trackedHand.AddChild(root);
+        // Hand-tracker skeletons and these XR Tools meshes both use Godot's
+        // humanoid hand convention, so the tracked default pose is applied at
+        // identity. No controller-grip correction belongs on this path.
+        root.AddChild(model);
+
+        Skeleton3D? skeleton = null;
+        foreach (Node child in model.FindChildren("*", "Skeleton3D", true, false))
+        {
+            skeleton = (Skeleton3D)child;
+            break;
+        }
+        if (skeleton == null)
+        {
+            GD.PushWarning($"CrimsonVR: Tac Glove {side} has no hand skeleton");
+            return;
+        }
+        RenameTacGloveBones(skeleton, index == 0);
+        skeleton.AddChild(new XRHandModifier3D
+        {
+            Name = "OpticalHandPose",
+            HandTracker = handTracker,
+            BoneUpdate = XRHandModifier3D.BoneUpdateEnum.Full,
+        });
+
+        _gloveHands[index] = root;
+        ApplyTacGloveMaterial(root, 1);
+    }
+
+    /// <summary>XRHandModifier3D binds by the Godot humanoid hand names. The
+    /// CC0 Tac Glove rig uses Blender-style names, so rename the Skeleton3D
+    /// bones in-place before adding the modifier. Skin weights reference bone
+    /// indices, not names, and remain intact.</summary>
+    private static void RenameTacGloveBones(Skeleton3D skeleton, bool left)
+    {
+        string prefix = left ? "Left" : "Right";
+        string suffix = left ? "_L" : "_R";
+        var stems = new Dictionary<string, string>
+        {
+            ["Wrist"] = "Hand",
+            ["Palm"] = "Palm",
+            ["Thumb_Metacarpal"] = "ThumbMetacarpal",
+            ["Thumb_Proximal"] = "ThumbProximal",
+            ["Thumb_Distal"] = "ThumbDistal",
+            ["Thumb_Tip"] = "ThumbTip",
+            ["Index_Metacarpal"] = "IndexMetacarpal",
+            ["Index_Proximal"] = "IndexProximal",
+            ["Index_Intermediate"] = "IndexIntermediate",
+            ["Index_Distal"] = "IndexDistal",
+            ["Index_Tip"] = "IndexTip",
+            ["Middle_Metacarpal"] = "MiddleMetacarpal",
+            ["Middle_Proximal"] = "MiddleProximal",
+            ["Middle_Intermediate"] = "MiddleIntermediate",
+            ["Middle_Distal"] = "MiddleDistal",
+            ["Middle_Tip"] = "MiddleTip",
+            ["Ring_Metacarpal"] = "RingMetacarpal",
+            ["Ring_Proximal"] = "RingProximal",
+            ["Ring_Intermediate"] = "RingIntermediate",
+            ["Ring_Distal"] = "RingDistal",
+            ["Ring_Tip"] = "RingTip",
+            ["Little_Metacarpal"] = "LittleMetacarpal",
+            ["Little_Proximal"] = "LittleProximal",
+            ["Little_Intermediate"] = "LittleIntermediate",
+            ["Little_Distal"] = "LittleDistal",
+            ["Little_Tip"] = "LittleTip",
+        };
+        int renamed = 0;
+        for (int bone = 0; bone < skeleton.GetBoneCount(); bone++)
+        {
+            string current = skeleton.GetBoneName(bone).ToString();
+            if (!current.EndsWith(suffix, StringComparison.Ordinal))
             {
-                model.Visible = visible;
+                continue;
+            }
+            string stem = current[..^suffix.Length];
+            if (stems.TryGetValue(stem, out string? humanoid))
+            {
+                skeleton.SetBoneName(bone, prefix + humanoid);
+                renamed++;
+            }
+        }
+        GD.Print($"CrimsonVR: renamed {renamed} Tac Glove bones for {prefix} XR hand binding");
+    }
+
+    private static void ApplyTacGloveMaterial(Node root, int handModel)
+    {
+        string materialName = handModel == 2
+            ? "glove_african_dark_camo" : "glove_caucasian_green_camo";
+        var material = GD.Load<Material>($"res://third_party/tac_gloves/materials/{materialName}.tres");
+        foreach (Node child in root.FindChildren("*", "MeshInstance3D", true, false))
+        {
+            ((MeshInstance3D)child).MaterialOverride = material;
+        }
+    }
+
+    private void ApplyHandAppearance()
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            if (_controllerModels[i] is { } controller)
+            {
+                controller.Visible = false;
+            }
+            if (_gloveHands[i] is { } glove)
+            {
+                glove.Visible = false;
+                ApplyTacGloveMaterial(glove, _settings.HandModel);
             }
         }
     }
@@ -1935,22 +2077,21 @@ public partial class Main : Node3D
 
     private void UpdateHandMarkers()
     {
-        bool pokeUi = _assetBootstrapActive
-            || MenuOwnsScreen
-            || _pauseMenu.IsPaused
-            || _perkMenu.Active
-            || _startPrompt.Pending
-            || _questPanel.Active
-            || _endNote.Active
-            || (_sim != null && _sim.GameOver && (_keyboard.Active || _gameOverPanel.Active));
         Update(0, _leftHand);
         Update(1, _rightHand);
 
         void Update(int index, XRController3D hand)
         {
+            bool tracked = hand.GetHasTrackingData();
+            bool opticalHand = HasOpticalHandTracking(index);
             if (_controllerModels[index] is { } controllerModel)
             {
-                controllerModel.Visible = _settings.ControllerModels && hand.GetHasTrackingData();
+                controllerModel.Visible = (ControllerDisplayMode)_settings.ControllerDisplay == ControllerDisplayMode.ControllerModels
+                    && tracked && !opticalHand;
+            }
+            if (_gloveHands[index] is { } glove)
+            {
+                glove.Visible = opticalHand;
             }
             // Guarded because the array holds nullable refs and is populated in
             // BuildRig: safe today, but a marker built behind any condition
@@ -1961,7 +2102,8 @@ public partial class Main : Node3D
             {
                 return;
             }
-            bool visible = pokeUi && HasPokeTracking(hand);
+            bool visible = tracked && (_debug
+                || (!opticalHand && (ControllerDisplayMode)_settings.ControllerDisplay == ControllerDisplayMode.PokeMarkers));
             marker.Visible = visible;
             if (visible)
             {
@@ -2837,42 +2979,6 @@ public partial class Main : Node3D
         // and report even if the native lib failed to load).
         PollMenuPoke();
         UpdateHandMarkers();
-        if (PokeMarkersVisible)
-        {
-            UpdatePokeMarkers();
-        }
-    }
-
-    /// <summary>Whether poke-tip markers should be drawn: either the player asked
-    /// for them outright, or Debug is on and shows every dev overlay.</summary>
-    private bool PokeMarkersVisible => _debug || _settings.PokeMarkers;
-
-    private void HidePokeMarkers()
-    {
-        foreach (MeshInstance3D m in _pokeMarkers)
-        {
-            m.Visible = false;
-        }
-    }
-
-    /// <summary>Show a marker at each controller's poke tip so the physical poke
-    /// point is visible against the menu buttons. No longer debug-only: the tips
-    /// sit over the control rectangle, not the playfield, so they obscure nothing
-    /// during play (see UserSettings.PokeMarkers).</summary>
-    private void UpdatePokeMarkers()
-    {
-        UpdateMarker(0, _leftHand);
-        UpdateMarker(1, _rightHand);
-    }
-
-    private void UpdateMarker(int index, XRController3D hand)
-    {
-        bool tracking = HasPokeTracking(hand);
-        _pokeMarkers[index].Visible = tracking;
-        if (tracking)
-        {
-            _pokeMarkers[index].GlobalPosition = PokeTip(hand);
-        }
     }
 
     /// <summary>Feed controller tips to the diegetic menus (poke) each rendered
@@ -2955,6 +3061,10 @@ public partial class Main : Node3D
             if (_arenaLayoutOpen)
             {
                 _arenaLayout.PollPoke(p);
+                // The preview toggle lives on PerkMenu in the normal Confirm
+                // location. Main-menu options return from this branch early,
+                // so it must be polled here as a peer of ArenaLayoutMenu.
+                _perkMenu.PollPoke(p);
             }
             else if (_vrSettingsOpen)
             {
@@ -3088,12 +3198,6 @@ public partial class Main : Node3D
         // sim — the weapon showcase — is its own setting, reachable from the
         // Debug FX menu, so turning overlays on no longer costs the run its
         // replay.
-        // Debug off no longer implies markers off: the player may have turned them
-        // on in their own right, in which case they stay.
-        if (!PokeMarkersVisible)
-        {
-            HidePokeMarkers();
-        }
     }
 
     /// <summary>0-based insertion rank of a score in the current mode's local
@@ -3226,6 +3330,15 @@ public partial class Main : Node3D
         }
         transform = Transform3D.Identity;
         return false;
+    }
+
+    private static bool HasOpticalHandTracking(int index)
+    {
+        string trackerPath = index == 0 ? LeftHandTrackerPath : RightHandTrackerPath;
+        return XRServer.GetTracker(trackerPath) is XRHandTracker tracker
+            && tracker.HasTrackingData
+            && tracker.HandTrackingSource != XRHandTracker.HandTrackingSourceEnum.Controller
+            && tracker.HandTrackingSource != XRHandTracker.HandTrackingSourceEnum.NotTracked;
     }
 
     /// <summary>Shared projection of a controller onto the CONTROL rectangle
