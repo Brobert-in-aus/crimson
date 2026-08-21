@@ -18,7 +18,7 @@ public sealed partial class CreditsMenu : Node3D
     public event Action? OnBack; public event Action? OnSecret;
     public void Build(float s)
     {
-        Position = new Vector3(0, s * .85f, s * .25f); RotationDegrees = new Vector3(-12, 180, 0);
+        Position = SpatialMenuPlacement.PlayerFacing(s); RotationDegrees = new Vector3(-12, 180, 0);
         ClassicPanel.Build(this, s * 1.25f, s * 1.05f, -.012f);
         if (SmallFont.Shared() is { } font) { _text = new SmallFontLabel(); AddChild(_text); _text.Build(font, s / 570f, Colors.White); _text.Position = new Vector3(0, s * .08f, 0); }
         else { _fallback = new Label3D { FontSize = 65, PixelSize = s / 1200f, Position = new Vector3(0, s * .08f, 0), HorizontalAlignment = HorizontalAlignment.Center }; AddChild(_fallback); }

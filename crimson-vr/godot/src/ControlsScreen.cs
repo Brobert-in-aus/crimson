@@ -27,7 +27,7 @@ public sealed partial class ControlsScreen : Node3D
         _side = s;
         _handSwap = handSwap;
         _mode = mode;
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         float y = s * 0.34f;

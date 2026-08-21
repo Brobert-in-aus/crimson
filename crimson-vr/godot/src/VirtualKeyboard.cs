@@ -34,7 +34,7 @@ public sealed partial class VirtualKeyboard : Node3D
     {
         float s = arenaSideMeters;
         // Lowered from 0.85x side (in-headset: keys sat too high for a seated poke).
-        Position = new Vector3(0.0f, s * 0.70f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(s, heightFactor: 0.70f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         _prompt = MakeLabel("Enter your name", s / 1300.0f, new Color(0.85f, 0.85f, 0.9f), new Vector3(0.0f, s * 0.72f, 0.0f));

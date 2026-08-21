@@ -190,6 +190,7 @@ public partial class Main : Node3D
     private Label3D _recenterFeedback = null!;
     private bool _assetBootstrapActive;
     private bool _assetBootstrapPlaced;
+    private bool _assetImportPending;
     private AssetBootstrapPanel? _assetBootstrapPanel;
 
     // Reticle textures projected onto the play plane: ui_aim = aim-hand crosshair,
@@ -228,6 +229,9 @@ public partial class Main : Node3D
     private StartPrompt _startPrompt = null!;
     private VirtualKeyboard _keyboard = null!;
     private GameOverPanel _gameOverPanel = null!;
+    private SessionErrorPanel _sessionErrorPanel = null!;
+    private int _failedGameMode;
+    private int _failedQuestKey;
     private int _deathTicks;     // pacing counter: death -> results (base death-timer delay)
     // Death cinematic: the view zooms in on the corpse over roughly the death
     // animation's length (16/20 s = 48 ticks), holding until the run resets.
@@ -270,7 +274,7 @@ public partial class Main : Node3D
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _multiplayerLanMenu.IsOpen || _questSelect.IsOpen
         || _statsMenu.IsOpen || _databaseMenu.IsOpen || _highScoresMenu.IsOpen
         || _creditsMenu.IsOpen || _alienZooKeeper.IsOpen
-        || _startPrompt is { Pending: true }
+        || _startPrompt is { Pending: true } || _sessionErrorPanel is { Active: true }
         || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen));
     private bool _debug;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -428,9 +432,23 @@ public partial class Main : Node3D
 
     private void RetryQuestAssetImport()
     {
+        if (_assetImportPending)
+        {
+            return;
+        }
+        _assetImportPending = true;
+        _assetBootstrapPanel?.SetDetail("Checking the Quest asset inbox...", error: false);
+        // Defer the filesystem work so the progress copy renders before the
+        // import begins; repeated pokes are ignored until it finishes.
+        Callable.From(RunQuestAssetImport).CallDeferred();
+    }
+
+    private void RunQuestAssetImport()
+    {
         AssetPackInstaller.Result? result = AssetStore.ImportPendingPack();
         if (result == null)
         {
+            _assetImportPending = false;
             _assetBootstrapPanel?.SetDetail(
                 "No crimson-assets.pack is in the Quest inbox yet.\nRun prepare_assets.ps1 -Quest, then retry.",
                 error: true);
@@ -438,6 +456,7 @@ public partial class Main : Node3D
         }
         if (!result.Success)
         {
+            _assetImportPending = false;
             GD.PushError($"CrimsonVR: {result.Message}");
             _assetBootstrapPanel?.SetDetail(result.Message, error: true);
             return;
@@ -813,6 +832,22 @@ public partial class Main : Node3D
         _gameOverPanel.OnPlayAgain += PlayAgain;
         _gameOverPanel.OnMainMenu += () => { _gameOverPanel.Dismiss(); ReturnToMenu(); };
 
+        _sessionErrorPanel = new SessionErrorPanel();
+        _arenaRoot.AddChild(_sessionErrorPanel);
+        _sessionErrorPanel.Build(ArenaSideMeters);
+        _sessionErrorPanel.OnRetry += () =>
+        {
+            _sessionErrorPanel.Dismiss();
+            StartRun(_failedGameMode, _failedQuestKey);
+        };
+        _sessionErrorPanel.OnMainMenu += () =>
+        {
+            _sessionErrorPanel.Dismiss();
+            SetGameplayVisible(false);
+            _mainMenu.Open();
+            _audio.PlayMusic("crimson_theme");
+        };
+
         // Main menu (boot screen): the original Crimsonland menu art, floating and
         // pokeable, over the terrain diorama. Holds the sim until PLAY is poked.
         _mainMenu = new MainMenu();
@@ -822,7 +857,7 @@ public partial class Main : Node3D
             LoadReticleTex("ui_signCrimson.png"),
             LoadReticleTex("ui_menuItem.png"),
             LoadReticleTex("ui_itemTexts.png"));
-        _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(); };
+        _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(!_settings.TutorialCompleted); };
         _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
         _mainMenu.OnStatistics += () => { _mainMenu.Close(); _statsMenu.Open(); };
         _mainMenu.OnQuit += () => { CaptureWeaponUsage(); GetTree().Quit(); };
@@ -904,6 +939,13 @@ public partial class Main : Node3D
         _tutorialPanel.OnSkip += LeaveTutorial;
         _tutorialPanel.OnPlay += LeaveTutorial;
         _tutorialPanel.OnRepeat += () => StartRun(GameModeTutorial);
+        _tutorialPanel.OnCompleted += () =>
+        {
+            if (_settings.TutorialCompleted) return;
+            _settings.TutorialCompleted = true;
+            _settings.Save();
+            _playGameMenu.SetTutorialRecommended(false);
+        };
 
         // Quest stage/level select, gated by the persisted unlock index.
         _questSelect = new QuestSelectMenu();
@@ -1029,7 +1071,20 @@ public partial class Main : Node3D
         _questSelect.Close();
         _questPanel.Dismiss();
         _questEndShown = false;
-        RestartSession();
+        try
+        {
+            RestartSession();
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr($"CrimsonVR: offline run create failed: {e.Message}");
+            _failedGameMode = gameMode;
+            _failedQuestKey = questKey;
+            _tutorialPanel.SetActive(false);
+            SetGameplayVisible(false);
+            _sessionErrorPanel.Show(e.Message);
+            return;
+        }
         _tutorialPanel.SetActive(gameMode == GameModeTutorial);
         _hud.SetQuestTimeLimit(gameMode == GameModeQuests ? _questSelect.TimeLimitFor(_questKey) : 0);
         SetGameplayVisible(true);
@@ -2516,7 +2571,6 @@ public partial class Main : Node3D
         {
             return;
         }
-
         // Quest end panel (completed or failed) or the 5.10 end note up: hold
         // the sim until a button routes somewhere.
         if (_questPanel.Active || _endNote.Active)
@@ -3084,6 +3138,11 @@ public partial class Main : Node3D
         if (_startPrompt.Pending)
         {
             _startPrompt.PollPoke(p);
+            return;
+        }
+        if (_sessionErrorPanel.Active)
+        {
+            _sessionErrorPanel.PollPoke(p);
             return;
         }
         // Quest end panel (completed or failed): its buttons own the poke.

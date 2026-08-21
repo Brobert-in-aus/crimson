@@ -55,7 +55,7 @@ public sealed partial class GameOverPanel : Node3D
 
         // Same slot as the virtual keyboard: above the arena, yawed to face the
         // player (arena local +z = far edge), slight back-lean.
-        Position = new Vector3(0.0f, s * 0.85f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         // Backing panel. Coplanar overlay quads must be transparent with distinct
@@ -116,7 +116,7 @@ public sealed partial class GameOverPanel : Node3D
             b.Visible = false;
         }
         Scale = Vector3.One * 0.85f;
-        Position = new Vector3(-_side * 1.05f, _side * 0.85f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(_side, horizontalOffset: -_side * 1.05f);
         RotationDegrees = new Vector3(-12.0f, 135.0f, 0.0f);
     }
 
@@ -125,7 +125,7 @@ public sealed partial class GameOverPanel : Node3D
     public void ShowButtons()
     {
         Scale = Vector3.One;
-        Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(_side);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
         _buttonsShown = true;
         foreach (VrButton b in _buttons)
@@ -175,7 +175,7 @@ public sealed partial class GameOverPanel : Node3D
         _hitRatio.Text = $"Hit %: {ratio}%";
 
         Scale = Vector3.One;
-        Position = new Vector3(0.0f, _side * 0.85f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(_side);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
         _buttonsShown = true;
         foreach (VrButton b in _buttons)

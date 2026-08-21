@@ -33,10 +33,11 @@ public sealed partial class AssetBootstrapPanel : Node3D
             new Color(1.0f, 0.72f, 0.25f), s / 900.0f);
         AddLabel(
             "CrimsonVR does not include Crimsonland art or audio.\n\n"
-            + "On your PC, open the Crimson checkout and run:\n"
-            + "crimson-vr\\tools\\prepare_assets.ps1 -Quest\n\n"
-            + "Use Crimsonland Classic from GOG Extras, not the 2014 HD remake.\n"
-            + "The helper transfers your assets locally; nothing is uploaded.",
+            + "1. On your PC, open the Crimson checkout.\n"
+            + "2. Run crimson-vr\\tools\\prepare_assets.ps1 -Quest\n"
+            + "3. Keep this headset connected, then poke Retry Import.\n\n"
+            + "Use GOG Extras: Crimsonland Classic (not the 2014 HD remake).\n"
+            + "Your files transfer locally and are never uploaded.",
             s * 0.08f, 56, new Color(0.9f, 0.92f, 0.96f), s / 1050.0f);
 
         _detail = AddLabel(error ?? "After transfer, poke Retry Import.",

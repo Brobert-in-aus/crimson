@@ -30,8 +30,12 @@ public sealed partial class MainMenu : Node3D
     private VrMenuItem _options = null!;
     private VrMenuItem _statistics = null!;
     private VrMenuItem _quit = null!;
+    private VrButton _confirmQuit = null!;
+    private VrButton _cancelQuit = null!;
+    private Label3D _quitWarning = null!;
 
     public bool IsOpen { get; private set; }
+    public bool QuitConfirmationPending { get; private set; }
 
     public event Action? OnPlay;
     public event Action? OnOptions;
@@ -46,12 +50,10 @@ public sealed partial class MainMenu : Node3D
         // (RecenterArena yaws the arena so a 180 deg yaw faces the near/player
         // side; the small back-lean tips the top away). Vertical Label3D/quad
         // content reads upright under this transform.
-        // Shared menu anchor: elevated above the arena and pushed back to ~3/4 of
-        // the way to the far edge (arena-local z spans -s/2..+s/2). Every menu uses
-        // this exact transform so all their items share ONE plane — poking Back on
-        // one and having another appear can't carry the finger into a button at a
-        // different depth (the instant-fire cause). Keep in sync across menus.
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        // Every player-facing surface uses one tested depth contract. Keeping
+        // transitions coplanar prevents a newly-opened menu from appearing around
+        // the hand that just operated the previous one.
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         // The crimson logo up top (ui_signCrimson is 512x128 -> 4:1).
@@ -89,7 +91,45 @@ public sealed partial class MainMenu : Node3D
         _play.OnPress += () => OnPlay?.Invoke();
         _options.OnPress += () => OnOptions?.Invoke();
         _statistics.OnPress += () => OnStatistics?.Invoke();
-        _quit.OnPress += () => OnQuit?.Invoke();
+        _quit.OnPress += () => SetQuitConfirmation(true);
+
+        // Quitting the app is deliberately not a repeat press on the original
+        // target. The confirmation sits about 15 cm ABOVE Quit; after a player
+        // puts on or hands over the headset, a hand left at Quit's height cannot
+        // terminate the app when the confirmation state appears.
+        float confirmW = s * 0.65f;
+        float confirmH = s * 0.13f;
+        _quitWarning = new Label3D
+        {
+            Text = "Quit CrimsonVR?",
+            FontSize = 82,
+            PixelSize = s / 1200.0f,
+            Modulate = new Color(1.0f, 0.72f, 0.52f),
+            OutlineSize = 20,
+            OutlineModulate = Colors.Black,
+            Position = new Vector3(0.0f, s * 0.34f, 0.002f),
+            NoDepthTest = true,
+            Visible = false,
+        };
+        AddChild(_quitWarning);
+
+        _confirmQuit = new VrButton();
+        AddChild(_confirmQuit);
+        _confirmQuit.BuildClassic(confirmW, confirmH, "Confirm Quit");
+        _confirmQuit.Position = new Vector3(0.0f, s * 0.15f, 0.0f);
+        _confirmQuit.OnPress += () =>
+        {
+            SetQuitConfirmation(false);
+            OnQuit?.Invoke();
+        };
+        _confirmQuit.Visible = false;
+
+        _cancelQuit = new VrButton();
+        AddChild(_cancelQuit);
+        _cancelQuit.BuildClassic(confirmW, confirmH, "Go Back");
+        _cancelQuit.Position = new Vector3(0.0f, -s * 0.20f, 0.0f);
+        _cancelQuit.OnPress += () => SetQuitConfirmation(false);
+        _cancelQuit.Visible = false;
 
         // Statistics opens the stats + high-scores screen (wired in Main).
 
@@ -111,6 +151,7 @@ public sealed partial class MainMenu : Node3D
     {
         IsOpen = true;
         Visible = true;
+        SetQuitConfirmation(false);
         // Re-arm + start the settle window so a finger lingering where an item pops
         // up (e.g. returning from Options with the hand over Quit) can't instant-fire.
         _play.ResetPress();
@@ -122,6 +163,7 @@ public sealed partial class MainMenu : Node3D
     public void Close()
     {
         IsOpen = false;
+        SetQuitConfirmation(false);
         Visible = false;
         _play.ResetPress();
         _options.ResetPress();
@@ -135,9 +177,34 @@ public sealed partial class MainMenu : Node3D
         {
             return;
         }
+        if (QuitConfirmationPending)
+        {
+            _confirmQuit.PollPoke(probes);
+            _cancelQuit.PollPoke(probes);
+            return;
+        }
         _play.PollPoke(probes);
         _options.PollPoke(probes);
         _statistics.PollPoke(probes);
         _quit.PollPoke(probes);
+    }
+
+    private void SetQuitConfirmation(bool pending)
+    {
+        QuitConfirmationPending = pending;
+        _play.Visible = !pending;
+        _options.Visible = !pending;
+        _statistics.Visible = !pending;
+        _quit.Visible = !pending;
+        _quitWarning.Visible = pending;
+        _confirmQuit.Visible = pending;
+        _cancelQuit.Visible = pending;
+
+        _play.ResetPress();
+        _options.ResetPress();
+        _statistics.ResetPress();
+        _quit.ResetPress();
+        _confirmQuit.ResetPress();
+        _cancelQuit.ResetPress();
     }
 }

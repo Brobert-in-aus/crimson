@@ -64,7 +64,7 @@ public sealed partial class MultiplayerLanMenu : Node3D
     {
         float s = arenaSideMeters;
         _side = s;
-        Position = new Vector3(0, s * 0.85f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12, 180, 0);
         ClassicPanel.Build(this, s * 1.18f, s * 1.35f, z: -0.012f);
 

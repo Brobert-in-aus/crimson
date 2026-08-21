@@ -20,29 +20,24 @@ public sealed partial class ValidationChecklist : Node3D
     // failures and work that genuinely still needs testing after an update.
     private static readonly (string Id, string Label)[] Items =
     {
-        // The 2026-08-09 headset pass selected every previous row except these
-        // four. Keep only genuinely untested work, the revised vignette seam
-        // mask, and the fresh UI/layout changes below.
-        ("spriteht", "Sprite height slider seats the entities"),
-        ("mrvignseam", "MR: seam fades to 70% dark by 1/3 margin"),
-        ("mrproject", "Projectiles leave diorama, fly on, then despawn"),
-        ("mrfadeback", "Enemies fade smoothly through the outer margin"),
-        ("assetboot", "No-assets boot: clear recovery screen + Retry"),
-        ("vrpages", "VR Settings: both pages fit and navigate cleanly"),
-        ("editpreview", "Edit: moving sprites + all 7 perk cards are visible"),
-        ("editclear", "Edit: mirrored buttons and xN clear perk cards"),
-        ("editperktoggle-v4", "Edit: preview toggle works from main + pause menus"),
-        ("editheight-v2", "Edit: height 0=floor, 1=up; defaults 0.5 m"),
-        ("edittabletop-v3", "Tabletop edit: size button; flat, no distance"),
-        ("editrotation-v2", "Edit: button pitch follows controller rotation"),
-        ("cabinetbuttons-v2", "Cabinet reset uses Tabletop button positions"),
-        ("handdisplay-v6", "Official runtime models + optical glove joints animate"),
-        ("layoutdefaults", "Clean profile starts at the tuned arena layout"),
-        ("lan-survival", "LAN Survival: PC/Quest host + join both work"),
-        ("lan-rush", "LAN Rush: PC/Quest host + join both work"),
-        ("lan-slots", "LAN: Quest controls correctly in slots 2-4"),
-        ("lan-playerfx", "LAN: every player's aura, shield and laser render"),
-        ("lan-results", "LAN results show local player stats + player count"),
+        // Fresh 2026-08-22 batch: only questions that require a worn headset,
+        // tracked hands/controllers, stereo depth, or a second network peer.
+        ("ux0822-freshboot", "Fresh boot: recovery then first-run appear correctly"),
+        ("ux0822-menudistance", "Menus + results/perks sit at a comfortable depth"),
+        ("ux0822-menureach", "Seated poke reaches every menu row comfortably"),
+        ("ux0822-menulegibility", "Menu text is crisp and readable in both eyes"),
+        ("ux0822-quitsafe", "Quit confirmations require a clear vertical move"),
+        ("ux0822-tutorialentry", "Play recommends Tutorial without blocking modes"),
+        ("ux0822-tutorialfull", "Tutorial clears the arena and reaches completion"),
+        ("ux0822-pausetrack", "Pause and Level Up are easy to find and reach"),
+        ("ux0822-perks", "Perk inspect/confirm flow prevents accidental picks"),
+        ("ux0822-vrsettings", "Both VR Settings pages fit and labels are clear"),
+        ("ux0822-layoutcab", "Cabinet edit defaults, rotation and preview work"),
+        ("ux0822-layouttable", "Tabletop is flat; size and height controls work"),
+        ("ux0822-controllers", "Controller poses, buttons and both sticks animate"),
+        ("ux0822-hands", "Optical glove joints follow tracked hands one-to-one"),
+        ("ux0822-rayneed", "Direct poke remains comfortable without a ray option"),
+        ("ux0822-lan", "PC/Quest host + join, slots, effects and results work"),
     };
 
     private const int PerPage = 4;

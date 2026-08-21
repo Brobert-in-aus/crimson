@@ -43,7 +43,7 @@ public sealed partial class QuestResultPanel : Node3D
     public void Build(float arenaSideMeters)
     {
         float s = arenaSideMeters;
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         ClassicPanel.Build(this, s * 1.1f, s * 1.15f, z: -0.012f);

@@ -14,7 +14,7 @@ public sealed partial class TutorialPanel : Node3D
 {
     private static readonly string[] Prompts =
     {
-        "Welcome! This tutorial teaches Crimsonland in VR.",
+        "Welcome! This tutorial teaches Crimsonland in VR. Pause is beside your control area.",
         "Move: hold a pinch or trigger with your movement hand and point where you want to go.",
         "Walk over the bonuses to pick them up.",
         "Keep moving, then pinch or hold trigger with your aim hand to shoot.",
@@ -43,11 +43,13 @@ public sealed partial class TutorialPanel : Node3D
     private VrButton _play = null!;
     private VrButton _repeat = null!;
     private int _stage = -1;
+    private bool _completionSignalled;
 
     public bool Active { get; private set; }
     public event Action? OnSkip;
     public event Action? OnPlay;
     public event Action? OnRepeat;
+    public event Action? OnCompleted;
 
     public void Build(float arenaSideMeters)
     {
@@ -112,6 +114,7 @@ public sealed partial class TutorialPanel : Node3D
         Active = active;
         Visible = active;
         _stage = -1;
+        _completionSignalled = false;
         if (active)
         {
             _skip.ResetPress();
@@ -140,6 +143,11 @@ public sealed partial class TutorialPanel : Node3D
         if (_fallback != null) _fallback.Text = prompt + (string.IsNullOrEmpty(hint) ? string.Empty : "\n\n" + hint);
 
         bool complete = stage == 8;
+        if (complete && !_completionSignalled)
+        {
+            _completionSignalled = true;
+            OnCompleted?.Invoke();
+        }
         _skip.Visible = !complete && stage >= 0;
         _play.Visible = complete;
         _repeat.Visible = complete;

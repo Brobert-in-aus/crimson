@@ -8,38 +8,54 @@ asset-free APK from source without requiring the user to install Godot, Zig,
 Windows/Linux personal packages follow the parallel policy and workflow in
 [`pcvr-ci.md`](pcvr-ci.md).
 
-## Why this is not a normal public-fork artifact
+## Distribution boundary
 
 All forks of a public GitHub repository are public. Workflow artifacts in a
 public repository can be downloaded by any signed-in GitHub user with read
 access. Uploading `CrimsonVR.quest.apk` from a public fork would therefore be
 binary redistribution, even with one-day retention.
 
-The no-grant flow is instead:
+The workflow is a technical containment measure, not permission or legal
+advice. As of 2026-08-22, the upstream repository has no detected licence file.
+If the
+maintainer does not have permission to distribute an upstream-linked APK, do
+not send a maintainer-built APK to testers merely because it came from a private
+workflow. Use the tester-owned build path below, and obtain legal advice if the
+source-copy or binary boundary is uncertain.
 
-1. Import or mirror this repository into a new **private standalone GitHub
-   repository**. Do not use GitHub's Fork button, because a public fork cannot
-   be made private.
+The no-publication flow is instead:
+
+1. Each tester imports or mirrors the approved source revision into their own
+   **private standalone GitHub repository**. Do not use GitHub's Fork button,
+   because a public fork cannot be made private.
 2. Ensure `.github/workflows/quest.yml` is on that repository's default branch.
 3. Open **Actions -> Quest personal build -> Run workflow**.
 4. Set `publish_artifact` to `true`.
-5. Download `CrimsonVR-Quest-*` as soon as the run completes. It expires after
-   one day.
-6. Keep both the APK and `crimsonvr-ci.keystore`. The key and password recorded
-   in `QUEST-PERSONAL-BUILD.txt` are required to sign an in-place update. A new
-   CI run currently generates a new key, so installing its APK requires
-   uninstalling the previous build unless the saved key is supplied locally.
+5. Download the complete `CrimsonVR-Quest-*` bundle as soon as the run
+   completes. It expires after one day.
+6. Follow [`quest-playtest.md`](quest-playtest.md) to preserve the signing key,
+   install the APK, supply locally owned assets, and record results.
 
 On a public repository, leave `publish_artifact=false`. CI performs the entire
 clean build and payload validation but deliberately uploads no binary.
 
 ## Fresh Quest install
 
-The private build artifact contains the APK, its generated signing keystore, and
-`QUEST-PERSONAL-BUILD.txt`. Preserve all three. Because a new workflow run
-currently generates a new key, replacing an existing CrimsonVR install normally
-requires uninstalling `xyz.crimsonvr.app`; that erases its settings, scores,
-imported assets, and replays. Pull anything valuable first.
+The private build artifact contains the APK, its signing keystore, and
+`QUEST-PERSONAL-BUILD.txt`. Preserve all three. After the first build, encode
+the downloaded keystore and save it as the private repository Actions secret
+`QUEST_KEYSTORE_BASE64`:
+
+```powershell
+$bytes = [IO.File]::ReadAllBytes('.\crimsonvr-ci.keystore')
+[Convert]::ToBase64String($bytes) | gh secret set QUEST_KEYSTORE_BASE64 --repo OWNER/REPOSITORY
+```
+
+Later workflow runs restore that key and can update the installed APK without
+deleting settings, scores, imported assets, checklist results, or replays. The
+password and alias remain the personal-build values recorded in the manifest.
+If the secret is absent, CI generates a new key and says so in both the log and
+manifest; that APK requires uninstalling any differently signed build first.
 
 For a maintainer checkout with ADB available, stage a known-good locally created
 asset pack outside app storage and use the guarded clean-install script. Its
@@ -72,7 +88,8 @@ artifact hashes, device validation, and legal disposition in the canonical
 [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
 evidence table.
 
-The workflow is manually triggered, needs no repository secrets, and pins:
+The workflow is manually triggered. Its first run needs no repository secrets;
+repeat in-place updates use the optional `QUEST_KEYSTORE_BASE64` secret. It pins:
 
 - Windows Server 2025;
 - .NET 9;

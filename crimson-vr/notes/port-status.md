@@ -6,7 +6,7 @@ and what's still missing to reach faithful parity with the base game. The
 work is almost entirely the **presentation + interaction** layer, so most gaps
 below are "not surfaced in VR yet", not "not simulated".
 
-_Last updated: 2026-08-13._
+_Last updated: 2026-08-22._
 
 ## Release readiness
 
@@ -30,6 +30,9 @@ release approval.
   them to controller/hand language and provides Skip, Repeat and Play-a-game
   exits. Practice-round copy explicitly requires collecting each dropped
   power-up as well as clearing its wave, matching the director's advance gate.
+  On a profile that has not completed it, Play Game moves **Tutorial - Start
+  Here** to the first row without blocking the other modes. Completion persists
+  and restores the normal ordering.
 - **Typo'Shooter remains deliberately unsurfaced.** A poke keyboard is not a
   viable real-time combat input. It needs a separate voice or physical-keyboard
   design; this is a product/input decision, not missing simulation work.
@@ -63,6 +66,9 @@ release approval.
   base game's pulsing additive menu **cursor** (`ui/cursor.py:41-92`) has no VR
   analog by design (poke interaction) — `ui_cursor` is repurposed as the
   move-hand reticle.
+- Offline run-creation failure is recoverable in-headset through a dedicated
+  Retry/Main Menu panel. The asset-free startup screen presents numbered setup
+  instructions, visible import progress, and duplicate-poke protection.
 - **Survival, Rush, Quests and Tutorial gameplay** rendered as the diorama.
 - **Pause** menu (flat toggle + Resume / Settings / Exit to Main Menu). Leaving
   a run requires a consequence confirmation; the main menu's Quit exits the app. **[audit]** The base pause menu
@@ -72,8 +78,9 @@ release approval.
   (ESC resumes); VR is Resume/Settings/Quit.
 - **Options** screen mirroring the applicable base-game controls (segmented
   `ui_rectOn/Off` sliders: Sound / Music / Graphics detail) + a **VR
-  Settings** submenu (movement hand, dead zone, debug overlays, **render-scale
-  supersampling 0.6-1.6× and MSAA Off/2×/4×** — the latter two were undocumented;
+  Settings** submenu (movement hand, named movement dead-zone levels, debug
+  overlays, **named resolution levels backed by 0.6-1.6× render scale and named
+  edge smoothing backed by MSAA Off/2×/4×**;
   `SettingsMenu.cs:99-118`, `Main.cs:405-417`).
   The inert "UI Info texts" checkbox was removed from the player-facing menu on
   2026-08-11; the persisted field remains only for config compatibility until

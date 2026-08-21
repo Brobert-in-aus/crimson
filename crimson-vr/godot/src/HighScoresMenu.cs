@@ -26,7 +26,7 @@ public sealed partial class HighScoresMenu : Node3D
     public void Build(float s, UserSettings settings)
     {
         _settings = settings;
-        Position = new Vector3(0, s * .85f, s * .25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12, 180, 0);
         ClassicPanel.Build(this, s * 1.65f, s * 1.25f, -.012f);
         if (SmallFont.Shared() is { } font)

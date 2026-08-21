@@ -16,7 +16,7 @@ public sealed partial class StatsMenu : Node3D
 
     public void Build(float s, UserSettings settings)
     {
-        _settings = settings; Position = new Vector3(0, s * .85f, s * .25f); RotationDegrees = new Vector3(-12, 180, 0);
+        _settings = settings; Position = SpatialMenuPlacement.PlayerFacing(s); RotationDegrees = new Vector3(-12, 180, 0);
         ClassicPanel.Build(this, s * 1.5f, s * 1.15f, -.012f);
         ClassicTitle.BuildRow(this, s * .5f, ClassicTitle.RowStatistics, s * .47f);
         if (SmallFont.Shared() is { } font) { _statsText = new SmallFontLabel(); AddChild(_statsText); _statsText.Build(font, s / 620f, new Color(1,1,1,.85f)); _statsText.Position = new Vector3(0, s * .13f, 0); }

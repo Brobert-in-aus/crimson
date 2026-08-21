@@ -167,7 +167,7 @@ public sealed partial class PerkMenu : Node3D
         // Float above the arena centre facing the player. RecenterArena yaws the
         // arena so local +z is the far edge, so a 180 deg yaw faces the near
         // (player) side; a small back-lean tips the tops away from the player.
-        Position = new Vector3(0.0f, arenaSideMeters * 0.8f, 0.0f);
+        Position = SpatialMenuPlacement.PlayerFacing(arenaSideMeters, heightFactor: 0.8f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
         _cardW = arenaSideMeters * 0.26f;
         _cardGap = arenaSideMeters * 0.05f;

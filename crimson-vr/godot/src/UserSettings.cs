@@ -43,6 +43,7 @@ public sealed class UserSettings
     public bool HandSwap;
     public float DeadZone = VrInput.DefaultDeadZoneGameUnits;
     public bool FirstRunDone;
+    public bool TutorialCompleted;
     public string PlayerName = string.Empty;
     public bool Debug;
 
@@ -156,6 +157,9 @@ public sealed class UserSettings
     public readonly Dictionary<string, ModeStats> Stats = new();
     // In-headset validation checklist results, item id -> 0 untested / 1 pass / 2 fail.
     public readonly Dictionary<string, int> Checklist = new();
+    // Validation batches are deliberately disposable. A version bump starts a
+    // clean headset pass without carrying old PASS/FAIL state into new work.
+    private const int ChecklistVersion = 2;
 
     public void Load()
     {
@@ -167,6 +171,7 @@ public sealed class UserSettings
         HandSwap = cf.GetValue("input", "hand_swap", HandSwap).AsBool();
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
+        TutorialCompleted = cf.GetValue("game", "tutorial_completed", TutorialCompleted).AsBool();
         PlayerName = cf.GetValue("game", "player_name", PlayerName).AsString();
         Debug = cf.GetValue("dev", "debug", Debug).AsBool();
         WeaponShowcase = cf.GetValue("dev", "weapon_showcase", WeaponShowcase).AsBool();
@@ -288,7 +293,9 @@ public sealed class UserSettings
         }
 
         Checklist.Clear();
-        string ck = cf.GetValue("dev", "checklist", string.Empty).AsString();
+        string ck = cf.GetValue("dev", "checklist_version", 0).AsInt32() == ChecklistVersion
+            ? cf.GetValue("dev", "checklist", string.Empty).AsString()
+            : string.Empty;
         if (!string.IsNullOrEmpty(ck))
         {
             try
@@ -327,6 +334,7 @@ public sealed class UserSettings
             cf.SetValue("ui_layout", kv.Key, kv.Value);
         }
         cf.SetValue("game", "first_run_done", FirstRunDone);
+        cf.SetValue("game", "tutorial_completed", TutorialCompleted);
         cf.SetValue("game", "player_name", PlayerName);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);
@@ -349,6 +357,7 @@ public sealed class UserSettings
         cf.SetValue("dev", "debug", Debug);
         cf.SetValue("dev", "weapon_showcase", WeaponShowcase);
         cf.SetValue("dev", "checklist", JsonSerializer.Serialize(Checklist));
+        cf.SetValue("dev", "checklist_version", ChecklistVersion);
         cf.Save(ConfigPath);
     }
 

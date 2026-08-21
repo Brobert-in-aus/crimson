@@ -31,9 +31,12 @@ checklist as the canonical go/no-go record.
 
 VR packages are deliberately asset-free. Players create a local pack from a
 user-owned GOG Crimsonland Classic 1.9.93 installation and import it on first
-launch; see the [asset-import guide](crimson-vr/notes/asset-import.md). Quest and
+launch through an in-headset recovery flow with retry feedback. New profiles
+are guided toward the optional VR tutorial while retaining immediate access to
+every mode; see the [asset-import guide](crimson-vr/notes/asset-import.md). Quest and
 PCVR personal builds are documented in the [Quest CI](crimson-vr/notes/quest-ci.md)
-and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides. The Quest-specific runtime
+and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides; small private headset tests
+use the [Quest playtester handoff](crimson-vr/notes/quest-playtest.md). The Quest-specific runtime
 controller model and animation integration is documented in the
 [Godot controller-model guide](crimson-vr/notes/godot-quest-controller-models.md).
 Where binary redistribution is

@@ -61,6 +61,28 @@ jobs:
           path: ${{ env.QUEST_CACHE }}
           key: quest-tools-godot-4.7-vendors-5.1.0
 
+      - name: Restore repeat-update signing key
+        shell: pwsh
+        env:
+          QUEST_KEYSTORE_BASE64: ${{ secrets.QUEST_KEYSTORE_BASE64 }}
+        run: |
+          $path = Join-Path $env:GITHUB_WORKSPACE 'artifacts/crimsonvr-ci.keystore'
+          New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+          if ([string]::IsNullOrWhiteSpace($env:QUEST_KEYSTORE_BASE64)) {
+            Add-Content $env:GITHUB_ENV 'QUEST_SIGNING_KEY_SOURCE=generated_for_this_run'
+            Write-Host 'No saved signing key configured; this run will generate one.'
+            exit 0
+          }
+          try {
+            $encoded = $env:QUEST_KEYSTORE_BASE64 -replace '\s', ''
+            [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($encoded))
+          }
+          catch {
+            throw 'QUEST_KEYSTORE_BASE64 is not a valid base64-encoded keystore.'
+          }
+          Add-Content $env:GITHUB_ENV 'QUEST_SIGNING_KEY_SOURCE=repository_secret'
+          Write-Host 'Restored the saved signing key for in-place APK updates.'
+
       - name: Restore Quest toolchain
         id: quest-tools
         shell: pwsh
@@ -95,6 +117,7 @@ jobs:
             "commit=${{ github.sha }}"
             "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             "apk_sha256=$((Get-FileHash $apk -Algorithm SHA256).Hash.ToLowerInvariant())"
+            "signing_key_source=$env:QUEST_SIGNING_KEY_SOURCE"
             'keystore_alias=androiddebugkey'
             'keystore_password=android'
             'Keep the keystore: Android requires the same key for in-place updates.'
@@ -111,6 +134,18 @@ jobs:
             artifacts/QUEST-PERSONAL-BUILD.txt
           if-no-files-found: error
           retention-days: 1
+
+      - name: Private playtest summary
+        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+        shell: pwsh
+        run: |
+          Add-Content $env:GITHUB_STEP_SUMMARY @'
+          The asset-free playtest bundle is available for one day. Download all
+          three files. Before the next build, save the keystore as the private
+          repository secret `QUEST_KEYSTORE_BASE64` to permit in-place updates.
+          Each tester must supply Crimsonland Classic assets locally; never
+          upload an asset pack to GitHub.
+          '@
 
       - name: Public validation summary
         if: ${{ !inputs.publish_artifact }}

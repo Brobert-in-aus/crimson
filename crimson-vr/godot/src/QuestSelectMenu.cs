@@ -47,7 +47,7 @@ public sealed partial class QuestSelectMenu : Node3D
         LoadQuestTable();
 
         // Shared menu anchor (one plane for all menus).
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         // Classic backdrop + the ui_textQuest title banner.

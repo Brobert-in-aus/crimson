@@ -53,6 +53,7 @@ public sealed partial class PauseMenu : Node3D
     private VrButton _recenter = null!;
     private VrButton _settings = null!;
     private VrButton _quit = null!;
+    private VrButton _confirmQuit = null!;
     private Label3D _exitWarning = null!;
     private bool _confirmExit;
 
@@ -138,8 +139,7 @@ public sealed partial class PauseMenu : Node3D
         // perk menu): Resume / Recenter / Settings / Exit stacked vertically.
         _panel = new Node3D
         {
-            // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
-            Position = new Vector3(0.0f, s * 0.85f, s * 0.25f),
+            Position = SpatialMenuPlacement.PlayerFacing(s),
             RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f),
             Visible = false,
         };
@@ -152,6 +152,14 @@ public sealed partial class PauseMenu : Node3D
         _recenter = MakeButton(_panel, "Recenter View", new Color(0.45f, 0.72f, 0.78f), bw, bh, 1, gap);
         _settings = MakeButton(_panel, "Settings", new Color(0.5f, 0.6f, 0.85f), bw, bh, 2, gap);
         _quit = MakeButton(_panel, "Exit to Main Menu", new Color(0.85f, 0.35f, 0.3f), bw, bh, 3, gap);
+        _confirmQuit = new VrButton();
+        _panel.AddChild(_confirmQuit);
+        _confirmQuit.Build(bw, bh, "Confirm Exit", new Color(0.85f, 0.35f, 0.3f), plate: true);
+        // The original Exit target is at -0.33 side-m, while confirmation is
+        // centred here. A hand left at Exit's height can only see empty space
+        // after the first press; confirming requires an intentional upward move.
+        _confirmQuit.Position = Vector3.Zero;
+        _confirmQuit.Visible = false;
         _exitWarning = new Label3D
         {
             Text = "Exit this run? Current progress will be lost.",
@@ -168,7 +176,12 @@ public sealed partial class PauseMenu : Node3D
         _resume.OnPress += ResumeOrCancelExit;
         _recenter.OnPress += () => OnRecenter?.Invoke();
         _settings.OnPress += () => OnSettings?.Invoke();
-        _quit.OnPress += RequestOrConfirmExit;
+        _quit.OnPress += () => SetExitConfirmation(true);
+        _confirmQuit.OnPress += () =>
+        {
+            SetExitConfirmation(false);
+            OnQuit?.Invoke();
+        };
     }
 
     private static VrButton MakeButton(Node3D parent, string text, Color color, float w, float h, int row, float gap)
@@ -234,17 +247,6 @@ public sealed partial class PauseMenu : Node3D
         SetPaused(false);
     }
 
-    private void RequestOrConfirmExit()
-    {
-        if (!_confirmExit)
-        {
-            SetExitConfirmation(true);
-            return;
-        }
-        SetExitConfirmation(false);
-        OnQuit?.Invoke();
-    }
-
     private void SetExitConfirmation(bool confirm)
     {
         _confirmExit = confirm;
@@ -252,11 +254,13 @@ public sealed partial class PauseMenu : Node3D
         _resume.SetText(confirm ? "Keep Playing" : "Resume");
         _settings.Visible = !confirm;
         _recenter.Visible = !confirm;
-        _quit.SetText(confirm ? "Exit Run" : "Exit to Main Menu");
+        _quit.Visible = !confirm;
+        _confirmQuit.Visible = confirm;
         _resume.ResetPress();
         _recenter.ResetPress();
         _settings.ResetPress();
         _quit.ResetPress();
+        _confirmQuit.ResetPress();
     }
 
     private void SetPaused(bool paused)
@@ -270,6 +274,7 @@ public sealed partial class PauseMenu : Node3D
             _settings.ResetPress();
             _recenter.ResetPress();
             _quit.ResetPress();
+            _confirmQuit.ResetPress();
         }
     }
 
@@ -298,7 +303,8 @@ public sealed partial class PauseMenu : Node3D
             {
                 _settings.PollPoke(probes);
             }
-            _quit.PollPoke(probes);
+            if (_quit.Visible) _quit.PollPoke(probes);
+            if (_confirmQuit.Visible) _confirmQuit.PollPoke(probes);
         }
     }
 

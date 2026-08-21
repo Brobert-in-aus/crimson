@@ -213,3 +213,41 @@ Implemented 2026-08-13:
 6. Compare seven perks, switch selection between cards, then confirm; with
    accumulated picks, verify the confirming hand does not contact the next offer.
 7. Re-check expanded/localized text and the smallest supported render scale.
+
+## 2026-08-22 general UX follow-up
+
+This pass separates issues that can be resolved from code and flow inspection
+from questions that require a worn headset. Returning players retain the direct
+Main Menu path; new players are guided toward first value without being forced
+through the tutorial.
+
+Implemented without headset interaction:
+
+- The first Play Game visit places **Tutorial - Start Here** first. All game
+  modes remain available, and completing the tutorial restores the normal mode
+  order permanently.
+- Offline session-creation failures now open a player-facing recovery panel with
+  **Retry** and **Main Menu**, rather than leaving the player in a blank or
+  partially transitioned state.
+- The missing-assets flow uses numbered PC/headset steps and shows immediate
+  "Checking" feedback while preventing duplicate imports.
+- VR Display uses player-language quality labels (Resolution and Edge
+  smoothing), and the movement dead zone is expressed as Off/Low/Medium/High.
+- The tutorial's opening prompt points out Pause.
+- Validation results are batch-versioned. Batch 2 clears the previous checklist
+  and contains only stereo, reach, tracked-input, layout, and network questions
+  that cannot be settled headlessly.
+
+Fresh headset checklist (batch 2): first-boot order; menu depth, reach and stereo
+legibility; quit-confirm separation; tutorial recommendation and completion;
+Pause/Level Up discovery; perk confirmation safety; both VR Settings pages;
+Cabinet and Tabletop layout editing; animated controllers; optical-hand joint
+matching; whether direct poke needs a ray fallback; and full PC/Quest LAN flow.
+
+Deferred until operated testing:
+
+- A direct-ray alternative, because target acquisition, accidental activation,
+  and mode-switch cost must be measured with controllers and hands before
+  choosing the interaction rule.
+- Further spatial offsets, typography sizes, and environmental grounding, which
+  depend on stereo comfort and physical reach at the new shared menu depth.

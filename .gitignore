@@ -38,6 +38,8 @@ htmlcov/
 screenshots/
 # Locally generated user-owned VR asset bundles must never be committed.
 *.pack
+# Local/CI VR packages are distribution artifacts, never source inputs.
+*.apk
 zig-cache/
 .zig-cache/
 zig-pkg/

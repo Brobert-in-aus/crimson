@@ -78,7 +78,7 @@ public sealed partial class SettingsMenu : Node3D
         _controlModeState = controlMode;
 
         // Shared menu anchor (see MainMenu): all menus coplanar + pushed back.
-        Position = new Vector3(0.0f, s * 0.9f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s, heightFactor: 0.9f);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         float bw = s * 0.7f;
@@ -245,9 +245,20 @@ public sealed partial class SettingsMenu : Node3D
     private static int RenderScaleToValue(float scale) =>
         Mathf.Clamp(Mathf.RoundToInt((scale - RenderScaleBase) / RenderScaleStep), 0, 10);
 
-    private static string RenderScaleText(float scale) => $"Render scale: {scale:0.0}x";
+    private static string RenderScaleText(float scale) => "Resolution: " + (scale switch
+    {
+        <= 0.9f => "Performance",
+        <= 1.2f => "Balanced",
+        <= 1.4f => "High",
+        _ => "Ultra",
+    });
 
-    private string AaText() => _msaaState <= 0 ? "Anti-aliasing: Off" : $"Anti-aliasing: {_msaaState}x";
+    private string AaText() => _msaaState switch
+    {
+        <= 0 => "Edge smoothing: Off",
+        2 => "Edge smoothing: Standard",
+        _ => "Edge smoothing: High",
+    };
 
     private void CycleAa()
     {
@@ -446,5 +457,11 @@ public sealed partial class SettingsMenu : Node3D
 
     private string DebugText() => _debugState ? "Debug overlays: ON" : "Debug overlays: off";
 
-    private static string DeadZoneText(float v) => $"Dead zone: {v:0} units";
+    private static string DeadZoneText(float v) => "Movement dead zone: " + (v switch
+    {
+        <= 0.0f => "Off",
+        <= 12.0f => "Low",
+        <= 28.0f => "Medium",
+        _ => "High",
+    });
 }

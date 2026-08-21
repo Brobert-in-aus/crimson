@@ -20,7 +20,7 @@ public sealed partial class AlienZooKeeper : Node3D
 
     public void Build(float s)
     {
-        Position = new Vector3(0, s * .85f, s * .25f); RotationDegrees = new Vector3(-12, 180, 0);
+        Position = SpatialMenuPlacement.PlayerFacing(s); RotationDegrees = new Vector3(-12, 180, 0);
         ClassicPanel.Build(this, s * 1.15f, s * 1.3f, -.012f);
         if (SmallFont.Shared() is { } font) { _status = new SmallFontLabel(); AddChild(_status); _status.Build(font, s / 520f, Godot.Colors.White); _status.Position = new Vector3(0, s * .52f, 0); }
         else { _fallback = new Label3D { FontSize = 60, PixelSize = s / 1200f, Position = new Vector3(0, s * .52f, 0) }; AddChild(_fallback); }

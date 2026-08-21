@@ -32,7 +32,7 @@ public sealed partial class EndNotePanel : Node3D
     {
         float s = arenaSideMeters;
         _side = s;
-        Position = new Vector3(0.0f, s * 0.85f, s * 0.25f);
+        Position = SpatialMenuPlacement.PlayerFacing(s);
         RotationDegrees = new Vector3(-12.0f, 180.0f, 0.0f);
 
         ClassicPanel.Build(this, s * 1.4f, s * 1.2f, z: -0.012f);
