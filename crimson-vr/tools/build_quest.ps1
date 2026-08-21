@@ -306,6 +306,9 @@ function Stop-ProcessTree {
 $deadline = (Get-Date).AddSeconds($ExportTimeoutSec)
 $printed = 0
 $done = $false
+$markerSeen = $false
+$lastApkSize = -1L
+$stableApkPolls = 0
 while ($true) {
     Start-Sleep -Seconds 3
     $log = Get-ExportLog
@@ -321,13 +324,29 @@ while ($true) {
         $printed = $lines.Count
     }
 
-    if ($log -match '\[ DONE \]\s*export') { $done = $true; break }
+    if ($log -match '\[ DONE \]\s*export') { $markerSeen = $true }
+    # On clean hosted runners Godot can flush the progress marker before Gradle
+    # has closed/moved the APK. Do not terminate its process tree until the file
+    # exists and its size has stopped changing across two polls; otherwise a
+    # fast runner kills the export in the small marker-to-rename window.
+    if ($markerSeen -and (Test-Path -LiteralPath $apk -PathType Leaf)) {
+        $size = (Get-Item -LiteralPath $apk).Length
+        if ($size -gt 0 -and $size -eq $lastApkSize) { $stableApkPolls++ }
+        else { $stableApkPolls = 0 }
+        $lastApkSize = $size
+        if ($stableApkPolls -ge 1) { $done = $true; break }
+    }
     if ($p.HasExited) { break }
     if ((Get-Date) -gt $deadline) { break }
 }
 
-# Godot may have flushed the marker as it exited; re-read once before deciding.
-if (-not $done -and ((Get-ExportLog) -match '\[ DONE \]\s*export')) { $done = $true }
+# Godot may have created the APK as it exited after the final poll. Treat that as
+# complete only when both the marker and a non-empty file are present.
+if (-not $done -and ((Get-ExportLog) -match '\[ DONE \]\s*export') `
+    -and (Test-Path -LiteralPath $apk -PathType Leaf) `
+    -and (Get-Item -LiteralPath $apk).Length -gt 0) {
+    $done = $true
+}
 
 if ($done) {
     # Marker seen: the APK is written and Godot typically hangs in teardown — end it.
