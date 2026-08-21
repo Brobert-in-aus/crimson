@@ -284,6 +284,17 @@ function Get-ExportLog {
     return ($t -replace "\x1b\[[0-9;]*m", '')
 }
 
+function Get-ExportFailureTail {
+    $parts = @()
+    foreach ($entry in @(@{ Name = 'stderr'; Path = $errLog }, @{ Name = 'stdout'; Path = $outLog })) {
+        if (Test-Path $entry.Path) {
+            $tail = Get-Content $entry.Path -Tail 80 -ErrorAction SilentlyContinue
+            if ($tail) { $parts += "--- Godot $($entry.Name) tail ---`n$($tail -join "`n")" }
+        }
+    }
+    return (($parts -join "`n") -replace "\x1b\[[0-9;]*m", '')
+}
+
 function Stop-ProcessTree {
     # Kill a process and ONLY its descendants, by PID (taskkill /T) — never
     # unrelated Godot/Java processes by name/timestamp. taskkill /T is the PS 5.1
@@ -359,8 +370,8 @@ elseif ($p.HasExited) {
     # Exited WITHOUT the marker: distinguish a real failure from a rare clean-but-
     # markerless exit (don't mislabel an early non-zero exit as a timeout).
     $code = $p.ExitCode
-    if ($code -ne 0) { throw "Godot export exited with code $code before completing (see $errLog)." }
-    if (-not (Test-Path $apk)) { throw "Godot export exited (code 0) without producing an APK (see $errLog)." }
+    if ($code -ne 0) { throw "Godot export exited with code $code before completing.`n$(Get-ExportFailureTail)" }
+    if (-not (Test-Path $apk)) { throw "Godot export exited (code 0) without producing an APK.`n$(Get-ExportFailureTail)" }
     Write-Warning "Godot export exited cleanly without the '[ DONE ] export' marker; APK exists, continuing."
 }
 else {

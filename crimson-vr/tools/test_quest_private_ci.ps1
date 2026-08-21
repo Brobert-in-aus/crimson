@@ -152,7 +152,7 @@ $sourceCommit = Invoke-Captured gh api "repos/$SourceRepo/commits/$SourceBranch"
 if ($sourceCommit -notmatch '^[0-9a-f]{40}$') { throw "Invalid source commit: $sourceCommit" }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-if (-not $RepositoryName) { $RepositoryName = "crimsonvr-ci-e2e-$stamp" }
+if (-not $RepositoryName) { $RepositoryName = "cvr-e2e-$stamp" }
 if ($RepositoryName -notmatch '^[A-Za-z0-9_.-]+$') { throw "Unsafe repository name: $RepositoryName" }
 $destinationRepo = "$DestinationOwner/$RepositoryName"
 
