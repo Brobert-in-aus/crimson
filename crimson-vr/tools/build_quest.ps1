@@ -209,6 +209,29 @@ if ($Install) {
 
 New-Item -ItemType Directory -Force (Split-Path $apk) | Out-Null
 
+# A clean CI checkout has no generated android/build directory. Restore the
+# exact Android source template belonging to the pinned Godot executable before
+# we copy our activity/plugin sources into it. Passing the Godot
+# --install-android-build-template flag during export is too late: the bridge
+# copy below necessarily happens before that export process starts.
+if ($InstallAndroidBuildTemplate) {
+    $godotVersionText = (& $Godot --version | Out-String).Trim()
+    $godotTemplateVersion = if ($godotVersionText -match '^(\d+\.\d+\.[^.]+\.mono)') {
+        $matches[1]
+    }
+    else {
+        throw "Could not derive Mono export-template version from Godot: $godotVersionText"
+    }
+    $androidSourceZip = Join-Path $env:APPDATA "Godot\export_templates\$godotTemplateVersion\android_source.zip"
+    if (-not (Test-Path -LiteralPath $androidSourceZip -PathType Leaf)) {
+        throw "Android source template missing for $godotTemplateVersion`: $androidSourceZip"
+    }
+    $androidBuild = Join-Path $proj 'android\build'
+    New-Item -ItemType Directory -Force $androidBuild | Out-Null
+    Expand-Archive -LiteralPath $androidSourceZip -DestinationPath $androidBuild -Force
+    Write-Host "    restored Android build template $godotTemplateVersion" -ForegroundColor DarkGray
+}
+
 # The custom Android template is generated/ignored, so restore our tracked host
 # activity and native text-input plugin before every export (including CI).
 $androidJavaSource = Join-Path $repoRoot 'crimson-vr\tools\android'
@@ -247,7 +270,6 @@ $env:GODOT_ANDROID_KEYSTORE_RELEASE_USER = $KeyAlias
 $env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = $StorePassword
 $exportMode = if ($Release) { '--export-release' } else { '--export-debug' }
 $godotArgs = @('--headless', '--xr-mode', 'off', '--path', $proj)
-if ($InstallAndroidBuildTemplate) { $godotArgs += '--install-android-build-template' }
 $godotArgs += @($exportMode, 'Android', $apk)
 $p = Start-Process -FilePath $Godot `
     -ArgumentList $godotArgs `
