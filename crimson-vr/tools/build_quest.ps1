@@ -229,6 +229,12 @@ if ($InstallAndroidBuildTemplate) {
     $androidBuild = Join-Path $proj 'android\build'
     New-Item -ItemType Directory -Force $androidBuild | Out-Null
     Expand-Archive -LiteralPath $androidSourceZip -DestinationPath $androidBuild -Force
+    # Godot's Project-menu installer writes these beside the extracted archive.
+    # A raw Expand-Archive without them is rejected as an unknown Gradle template
+    # even though every source file is present.
+    [IO.File]::WriteAllText((Join-Path $proj 'android\.build_version'), $godotTemplateVersion)
+    [IO.File]::WriteAllText((Join-Path $androidBuild '.build_version'), $godotTemplateVersion)
+    [IO.File]::WriteAllText((Join-Path $androidBuild '.gdignore'), "`n")
     Write-Host "    restored Android build template $godotTemplateVersion" -ForegroundColor DarkGray
 }
 
