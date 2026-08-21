@@ -111,7 +111,7 @@ All blockers must be closed with evidence, not merely marked understood.
 | RP-03 | Closed locally | `0.10.0` was already tagged/published | Minor bump selected for the substantial new VR, multiplayer, replay, and tooling capabilities; package and lockfile now use `0.11.0`; intended tag is `v0.11.0` |
 | RP-04 | Release-prep remediation committed; version commit and final rerun pending | The original release candidate existed only as a large dirty worktree | Commit the version/policy update, then run every required gate from the clean, versioned release commit |
 | RP-05 | Open | Public CrimsonVR derived-content and upstream-code scope is unresolved | Written licensing decision and completed repository/output audit, or release scope reduced accordingly |
-| RP-06 | Open | Private-copy workflows, clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Workflow URLs/artifact manifests and signed physical-validation record attached to the release evidence |
+| RP-06 | Partial: Quest hosted path passed | Quest private-copy create/build/download/re-sign path passed twice on 2026-08-22; clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Quest runs 32534616770 and 32535378646 plus local evidence JSON; PCVR workflow URLs/manifests and signed physical-validation record still required |
 
 ## Required automated gates
 
@@ -251,7 +251,7 @@ than pasting only summaries.
 | `just check` | |
 | Repeated Windows networking gate | |
 | Wheel/sdist hashes and install smoke | |
-| Quest workflow/build manifest | |
+| Quest workflow/build manifest | Commit `7e804816885d3bfb2419c268fd0c7c323af08dd3`; private runs [32534616770](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32534616770) and [32535378646](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32535378646); generated and restored signing-key paths passed |
 | PCVR workflow/build manifests | |
 | Physical-device matrix | |
 | Relay operations approval | |

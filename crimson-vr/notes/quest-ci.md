@@ -82,8 +82,8 @@ headset library to perform the first-run import. End users can instead use
 ## Build contract
 
 This workflow is one gate, not release approval. The 2026-08-13 audit remains a
-no-go because native networking, private-copy dispatch, physical validation,
-and legal/distribution work are still open. Record the eventual workflow run,
+no-go because physical validation and legal/distribution work are still open.
+Record the workflow run,
 artifact hashes, device validation, and legal disposition in the canonical
 [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
 evidence table.
@@ -107,8 +107,8 @@ The M6 runtime half is now implemented and tested: the asset-free APK presents
 an asset-independent recovery panel, imports a locally created pack atomically,
 and has completed a clean on-headset Quest import. Source and APK payload gates
 reject bundled original assets. Remaining release work is operational/legal:
-exercise the private-copy workflow end to end, complete the derived-content
-audit, and settle what upstream-linked binaries/code may be redistributed.
+complete the derived-content audit and settle what upstream-linked binaries/code
+may be redistributed.
 
 On 2026-08-11 the workflow's build contract was reproduced locally with a fresh
 CI-format keystore. The resulting asset-free Release APK
@@ -116,5 +116,33 @@ CI-format keystore. The resulting asset-free Release APK
 clean-installed on Quest 3 with the staged pack
 (`B43B203B70C3DD181E90EC19F32F6BB620DD89A2DB662292E23BDADF95F0736F`). Android
 reported a new first-install time and `stopped=true, notLaunched=true`; remote and
-local pack hashes matched. This validates the build/install contract, not the
-still-pending real private-repository GitHub Actions dispatch.
+local pack hashes matched.
+
+On 2026-08-22, `test_quest_private_ci.ps1` exercised the complete hosted path
+from a fresh clone of commit `7e804816885d3bfb2419c268fd0c7c323af08dd3`:
+
+```powershell
+.\crimson-vr\tools\test_quest_private_ci.ps1 -ScratchRoot 'D:\Projects\_scratch'
+```
+
+It created a private standalone repository with `main` as its default branch,
+passed the clean source gate, completed and downloaded two private Quest
+artifacts, rechecked both APK manifests/hashes and asset-free payloads locally,
+stored the first keystore as `QUEST_KEYSTORE_BASE64`, and proved that the second
+build reused the exact keystore and APK signing certificate. Evidence:
+
+- generated-key run: [32534616770](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32534616770), APK SHA-256
+  `83932d2eebd2355642117f0b2db26fdb32e6c04b0afdf7c50b1e804ab0232fa8`;
+- saved-key run: [32535378646](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32535378646), APK SHA-256
+  `1ae0ff1eccb957ddded28437eef21f3cf5bc1dfceb192ff34f263099eea4bc32`;
+- shared keystore SHA-256
+  `da9befc3a82a97e9b2b42f2724dce9bdc14be4981930281910205dddaa5b9465`;
+- shared signer certificate SHA-256
+  `168999965f03bf6502ed405944449a58d7f00478534aa6d398d708bfad41a090`;
+- local evidence file:
+  `D:\Projects\_scratch\cvr-e2e-20260822-084949\evidence.json`.
+
+The operated test exposed and fixed clean-run gaps in Android template ordering,
+Godot template metadata, the asset-independent app icon, APK-finalization
+waiting, and export-failure logging. The successful private repository is
+retained for inspection; its uploaded Actions artifacts expire after one day.
