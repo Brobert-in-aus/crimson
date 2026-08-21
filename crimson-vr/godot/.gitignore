@@ -5,6 +5,7 @@ native/
 android/
 assets/
 *.apk
+*.import
 
 # Prebuilt third-party plugin (~46 MB); restore with tools/fetch_vendors_plugin.ps1
 addons/godotopenxrvendors/
