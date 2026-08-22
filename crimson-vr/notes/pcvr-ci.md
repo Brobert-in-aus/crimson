@@ -14,9 +14,10 @@ fork. The project does not attach maintainer-built packages to a release.
 5. Extract the whole archive. Do not move the executable away from its `data_*`,
    `native`, PCK, or OpenXR-library siblings.
 6. Prepare the legally owned Crimsonland Classic assets locally. On Windows,
-   `prepare_assets.ps1 -Pcvr` detects the normal GOG locations and fills the
+   `crimson-vr\setup_pcvr.bat` detects the normal GOG locations and fills the
    per-user inbox; then run `CrimsonVR.exe` with SteamVR, VDXR, or another active
-   OpenXR runtime.
+   OpenXR runtime. Pass a custom Classic directory as the batch file's first
+   argument when auto-detection is not suitable.
 
 No signing key is needed for PCVR updates. Application upgrades reuse the
 per-user imported assets; keep the locally generated pack for recovery.

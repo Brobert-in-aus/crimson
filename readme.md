@@ -1,240 +1,204 @@
-# CrimsonVR — an independent VR port of Crimson
+# CrimsonVR
 
-CrimsonVR is an independent OpenXR VR port built on
-[banteg/crimson](https://github.com/banteg/crimson), a community reverse
-engineering and reimplementation of [Crimsonland](https://en.wikipedia.org/wiki/Crimsonland)
-v1.9.93. This fork is maintained separately: it is not an official part of,
-affiliated with, or endorsed by the upstream Crimson project, its maintainers,
-10tons, or the Crimsonland rights holders.
+CrimsonVR is an independent OpenXR VR port built on the
+[banteg/crimson](https://github.com/banteg/crimson) reimplementation of
+Crimsonland Classic. This fork is maintained separately and is not an official
+part of, affiliated with, or endorsed by that upstream project, its
+maintainers, 10tons, or the Crimsonland rights holders.
 
-## Upstream foundation
+It brings the deterministic Crimson simulation to standalone Quest and PCVR,
+with Tabletop and Cabinet layouts, controller and optical-hand input, spatial
+menus, VR onboarding, and PCVR-to-Quest multiplayer.
 
-The upstream project provides a high-fidelity Python + raylib reimplementation
-of the 2003 GOG release commonly known as Crimsonland Classic, paired with deep
-reverse engineering of the original Windows binary. CrimsonVR builds its VR
-frontend on that deterministic simulation and retains the upstream analysis,
-desktop frontend, tests, and documentation in this repository.
+## Before you start
 
-That upstream work targets **behavioral parity**: timings, RNG sequences,
-float32 math, UI layout quirks, asset decoding, and gameplay rules should match
-the original as closely as practical.
+CrimsonVR does not publish game assets or ready-made public binaries. Each
+player builds an asset-free personal package in their own GitHub fork and
+supplies assets locally from their own GOG copy of **Crimsonland Classic
+1.9.93**. The 2014 HD remake is not compatible.
 
-The upstream project supports that goal with a headless differential testing
-harness that verifies runs recorded in the original game against its
-reimplementation.
+You need:
 
-**[Read the upstream story](https://banteg.xyz/posts/crimsonland/)** — reverse engineering workflow, custom asset formats, AI-assisted decompilation, and game preservation philosophy.
+- a GitHub account and your own fork of this repository;
+- a Windows PC with your GOG Crimsonland Classic installation;
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for the local
+  asset-preparation helper; and
+- either a Quest in Developer Mode or a working PCVR OpenXR runtime.
 
-**[Browse the upstream docs](https://crimson.banteg.xyz/)** — 100+ pages of analysis, struct layouts, format specs, and parity tracking.
+Install `uv` once from Command Prompt or Windows Terminal:
 
-## CrimsonVR current state
+```bat
+winget install --id=astral-sh.uv -e
+```
 
-The inherited upstream rewrite is a playable full game: boot, menus, Survival,
-Rush, Quests (5 tiers), Tutorial, and Typ-o-Shooter, with full
-weapon/creature/perk content, terrain/sprite/decal rendering, music, gameplay
-SFX, and even secrets. Its simulation is fully deterministic, supporting
-seeded runs and headless verifiable replays.
+Fork this repository on GitHub, then clone your fork or download and extract
+its source ZIP. Run the setup files below from that source folder. No game
+assets are uploaded by these helpers.
 
-[`crimson-vr/`](crimson-vr/) contains the OpenXR frontend for
-standalone Quest 3 and PCVR. It embeds the same deterministic simulation and
-currently surfaces Survival, Rush, Quests, and Tutorial in two seated layouts:
-Tabletop and Cabinet. Menus use direct controller/hand poke interaction; native
-replays remain compatible with the desktop verifier. VR Display separately
-chooses poke or animated controller models and one of two Godot XR Tools Tac
-Glove skins; optical hand tracking swaps to the selected glove automatically and
-follows reported joints one-for-one. Friends-only multiplayer has been
-validated between PCVR and Quest for the accepted release scope. The current
-candidate is staged for release; maintainers should use the
-[Release Preparation](docs/contributor/project-tracking/release-preparation.md)
-checklist as the canonical go/no-go record.
+## Quest installation
 
-Local Quest builds now default to a clearly named, personal APK that bundles
-baked assets from the builder's own GOG Crimsonland Classic 1.9.93 installation.
-That APK is for the owner's headsets only and must not be shared or uploaded.
-Fork/CI packages remain explicitly asset-free: players create a local pack and
-import it on first launch through an in-headset recovery flow with retry feedback. New profiles
-are guided toward the optional VR tutorial while retaining immediate access to
-every mode through a one-time Tutorial/Skip recommendation. First-run layout
-setup likewise offers Edit Layout/Skip, with a short editor guide and one
-depth-only control shared by menus, perk selection and results; see the
-[asset-import guide](crimson-vr/notes/asset-import.md). Quest and
-PCVR personal builds are documented in the [Quest CI](crimson-vr/notes/quest-ci.md)
-and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides; headset playtests
-use the [Quest playtester handoff](crimson-vr/notes/quest-playtest.md). Release
-evidence uses the [Quest](crimson-vr/notes/quest-release-checklist.md) and
-[PCVR](crimson-vr/notes/pcvr-release-checklist.md) device checklists. The Quest-specific runtime
-controller model and animation integration is documented in the
-[Godot controller-model guide](crimson-vr/notes/godot-quest-controller-models.md).
-The current automated and packaging results are recorded in the
-[0.11.0 release evidence](crimson-vr/notes/release-evidence-0.11.0.md).
+### 1. Build your personal Quest APK
+
+In your fork on GitHub:
+
+1. Open **Actions**.
+2. Select **Quest personal build**.
+3. Choose **Run workflow**.
+4. Set `publish_artifact` to `true`, then run it.
+5. When the run finishes, download the `CrimsonVR-Quest-*` artifact within one
+   day and extract all three files:
+   - `CrimsonVR.quest.apk`
+   - `crimsonvr-ci.keystore`
+   - `QUEST-PERSONAL-BUILD.txt`
+
+Keep the keystore private. Android needs the same signing key for in-place
+updates. Losing it does not expose game assets, but the next differently signed
+APK will require an uninstall, which erases CrimsonVR app data.
+
+### 2. Connect the Quest
+
+Enable Developer Mode, connect the headset to the PC by USB, and approve the
+USB debugging prompt inside the headset. Ensure Android `adb` is available on
+`PATH`; Meta Quest Developer Hub or Android platform-tools can provide it.
+
+### 3. Install the APK and your assets
+
+From the repository root, run:
+
+```bat
+crimson-vr\setup_quest.bat "C:\path\to\CrimsonVR.quest.apk"
+```
+
+The helper finds the usual GOG Classic installation, validates it, builds a
+local asset pack, installs the asset-free APK, transfers the pack to the
+headset, and leaves the app stopped for a normal first launch.
+
+For a nonstandard Classic location, add it as the second argument:
+
+```bat
+crimson-vr\setup_quest.bat "C:\path\to\CrimsonVR.quest.apk" "D:\Games\Crimsonland"
+```
+
+If more than one Android device is connected, add the intended ADB serial as
+the third argument:
+
+```bat
+crimson-vr\setup_quest.bat "C:\path\to\CrimsonVR.quest.apk" "D:\Games\Crimsonland" "SERIAL"
+```
+
+After the helper reports success, put on the headset and launch CrimsonVR from
+the app library. Do not use an ADB launch command for the first run: Quest's
+controller and permission interstitials can make the onboarding appear to have
+been skipped.
+
+For updates, keep using the same fork and signing key. Imported assets survive
+an in-place APK update; an uninstall removes settings, scores, replays, and
+imported assets.
+
+## PCVR installation
+
+### 1. Build your personal PCVR package
+
+In your fork on GitHub:
+
+1. Open **Actions**.
+2. Select **PCVR personal build**.
+3. Choose **Run workflow**.
+4. Set `publish_artifact` to `true`, then run it.
+5. Download the `CrimsonVR-PCVR-*` artifact within one day.
+6. Choose `CrimsonVR-PCVR-Windows.zip` or the Linux `.tar.gz` package and
+   extract the entire archive.
+
+Do not move the executable away from its PCK, `data_*`, `native`, or OpenXR
+library files.
+
+### 2. Prepare your assets on Windows
+
+From the repository root, run:
+
+```bat
+crimson-vr\setup_pcvr.bat
+```
+
+For a nonstandard Classic location:
+
+```bat
+crimson-vr\setup_pcvr.bat "D:\Games\Crimsonland"
+```
+
+The helper writes the local pack to CrimsonVR's per-user first-run inbox. It
+does not upload the pack or copy assets into the GitHub checkout.
+
+Linux users can run the equivalent helper directly:
+
+```bash
+uv run python crimson-vr/tools/prepare_assets.py --pcvr
+```
+
+### 3. Launch PCVR
+
+Start SteamVR, VDXR, or another OpenXR runtime, then run `CrimsonVR.exe` from
+the fully extracted Windows package. On Linux, launch the executable from the
+extracted tar archive. CrimsonVR imports the prepared pack before starting XR.
+
+Package updates reuse the installed per-user assets. Keep the generated
+`crimson-assets.pack` somewhere safe if you want quick recovery after removing
+application data.
+
+## Troubleshooting
+
+### Classic installation is not found
+
+Install **Crimsonland Classic** from the Extras section in GOG Galaxy, or pass
+its directory explicitly to the appropriate `.bat` file. A directory containing
+only the HD remake will be rejected.
+
+### `uv` is not found
+
+Close and reopen Command Prompt after installing `uv`, then run the setup file
+again. The helpers also check `%USERPROFILE%\.local\bin\uv.exe` and an existing
+repository `.venv`.
+
+### `adb` is not found or the Quest is unavailable
+
+Install Android platform-tools, reconnect the Quest by USB, approve debugging
+inside the headset, and check `adb devices`. If several devices are listed,
+pass the desired serial as the third `setup_quest.bat` argument.
+
+### PCVR opens only on the monitor
+
+Confirm that the intended OpenXR runtime is active before launching CrimsonVR.
+For Virtual Desktop, connect the headset first and select VDXR where applicable.
+
+### Asset preparation fails partway through
+
+Correct the reported path or dependency problem and run the same setup file
+again. Asset installation is integrity-checked and atomic, so a failed
+replacement does not overwrite the last working imported asset set.
+
+## More documentation
+
+- [Quest personal-build details](crimson-vr/notes/quest-ci.md)
+- [Quest playtester handoff](crimson-vr/notes/quest-playtest.md)
+- [PCVR personal-build details](crimson-vr/notes/pcvr-ci.md)
+- [Asset import and recovery](crimson-vr/notes/asset-import.md)
+- [Quest release checklist](crimson-vr/notes/quest-release-checklist.md)
+- [PCVR release checklist](crimson-vr/notes/pcvr-release-checklist.md)
+- [Godot Quest controller models](crimson-vr/notes/godot-quest-controller-models.md)
+- [Release evidence](crimson-vr/notes/release-evidence-0.11.0.md)
+
+## Distribution and privacy
 
 The supported publication surface is source plus asset-free, user-owned CI
-builds. GitHub forking is the source-copy path and each user supplies Classic
-assets locally. Users explicitly request the short-lived personal artifact from
-their own fork; the project does not attach VR binaries to a maintainer release,
-and the local bundled-assets APK is never uploaded.
-
-For the default local Quest export (auto-detecting GOG Classic, or accepting
-`-GameDir`), run:
-
-```powershell
-.\crimson-vr\tools\build_quest.ps1 -Release
-# Explicit fork/CI asset-free contract:
-.\crimson-vr\tools\build_quest.ps1 -AssetMode AssetFree -Release
-```
-
-The bundled result is `artifacts/CrimsonVR.personal-assets.quest.apk`, with a
-convenience copy at `crimson-vr/CrimsonVR-Quest-testing.apk`.
-
-## Upstream desktop frontend
-
-The inherited non-VR desktop frontend can be run using the upstream project's
-normal workflow:
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
-
-```bash
-uvx crimsonland@latest
-
-# or run from source
-gh repo clone banteg/crimson && cd crimson
-uv run crimson
-```
-
-**Wayland on Linux:** current PyPI raylib wheels are X11-oriented on x86_64, so you may need `xwayland` + `libX11`. See [electronstudio/raylib-python-cffi#199](https://github.com/electronstudio/raylib-python-cffi/pull/199).
-
-### Runtime files
-
-By default, saves, config, logs, and replays live in your per-user data directory. To keep everything local to the checkout:
-
-```bash
-export CRIMSON_RUNTIME_DIR="$PWD/artifacts/runtime"
-uv run crimson
-```
-
-## Assets
-
-The upstream project documents permission for the assets it distributes. That
-permission is not assumed to transfer to independently distributed CrimsonVR
-builds. Public CrimsonVR releases are therefore source-only and its fork/CI
-packages are asset-free; each player supplies assets from their own copy of
-Crimsonland Classic. The inherited desktop frontend can still obtain its
-upstream-managed PAQ archives (`crimson.paq`, `music.paq`, and `sfx.paq`) at
-runtime.
-
-The upstream project also has access to original uncompressed source art. Its
-asset pack is a selective hybrid: it uses higher-quality uncompressed textures
-where they match the shipped runtime art, keeps original PAQ assets where they
-are the better match, and stitches a few sprite sheets from both sources.
-
-Point to them explicitly if needed:
-
-```bash
-uv run crimson --assets-dir path/to/game_dir
-```
-
-Extract PAQs into a filesystem tree for inspection. JAZ textures are automatically converted to PNG with alpha:
-
-```bash
-uv run crimson extract path/to/game_dir artifacts/assets
-```
-
-## CLI
-
-Everything is exposed via the `crimson` CLI (alias: `crimsonland`):
-
-```
-crimson                           run the game (default)
-crimson view <name>               debug views / sandboxes
-crimson quests <level>            print quest spawn script
-crimson config                    inspect crimson.cfg
-crimson extract <src> <dst>       extract PAQ archives
-crimson replay list               list replay files under runtime replays dir
-crimson replay play <file>        play back a recorded demo
-crimson replay verify <file>      headlessly simulate replay stats / score claims
-crimson replay benchmark <file>   benchmark replay throughput (headless or render, + optional profiling)
-crimson replay render <file>      render replay to high-quality 60fps video via ffmpeg
-crimson replay verify-checkpoints <file>  compare replay output to checkpoint sidecar
-```
-
-Useful flags: `--seed N` (deterministic runs), `--demo` (shareware teaser), `--preserve-bugs` (native quirks for parity work), `--no-intro` (skip logos), `--base-dir PATH` / `CRIMSON_RUNTIME_DIR` (runtime file location), `--assets-dir PATH` (PAQ / extracted asset location).
-
-## Project layout
-
-```
-src/
-  crimson/          game logic — modes, weapons, perks, creatures, UI, replay
-  grim/             engine layer — raylib wrapper, PAQ/JAZ decoders, audio, fonts
-analysis/
-  ghidra/           name/type maps (source of truth) and structured snapshots
-  binary_ninja/     preferred live analysis databases
-  ida/              structured function/import/string snapshots
-  frida/            runtime capture evidence (state snapshots, RNG traces)
-  windbg/           debugger session logs
-docs/               100+ pages: formats, structs, algorithms, parity tracking
-scripts/            40+ analysis and utility tools
-tests/              200+ tests: gameplay, perks, physics, replay, parity
-```
-
-## Reverse engineering
-
-**Static analysis** is the source of truth. Names and types live in
-[`analysis/ghidra/maps/`](analysis/ghidra/maps/); consult current function views
-in Binary Ninja, IDA, then Ghidra using the shared address-keyed workflow in
-[`analysis/README.md`](analysis/README.md).
-
-**Runtime tooling** (Frida, WinDbg) validates ambiguous behavior and captures ground truth. Evidence summaries live under [`analysis/frida/`](analysis/frida/).
-
-**Differential testing** captures original execution via Frida, replays the same inputs through the rewrite's headless oracle, and compares state checkpoints field-by-field.
-
-See [docs/contributor/project-tracking/provenance.md](docs/contributor/project-tracking/provenance.md) for exact binary hashes of the target build.
-
-## Development
-
-```bash
-uv run pytest              # test suite
-uv run ruff check .        # lint
-uv run ty check src        # type check
-sg scan                    # ast-grep code scan
-sg test                    # ast-grep rule tests
-just check                 # all of the above
-```
-
-### Docs
-
-Docs are authored in `docs/` and built as a static site with [zensical](https://github.com/banteg/zensical):
-
-```bash
-uv tool install zensical
-zensical serve
-```
-
-## Parity workflow
-
-1. Recover structure and intent from static analysis (`analysis/ghidra/maps/` as source-of-truth maps).
-2. Validate ambiguous behavior with runtime evidence (Frida/WinDbg captures under `analysis/frida/`).
-3. Port behavior into `src/` with deterministic simulation contracts.
-4. Verify against captures/replays with headless differential tools.
-
-For deterministic gameplay code, float behavior is part of the contract.  
-See [`docs/rewrite/float-parity-policy.md`](docs/rewrite/float-parity-policy.md).
-
-## Contributing
-
-- Keep changes small and reviewable — one subsystem at a time.
-- Prefer *measured parity* (captures, logs, deterministic tests) over "looks right".
-- Preserve native float32 math behavior in deterministic simulation paths. See [float parity policy](docs/rewrite/float-parity-policy.md).
-- Run `just check` before committing.
-
-## Tech stack
-
-Python 3.13+ · raylib (pyray) · Construct · msgspec · Typer · Ghidra · Frida · WinDbg · pytest · uv
+builds. Do not upload or share generated asset packs, PAQ/PAK files, extracted
+art or audio, personal bundled-assets APKs, or signing keys. The local setup
+helpers process files on the player's PC and transfer Quest data only to the
+connected headset.
 
 ## Legal
 
 CrimsonVR is an independent port and is not affiliated with or endorsed by the
 upstream Crimson project, its maintainers, 10tons, or the Crimsonland rights
 holders. The upstream project documents its own asset permissions; this fork
-does not claim those permissions transfer to CrimsonVR distribution. Supported
-CrimsonVR publication is source-only, with asset-free user-owned builds that
-require each player to supply their own Crimsonland Classic assets.
+does not claim those permissions transfer to CrimsonVR distribution. Each
+player must supply their own legally obtained Crimsonland Classic assets.

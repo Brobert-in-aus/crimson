@@ -80,16 +80,20 @@ CrimsonVR app data.
 
 ## Install and supply assets
 
-From a clean checkout of the same approved revision:
+From a clean checkout of the same approved revision, the recommended Windows
+path is:
 
-```powershell
-.\crimson-vr\tools\prepare_assets.ps1 -Quest -Apk '.\CrimsonVR.quest.apk'
+```bat
+crimson-vr\setup_quest.bat ".\CrimsonVR.quest.apk"
 ```
 
-The helper validates the APK, finds Crimsonland Classic (or accepts `-GameDir`),
+The helper validates the APK, finds Crimsonland Classic (or accepts its
+directory as the second argument),
 installs the asset-free APK, creates the pack locally, copies it only to the
 connected Quest's app-owned inbox, and leaves the app stopped. If more than one
-Android device is connected, add `-Device SERIAL`.
+Android device is connected, pass the Classic directory as the second argument
+and the ADB serial as the third. The underlying `prepare_assets.ps1` and Python
+entry point remain available for advanced use.
 
 Launch CrimsonVR manually from the headset library. A correct clean setup first
 imports the local pack and then shows the first-run guide. Do not use an ADB

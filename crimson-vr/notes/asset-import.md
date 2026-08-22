@@ -161,9 +161,11 @@ uv run crimson-vr/tools/bake_assets.py artifacts/assets crimson-vr/godot/assets/
 uv run crimson-vr/tools/pack_assets.py crimson-vr/godot/assets crimson-assets.pack
 # Or perform the complete pipeline (add --quest to transfer without launching):
 uv run python crimson-vr/tools/prepare_assets.py "C:\Games\Crimsonland Classic"
-# One-command PCVR inbox preparation:
+# Recommended Windows entry points (no PowerShell command required):
+.\crimson-vr\setup_pcvr.bat
+.\crimson-vr\setup_quest.bat ".\CrimsonVR.quest.apk"
+# Advanced equivalents:
 .\crimson-vr\tools\prepare_assets.ps1 -Pcvr
-# Complete Quest setup (installs, transfers, and leaves the app stopped):
 .\crimson-vr\tools\prepare_assets.ps1 -Quest -Apk ".\CrimsonVR.quest.apk"
 # Or make the default personal, non-shareable bundled Quest APK directly:
 .\crimson-vr\tools\build_quest.ps1 -Release
