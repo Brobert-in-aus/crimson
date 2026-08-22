@@ -1,22 +1,41 @@
-# Crimsonland 1.9.93 — reverse engineering + rewrite
+# CrimsonVR — an independent VR port of Crimson
 
-A high-fidelity reimplementation of [Crimsonland](https://en.wikipedia.org/wiki/Crimsonland) v1.9.93 (2003, GOG "Crimsonland Classic") in Python + raylib, paired with deep reverse engineering of the original Windows binary.
+CrimsonVR is an independent OpenXR VR port built on
+[banteg/crimson](https://github.com/banteg/crimson), a community reverse
+engineering and reimplementation of [Crimsonland](https://en.wikipedia.org/wiki/Crimsonland)
+v1.9.93. This fork is maintained separately: it is not an official part of,
+affiliated with, or endorsed by the upstream Crimson project, its maintainers,
+10tons, or the Crimsonland rights holders.
 
-The aim of the project is **behavioral parity**: timings, RNG sequences, float32 math, UI layout quirks, asset decoding, and gameplay rules should match the original as closely as practical.
+## Upstream foundation
 
-We go great lengths to achieve this goal, including a headless differential testing harness to verify runs recorded in the original game versus our reimplementation.
+The upstream project provides a high-fidelity Python + raylib reimplementation
+of the 2003 GOG release commonly known as Crimsonland Classic, paired with deep
+reverse engineering of the original Windows binary. CrimsonVR builds its VR
+frontend on that deterministic simulation and retains the upstream analysis,
+desktop frontend, tests, and documentation in this repository.
 
-**[Read the full story](https://banteg.xyz/posts/crimsonland/)** — reverse engineering workflow, custom asset formats, AI-assisted decompilation, and game preservation philosophy.
+That upstream work targets **behavioral parity**: timings, RNG sequences,
+float32 math, UI layout quirks, asset decoding, and gameplay rules should match
+the original as closely as practical.
 
-**[Browse the docs](https://crimson.banteg.xyz/)** — 100+ pages of analysis, struct layouts, format specs, and parity tracking.
+The upstream project supports that goal with a headless differential testing
+harness that verifies runs recorded in the original game against its
+reimplementation.
 
-## Current state
+**[Read the upstream story](https://banteg.xyz/posts/crimsonland/)** — reverse engineering workflow, custom asset formats, AI-assisted decompilation, and game preservation philosophy.
 
-The rewrite is a playable full game: boot, menus, Survival, Rush, Quests (5 tiers), Tutorial, and Typ-o-Shooter, with full weapon/creature/perk content, terrain/sprite/decal rendering, music, gameplay SFX, and even secrets. The simulation is fully deterministic, supporting seeded runs and headless verifiable replays.
+**[Browse the upstream docs](https://crimson.banteg.xyz/)** — 100+ pages of analysis, struct layouts, format specs, and parity tracking.
 
-### CrimsonVR
+## CrimsonVR current state
 
-[`crimson-vr/`](crimson-vr/) contains the experimental OpenXR frontend for
+The inherited upstream rewrite is a playable full game: boot, menus, Survival,
+Rush, Quests (5 tiers), Tutorial, and Typ-o-Shooter, with full
+weapon/creature/perk content, terrain/sprite/decal rendering, music, gameplay
+SFX, and even secrets. Its simulation is fully deterministic, supporting
+seeded runs and headless verifiable replays.
+
+[`crimson-vr/`](crimson-vr/) contains the OpenXR frontend for
 standalone Quest 3 and PCVR. It embeds the same deterministic simulation and
 currently surfaces Survival, Rush, Quests, and Tutorial in two seated layouts:
 Tabletop and Cabinet. Menus use direct controller/hand poke interaction; native
@@ -67,7 +86,10 @@ For the default local Quest export (auto-detecting GOG Classic, or accepting
 The bundled result is `artifacts/CrimsonVR.personal-assets.quest.apk`, with a
 convenience copy at `crimson-vr/CrimsonVR-Quest-testing.apk`.
 
-## Quick start
+## Upstream desktop frontend
+
+The inherited non-VR desktop frontend can be run using the upstream project's
+normal workflow:
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 
@@ -92,9 +114,18 @@ uv run crimson
 
 ## Assets
 
-The original Crimsonland Classic assets are distributed for this project with permission from the original developer. Missing PAQ archives (`crimson.paq`, `music.paq`, `sfx.paq`) are downloaded into the runtime directory on first launch, so `uvx crimsonland@latest` works out of the box.
+The upstream project documents permission for the assets it distributes. That
+permission is not assumed to transfer to independently distributed CrimsonVR
+builds. Public CrimsonVR releases are therefore source-only and its fork/CI
+packages are asset-free; each player supplies assets from their own copy of
+Crimsonland Classic. The inherited desktop frontend can still obtain its
+upstream-managed PAQ archives (`crimson.paq`, `music.paq`, and `sfx.paq`) at
+runtime.
 
-The project also has access to the original uncompressed source art. The current asset pack is a selective hybrid: it uses higher-quality uncompressed textures where they match the shipped runtime art, keeps the original PAQ assets where they are the better match, and stitches a few sprite sheets from both sources.
+The upstream project also has access to original uncompressed source art. Its
+asset pack is a selective hybrid: it uses higher-quality uncompressed textures
+where they match the shipped runtime art, keeps original PAQ assets where they
+are the better match, and stitches a few sprite sheets from both sources.
 
 Point to them explicitly if needed:
 
@@ -201,4 +232,9 @@ Python 3.13+ · raylib (pyray) · Construct · msgspec · Typer · Ghidra · Fri
 
 ## Legal
 
-This project is an independent reverse engineering and reimplementation effort for preservation, research, and compatibility. Original Crimsonland Classic assets are distributed with permission from the original developer; the game code and reimplementation remain independent.
+CrimsonVR is an independent port and is not affiliated with or endorsed by the
+upstream Crimson project, its maintainers, 10tons, or the Crimsonland rights
+holders. The upstream project documents its own asset permissions; this fork
+does not claim those permissions transfer to CrimsonVR distribution. Supported
+CrimsonVR publication is source-only, with asset-free user-owned builds that
+require each player to supply their own Crimsonland Classic assets.
