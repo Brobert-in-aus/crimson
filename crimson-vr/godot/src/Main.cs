@@ -2663,9 +2663,14 @@ public partial class Main : Node3D
         {
             return;
         }
-        // Quest end panel (completed or failed) or the 5.10 end note up: hold
-        // the sim until a button routes somewhere.
+        // End-of-run UI owns a stable final snapshot.  The death cinematic
+        // below keeps the world ticking until these panels open; after that,
+        // stop contact damage and audio from continuing behind the results.
         if (_questPanel.Active || _endNote.Active)
+        {
+            return;
+        }
+        if (_keyboard.Active || _gameOverPanel.Active)
         {
             return;
         }
@@ -2688,12 +2693,11 @@ public partial class Main : Node3D
         // Death handling (base game_over.py flow): a short pacing delay, then
         // name entry (only when the score ranks, like the base top-100 gate —
         // ours is the local top-10), then the results panel with Play Again /
-        // Main Menu. VR adaptation (user request): the world is NOT frozen
-        // under the death screen — the branch is skipped while the keyboard/
-        // panel is up, so the tick path below keeps the swarm milling around
-        // the corpse (dead input is inert; the score was pinned at show time).
-        // Quest mode swaps the score card for the Quest Failed panel (no
-        // highscores in quests) and freezes via the quest-panel guard above.
+        // Main Menu. The world keeps ticking through the death cinematic, then
+        // freezes once the keyboard/results UI opens so enemies cannot keep
+        // damaging the hidden corpse or emitting hit/death audio underneath
+        // the score screen. Quest mode swaps the score card for the Quest
+        // Failed panel (no highscores in quests) and uses the same ownership.
         if (_sim.GameOver && _sim.LastResult.PerkPendingCount == 0
             && !_keyboard.Active && !_gameOverPanel.Active)
         {
@@ -2742,9 +2746,7 @@ public partial class Main : Node3D
                     return;
                 }
                 int score = ScoreForCurrentMode(_sim.LastResult);
-                // Pin the score now: the sim keeps ticking under the death
-                // screen, and posthumous kills must not drift the saved entry
-                // away from the rank/panel computed here.
+                // Pin the score at the handoff from cinematic to results.
                 _deathScore = score;
                 _deathElapsedMs = _sim.LastResult.ElapsedMsSim;
                 _deathKills = _sim.LastResult.CreatureKillCount;
