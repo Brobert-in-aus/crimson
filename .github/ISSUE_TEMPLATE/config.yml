@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, ideas, and general feedback
+    url: https://github.com/Brobert-in-aus/CrimsonVR/discussions
+    about: Start a public discussion when you do not have a reproducible bug or concrete feature request.
+  - name: Setup and troubleshooting guide
+    url: https://github.com/Brobert-in-aus/CrimsonVR#troubleshooting
+    about: Check the installation and recovery guidance before opening a setup issue.
+

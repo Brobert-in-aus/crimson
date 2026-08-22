@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest an improvement or new capability for CrimsonVR
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. For open-ended ideas and early discussion, consider starting in GitHub Discussions before filing an implementation request.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - VR interaction or comfort
+        - Quest
+        - PCVR
+        - Gameplay or parity
+        - Multiplayer
+        - Setup or asset import
+        - Accessibility
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What user need would this address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Describe the desired experience rather than only the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or other designs have you tried or considered?
+
+  - type: textarea
+    id: vr_context
+    attributes:
+      label: VR context
+      description: Note relevant headset, input method, layout mode, accessibility, comfort, or multiplayer constraints.
+

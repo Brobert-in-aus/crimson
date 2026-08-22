@@ -176,6 +176,20 @@ Correct the reported path or dependency problem and run the same setup file
 again. Asset installation is integrity-checked and atomic, so a failed
 replacement does not overwrite the last working imported asset set.
 
+## Feedback and support
+
+- Use [GitHub Discussions](https://github.com/Brobert-in-aus/CrimsonVR/discussions)
+  for questions, playtest feedback, ideas, and help from the community.
+- [Report a reproducible bug](https://github.com/Brobert-in-aus/CrimsonVR/issues/new?template=bug_report.yml)
+  with your platform, build version, device/runtime details, and reproduction
+  steps.
+- [Request a feature](https://github.com/Brobert-in-aus/CrimsonVR/issues/new?template=feature_request.yml)
+  when you have a concrete improvement to propose.
+
+Before posting logs, screenshots, or recordings, remove personal information.
+Never upload Crimsonland assets, PAQ/PAK files, generated asset packs, personal
+APK/PCVR packages, or signing keys.
+
 ## More documentation
 
 - [Quest personal-build details](crimson-vr/notes/quest-ci.md)

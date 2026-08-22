@@ -1,0 +1,91 @@
+name: Bug report
+description: Report a reproducible CrimsonVR problem
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve CrimsonVR. Search existing issues before reporting a new one.
+
+        Do not attach Crimsonland assets, PAQ/PAK files, generated asset packs, personal APK/PCVR packages, signing keys, or private account information. Logs and screenshots should be checked for personal information before uploading.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where did the problem occur?
+      options:
+        - Quest 3
+        - Quest 2
+        - PCVR on Windows
+        - PCVR on Linux
+        - Personal-build workflow
+        - Asset setup or import
+        - Multiplayer or relay
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Enter the CrimsonVR version, commit hash, or PERSONAL-BUILD manifest commit.
+      placeholder: 0.11.0 or 2608cdf68...
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Device and runtime
+      description: Include headset, OS, OpenXR runtime, and input method where relevant.
+      placeholder: Quest 3, Quest OS 77, Touch Plus controllers
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+      placeholder: Tell us what you saw, what you expected, and whether it happens consistently.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Give the smallest sequence that reproduces the problem.
+      placeholder: |
+        1. Start CrimsonVR...
+        2. Open...
+        3. Select...
+        4. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Logs, screenshots, or recordings
+      description: Paste relevant text or attach sanitized media. Do not upload copyrighted game assets, personal packages, or secrets.
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Include multiplayer topology, player count, local slot, layout mode, or recent changes when relevant.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Upload safety
+      options:
+        - label: I have not attached game assets, asset packs, personal build packages, signing keys, or sensitive personal information.
+          required: true
+
