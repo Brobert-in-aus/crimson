@@ -45,7 +45,7 @@ an in-headset before/after visual re-check remains required.
   perk commitment have comfort or irreversible-session consequences.
 - Pattern: diegetic hub-and-spoke navigation with direct-touch controls,
   contextual first-run teaching, and explicit confirmation/recovery for risk.
-- Primary action: one concrete action per state (Continue, Resume, Retry,
+- Primary action: one concrete action per state (Edit Layout, Tutorial, Resume, Retry,
   Confirm, or Choose).
 - Recovery: Back/cancel preserves context; destructive actions confirm or undo;
   multiplayer failures preserve entered room/address data.
@@ -79,10 +79,11 @@ Options. The first screen therefore required a gesture it did not teach.
 Implemented:
 
 - First launch now shows a short diegetic guide before Main Menu.
-- It explains fingertip/controller-top poke and the recenter mapping.
-- Continue persists `FirstRunDone`; returning players skip the guide.
-- Adjust Reach enters the existing Options → VR Settings → Arena & Layout stack,
-  so Back navigation remains consistent.
+- It explains controller-top/fingertip poke and the recenter mapping.
+- **Edit Layout** is the left action and **Skip** is the right action; either
+  persists `FirstRunDone`, while returning players skip the guide.
+- Edit Layout enters the existing Options → VR Settings → Edit Layout stack, so
+  Back navigation remains consistent.
 
 ### 2. Recenter was immediate and undocumented — severity 3
 
@@ -184,8 +185,16 @@ Implemented 2026-08-13:
 
 ## Scenario re-check
 
-- First run: guide → Continue → Main Menu, or guide → Adjust Reach → normal Back
+- First run: guide → Skip → Main Menu, or guide → Edit Layout → one-time editor
+  tutorial → normal Back
   stack. Static path passes; physical reach remains headset-dependent.
+- First Play Game: Tutorial starts the lesson; Skip opens the unchanged mode
+  selector. The pure policy tests prove the prompt is suppressed after either it
+  has been seen or the tutorial has already been completed.
+- Layout distance: controller/hand movement is reduced to recenter-local depth,
+  clamped to 0.05-0.45 m beyond the base plane; automated tests prove horizontal
+  and vertical deltas do not affect the setting. Physical comfort remains an
+  in-headset check.
 - Returning run: Main Menu remains the fast path with no repeated onboarding.
 - Recenter: tap/release does nothing; held input shows progress and completion.
 - Pause exit: accidental first poke cannot abandon the run; cancellation is
@@ -223,9 +232,13 @@ through the tutorial.
 
 Implemented without headset interaction:
 
-- The first Play Game visit places **Tutorial - Start Here** first. All game
-  modes remain available, and completing the tutorial restores the normal mode
-  order permanently.
+- The first Play Game action opens a one-time recommendation with **Tutorial**
+  and **Skip**. Tutorial starts the lesson directly; Skip opens the normal mode
+  selector. Returning players reach the selector immediately.
+- The first Edit Layout visit briefly lists Pause, Level Up, the Cabinet control
+  pad and shared menu-distance point before enabling the grab handles.
+- One centred blue grip point moves the shared menu/perk/results plane toward or
+  away from the player. It cannot change height, horizontal position or angle.
 - Offline session-creation failures now open a player-facing recovery panel with
   **Retry** and **Main Menu**, rather than leaving the player in a blank or
   partially transitioned state.
@@ -234,12 +247,13 @@ Implemented without headset interaction:
 - VR Display uses player-language quality labels (Resolution and Edge
   smoothing), and the movement dead zone is expressed as Off/Low/Medium/High.
 - The tutorial's opening prompt points out Pause.
-- Validation results are batch-versioned. Batch 2 clears the previous checklist
+- Validation results are batch-versioned. Batch 3 clears the previous checklist
   and contains only stereo, reach, tracked-input, layout, and network questions
   that cannot be settled headlessly.
 
-Fresh headset checklist (batch 2): first-boot order; menu depth, reach and stereo
-legibility; quit-confirm separation; tutorial recommendation and completion;
+Fresh headset checklist (batch 3): first-boot action order; one-time layout
+teaching; shared menu-depth-only manipulation; Tutorial/Skip routing; reach and
+stereo legibility; quit-confirm separation; tutorial completion;
 Pause/Level Up discovery; perk confirmation safety; both VR Settings pages;
 Cabinet and Tabletop layout editing; animated controllers; optical-hand joint
 matching; whether direct poke needs a ray fallback; and full PC/Quest LAN flow.

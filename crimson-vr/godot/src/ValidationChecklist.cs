@@ -20,24 +20,27 @@ public sealed partial class ValidationChecklist : Node3D
     // failures and work that genuinely still needs testing after an update.
     private static readonly (string Id, string Label)[] Items =
     {
-        // Fresh 2026-08-22 batch: only questions that require a worn headset,
-        // tracked hands/controllers, stereo depth, or a second network peer.
-        ("ux0822-freshboot", "Fresh boot: recovery then first-run appear correctly"),
-        ("ux0822-menudistance", "Menus + results/perks sit at a comfortable depth"),
-        ("ux0822-menureach", "Seated poke reaches every menu row comfortably"),
-        ("ux0822-menulegibility", "Menu text is crisp and readable in both eyes"),
-        ("ux0822-quitsafe", "Quit confirmations require a clear vertical move"),
-        ("ux0822-tutorialentry", "Play recommends Tutorial without blocking modes"),
-        ("ux0822-tutorialfull", "Tutorial clears the arena and reaches completion"),
-        ("ux0822-pausetrack", "Pause and Level Up are easy to find and reach"),
-        ("ux0822-perks", "Perk inspect/confirm flow prevents accidental picks"),
-        ("ux0822-vrsettings", "Both VR Settings pages fit and labels are clear"),
-        ("ux0822-layoutcab", "Cabinet edit defaults, rotation and preview work"),
-        ("ux0822-layouttable", "Tabletop is flat; size and height controls work"),
-        ("ux0822-controllers", "Controller poses, buttons and both sticks animate"),
-        ("ux0822-hands", "Optical glove joints follow tracked hands one-to-one"),
-        ("ux0822-rayneed", "Direct poke remains comfortable without a ray option"),
-        ("ux0822-lan", "PC/Quest host + join, slots, effects and results work"),
+        // Release-candidate batch: physical/stereo/device questions only. The
+        // full evidence forms live in quest-release-checklist.md and
+        // pcvr-release-checklist.md.
+        ("rc0822-firstboot", "Clean install imports once; first-run order is correct"),
+        ("rc0822-layoutintro", "First Edit Layout shows guide before handles"),
+        ("rc0822-menudistance", "Blue grip moves every menu in depth only and saves"),
+        ("rc0822-menustereo", "All menu text stays crisp, in-panel and unobscured"),
+        ("rc0822-quitsafe", "Quit confirmations require a deliberate second move"),
+        ("rc0822-recenter", "Hold-to-recenter appears player-front and cancels safely"),
+        ("rc0822-tutorialentry", "First Play Tutorial/Skip routes once and correctly"),
+        ("rc0822-tutorialfull", "Tutorial panel clears arena and reaches completion"),
+        ("rc0822-layoutcab", "Cabinet defaults, rotation and perk preview work"),
+        ("rc0822-layouttable", "Tabletop is flat; height and three sizes work"),
+        ("rc0822-perks", "Perk inspect/confirm prevents overlap and fresh-offer picks"),
+        ("rc0822-controllers", "Both controller poses, buttons and stick axes animate"),
+        ("rc0822-hands", "Optical gloves auto-switch and follow every tracked joint"),
+        ("rc0822-poke", "Poke markers default on; direct poke is comfortable"),
+        ("rc0822-resume", "Focus loss, sleep and reconnect recover cleanly"),
+        ("rc0822-comfort", "30-minute stereo comfort and performance remain stable"),
+        ("rc0822-lan", "PC/Quest LAN passes both host directions and every slot"),
+        ("rc0822-relay", "Operated relay reconnect/resync and impairments pass"),
     };
 
     private const int PerPage = 4;

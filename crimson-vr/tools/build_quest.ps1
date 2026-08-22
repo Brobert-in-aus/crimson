@@ -1,4 +1,5 @@
-# One-shot Quest APK pipeline: gradle Android export (headless) -> inject the
+# One-shot personal Quest APK pipeline: optionally stage the user's owned game
+# assets -> gradle Android export (headless) -> inject the
 # arm64 crimson_host native lib -> zipalign + sign -> verify payload -> optional
 # adb install.
 # Wraps the two manual steps (Godot export, inject_native_and_sign.ps1) that
@@ -15,6 +16,8 @@
 #
 # Usage:
 #   pwsh -File crimson-vr/tools/build_quest.ps1 [-Install] [-Device <ip:port>]
+#     -AssetMode      Bundled (default local build) or AssetFree (fork/CI)
+#     -GameDir        Classic GOG directory; stages fresh bundled assets
 #     -Install        adb install -r the signed APK to -Device afterward
 #     -InstallOnly    skip the build; install the existing signed APK
 #     -Device         PREFERRED wireless adb target (default 192.168.8.100:5555);
@@ -24,6 +27,8 @@
 #                     skipping the install (default 300; the APK is kept either way)
 
 param(
+    [ValidateSet('Bundled', 'AssetFree')][string]$AssetMode = 'Bundled',
+    [string]$GameDir,
     [switch]$Install,
     [switch]$InstallOnly,
     [switch]$Release,
@@ -45,7 +50,13 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $proj = Join-Path $repoRoot 'crimson-vr\godot'
 $apk = Join-Path $repoRoot 'artifacts\CrimsonVR.apk'
-$questApk = Join-Path $repoRoot 'artifacts\CrimsonVR.quest.apk'
+$exportPreset = if ($AssetMode -eq 'Bundled') { 'Android' } else { 'Android Asset-Free' }
+$questApk = if ($AssetMode -eq 'Bundled') {
+    Join-Path $repoRoot 'artifacts\CrimsonVR.personal-assets.quest.apk'
+}
+else {
+    Join-Path $repoRoot 'artifacts\CrimsonVR.quest.apk'
+}
 $inject = Join-Path $PSScriptRoot 'inject_native_and_sign.ps1'
 
 $AndroidSdk = if ($AndroidSdk) { $AndroidSdk } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -66,6 +77,28 @@ $buildTools = Get-ChildItem (Join-Path $AndroidSdk 'build-tools') -Directory -Er
 
 if (-not (Test-Path $Godot)) { throw "Godot not found: $Godot" }
 if (-not (Test-Path $inject)) { throw "inject script not found: $inject" }
+if ($GameDir -and ($AssetMode -ne 'Bundled' -or $InstallOnly)) {
+    throw '-GameDir is only valid for a full Bundled build.'
+}
+
+if ($AssetMode -eq 'Bundled' -and -not $InstallOnly) {
+    $projectAssets = Join-Path $proj 'assets'
+    $spriteManifest = Join-Path $projectAssets 'sprites\sprite_manifest.json'
+    $audioManifest = Join-Path $projectAssets 'audio\audio_manifest.json'
+    if ($GameDir -or -not ((Test-Path $spriteManifest) -and (Test-Path $audioManifest))) {
+        Write-Host "==> Preparing owned Classic assets for this personal APK..." -ForegroundColor Cyan
+        $prepareArgs = @{ StageProject = $true; ProjectAssets = $projectAssets }
+        if ($GameDir) { $prepareArgs.GameDir = $GameDir }
+        & (Join-Path $PSScriptRoot 'prepare_assets.ps1') @prepareArgs
+        if ($LASTEXITCODE -ne 0) { throw "personal asset staging failed ($LASTEXITCODE)" }
+    }
+    else {
+        Write-Host "    using existing ignored project assets (pass -GameDir to refresh them)" -ForegroundColor DarkGray
+    }
+    if (-not ((Test-Path $spriteManifest) -and (Test-Path $audioManifest))) {
+        throw 'Bundled build requires complete sprite and audio manifests under crimson-vr/godot/assets.'
+    }
+}
 
 function Get-UsbSerial {
     # First adb device in 'device' state whose serial is NOT a tcp target
@@ -276,7 +309,9 @@ $env:GODOT_ANDROID_KEYSTORE_RELEASE_USER = $KeyAlias
 $env:GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD = $StorePassword
 $exportMode = if ($Release) { '--export-release' } else { '--export-debug' }
 $godotArgs = @('--headless', '--xr-mode', 'off', '--path', $proj)
-$godotArgs += @($exportMode, 'Android', $apk)
+# Start-Process flattens ArgumentList into one command line on Windows. Quote
+# the spaced AssetFree preset explicitly so Godot cannot fall back to Android.
+$godotArgs += @($exportMode, ('"' + $exportPreset + '"'), ('"' + $apk + '"'))
 $p = Start-Process -FilePath $Godot `
     -ArgumentList $godotArgs `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
@@ -415,11 +450,19 @@ foreach ($e in $required) {
 }
 Write-Host ("    payload OK ({0} required entries present)" -f $required.Count) -ForegroundColor DarkGray
 
-# Public/personal builds must contain only our frontend/native code. Keep this
-# output-level check beside the payload check so local builds cannot bypass the
-# source-tree CI gate merely by exporting from a dirty development checkout.
-& (Join-Path $PSScriptRoot 'assert_asset_free_apk.ps1') -Apk $questApk -Jar $jar
-if ($LASTEXITCODE -ne 0) { throw "asset-free APK verification failed ($LASTEXITCODE)" }
+if ($AssetMode -eq 'Bundled') {
+    & (Join-Path $PSScriptRoot 'assert_bundled_assets_apk.ps1') -Apk $questApk -Jar $jar
+    if ($LASTEXITCODE -ne 0) { throw "bundled-assets APK verification failed ($LASTEXITCODE)" }
+    $testingCopy = Join-Path $repoRoot 'crimson-vr\CrimsonVR-Quest-testing.apk'
+    Copy-Item -LiteralPath $questApk -Destination $testingCopy -Force
+    Write-Host "    copied personal test APK to $testingCopy" -ForegroundColor DarkGray
+}
+else {
+    # Fork/CI output remains asset-free even when a developer has ignored assets
+    # in the checkout; the dedicated preset excludes them and this gate proves it.
+    & (Join-Path $PSScriptRoot 'assert_asset_free_apk.ps1') -Apk $questApk -Jar $jar
+    if ($LASTEXITCODE -ne 0) { throw "asset-free APK verification failed ($LASTEXITCODE)" }
+}
 
 $installed = $false
 if ($Install) {

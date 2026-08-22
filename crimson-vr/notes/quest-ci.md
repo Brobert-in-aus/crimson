@@ -10,24 +10,16 @@ Windows/Linux personal packages follow the parallel policy and workflow in
 
 ## Distribution boundary
 
-All forks of a public GitHub repository are public. Workflow artifacts in a
-public repository can be downloaded by any signed-in GitHub user with read
-access. Uploading `CrimsonVR.quest.apk` from a public fork would therefore be
-binary redistribution, even with one-day retention.
+The project owner has approved source publication plus user-owned fork CI and
+user-supplied assets as the release model. GitHub's fork mechanism is explicitly
+the supported source path, and the workflow never includes Crimsonland game
+assets. The resulting APK is a personal build created in the user's own fork;
+the project does not publish a maintainer-built APK as a release asset.
 
-The workflow is a technical containment measure, not permission or legal
-advice. As of 2026-08-22, the upstream repository has no detected licence file.
-If the
-maintainer does not have permission to distribute an upstream-linked APK, do
-not send a maintainer-built APK to testers merely because it came from a private
-workflow. Use the tester-owned build path below, and obtain legal advice if the
-source-copy or binary boundary is uncertain.
+The personal-build flow is:
 
-The no-publication flow is instead:
-
-1. Each tester imports or mirrors the approved source revision into their own
-   **private standalone GitHub repository**. Do not use GitHub's Fork button,
-   because a public fork cannot be made private.
+1. Each tester forks the approved public repository into their own GitHub
+   account and selects the approved revision or branch.
 2. Ensure `.github/workflows/quest.yml` is on that repository's default branch.
 3. Open **Actions -> Quest personal build -> Run workflow**.
 4. Set `publish_artifact` to `true`.
@@ -36,14 +28,14 @@ The no-publication flow is instead:
 6. Follow [`quest-playtest.md`](quest-playtest.md) to preserve the signing key,
    install the APK, supply locally owned assets, and record results.
 
-On a public repository, leave `publish_artifact=false`. CI performs the entire
-clean build and payload validation but deliberately uploads no binary.
+The maintainer repository uses `publish_artifact=false` for validation. A user
+sets it to `true` in their own fork to receive their personal asset-free bundle.
 
 ## Fresh Quest install
 
-The private build artifact contains the APK, its signing keystore, and
+The personal build artifact contains the APK, its signing keystore, and
 `QUEST-PERSONAL-BUILD.txt`. Preserve all three. After the first build, encode
-the downloaded keystore and save it as the private repository Actions secret
+the downloaded keystore and save it as the fork's Actions secret
 `QUEST_KEYSTORE_BASE64`:
 
 ```powershell
@@ -81,8 +73,8 @@ headset library to perform the first-run import. End users can instead use
 
 ## Build contract
 
-This workflow is one gate, not release approval. The 2026-08-13 audit remains a
-no-go because physical validation and legal/distribution work are still open.
+This workflow is one gate, not release approval. Distribution scope is settled
+for source + user-owned asset-free builds, while physical validation remains open.
 Record the workflow run,
 artifact hashes, device validation, and legal disposition in the canonical
 [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
@@ -102,13 +94,25 @@ PAQ/PAK under the Godot project, runs the managed VR tests, cross-compiles the
 ReleaseSafe arm64 host library, installs a fresh Gradle Android template,
 exports a release APK, injects the host library, aligns native libraries for
 Quest's 16 KiB pages, signs it, and verifies the managed/native/OpenXR payload.
+The workflow passes `-AssetMode AssetFree` explicitly; it never inherits the
+local builder's bundled-assets default. The dedicated export preset excludes
+`assets/**`, and the final APK gate independently verifies that exclusion.
+
+For an owner's own headset, the separate local convenience path is:
+
+```powershell
+.\crimson-vr\tools\build_quest.ps1 -Release
+```
+
+That creates `CrimsonVR.personal-assets.quest.apk` from locally owned assets and
+must not be uploaded to GitHub or shared. See [`asset-import.md`](asset-import.md).
 
 The M6 runtime half is now implemented and tested: the asset-free APK presents
 an asset-independent recovery panel, imports a locally created pack atomically,
 and has completed a clean on-headset Quest import. Source and APK payload gates
-reject bundled original assets. Remaining release work is operational/legal:
-complete the derived-content audit and settle what upstream-linked binaries/code
-may be redistributed.
+reject bundled original assets. Remaining release work is operational and
+physical: close the Quest/PCVR checklists and the operated-relay matrix while
+keeping every CI artifact asset-free.
 
 On 2026-08-11 the workflow's build contract was reproduced locally with a fresh
 CI-format keystore. The resulting asset-free Release APK
@@ -118,15 +122,15 @@ clean-installed on Quest 3 with the staged pack
 reported a new first-install time and `stopped=true, notLaunched=true`; remote and
 local pack hashes matched.
 
-On 2026-08-22, `test_quest_private_ci.ps1` exercised the complete hosted path
+On 2026-08-22, `test_quest_private_ci.ps1` exercised the complete hosted build
 from a fresh clone of commit `7e804816885d3bfb2419c268fd0c7c323af08dd3`:
 
 ```powershell
 .\crimson-vr\tools\test_quest_private_ci.ps1 -ScratchRoot 'D:\Projects\_scratch'
 ```
 
-It created a private standalone repository with `main` as its default branch,
-passed the clean source gate, completed and downloaded two private Quest
+It created an isolated repository with `main` as its default branch, passed the
+clean source gate, completed and downloaded two Quest
 artifacts, rechecked both APK manifests/hashes and asset-free payloads locally,
 stored the first keystore as `QUEST_KEYSTORE_BASE64`, and proved that the second
 build reused the exact keystore and APK signing certificate. Evidence:
@@ -142,7 +146,9 @@ build reused the exact keystore and APK signing certificate. Evidence:
 - local evidence file:
   `D:\Projects\_scratch\cvr-e2e-20260822-084949\evidence.json`.
 
-The operated test exposed and fixed clean-run gaps in Android template ordering,
+This isolated-repository rehearsal predates the final public-fork policy update,
+but exercises the same workflow build, artifact, signing, and update steps. The
+operated test exposed and fixed clean-run gaps in Android template ordering,
 Godot template metadata, the asset-independent app icon, APK-finalization
-waiting, and export-failure logging. The successful private repository is
-retained for inspection; its uploaded Actions artifacts expire after one day.
+waiting, and export-failure logging. The repository is retained for inspection;
+its uploaded Actions artifacts expire after one day.

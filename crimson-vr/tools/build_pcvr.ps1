@@ -134,8 +134,8 @@ function Export-GodotProject {
 
 $targets = if ($Platform -eq 'All') { @('Windows', 'Linux') } else { @($Platform) }
 foreach ($target in $targets) {
-    $isWindows = $target -eq 'Windows'
-    $native = if ($isWindows) {
+    $targetIsWindows = $target -eq 'Windows'
+    $native = if ($targetIsWindows) {
         Join-Path $project 'native\win-x64\crimson_host.dll'
     } else {
         Join-Path $project 'native\linux-x64\libcrimson_host.so'
@@ -144,7 +144,7 @@ foreach ($target in $targets) {
         throw "native $target library missing: $native (run build_libcrimson.ps1 -Linux)"
     }
 
-    $preset = if ($isWindows) { 'Windows Desktop' } else { 'Linux/X11' }
+    $preset = if ($targetIsWindows) { 'Windows Desktop' } else { 'Linux/X11' }
     $folder = Join-Path $OutputDir $target.ToLowerInvariant()
     $outputRoot = [System.IO.Path]::GetFullPath($OutputDir).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -154,7 +154,7 @@ foreach ($target in $targets) {
     }
     if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
     New-Item -ItemType Directory -Force $folder | Out-Null
-    $binary = if ($isWindows) { Join-Path $folder 'CrimsonVR.exe' } else { Join-Path $folder 'CrimsonVR.x86_64' }
+    $binary = if ($targetIsWindows) { Join-Path $folder 'CrimsonVR.exe' } else { Join-Path $folder 'CrimsonVR.x86_64' }
     Write-Host "Exporting $preset -> $binary"
     Export-GodotProject $preset $binary (Join-Path $OutputDir "export-$($target.ToLowerInvariant())")
     if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw "$preset output missing: $binary" }
@@ -168,7 +168,7 @@ foreach ($target in $targets) {
 
     # NativeLibrary cannot dlopen a file embedded in the PCK. Keep the native
     # simulation loose at the exported res:// path used by Sim.ResolveNative.
-    $rid = if ($isWindows) { 'win-x64' } else { 'linux-x64' }
+    $rid = if ($targetIsWindows) { 'win-x64' } else { 'linux-x64' }
     $nativeOut = Join-Path $folder "native\$rid"
     New-Item -ItemType Directory -Force $nativeOut | Out-Null
     Copy-Item -LiteralPath $native -Destination $nativeOut -Force
@@ -197,7 +197,7 @@ foreach ($target in $targets) {
         'Assets are supplied locally after installation; this package contains no Crimsonland art or audio.'
     ) | Set-Content $manifest
 
-    $archive = if ($isWindows) {
+    $archive = if ($targetIsWindows) {
         Join-Path $OutputDir 'CrimsonVR-PCVR-Windows.zip'
     } else {
         $legacyZip = Join-Path $OutputDir 'CrimsonVR-PCVR-Linux.zip'

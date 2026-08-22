@@ -902,17 +902,19 @@ screen-space overlays:
    probes are a fixed `[left,right]` `HandProbe` span (tip + grip) so a grab keeps
    stable hand identity. Arena scale/height are their own deferred slices; not
    persisted yet (slice 9). Headless-verified; grab feel + layout need eyes.
-5. **First run — BUILT (updated 2026-08-13).** `StartPrompt` teaches direct-touch
-   poke and hold-to-recenter before Main Menu. Continue persists completion;
-   Adjust Reach enters the normal Arena & Layout navigation stack. Returning
-   players skip it. The guide copy is bounded and smart-wrapped, with explicit UI
-   render priority so the ClassicPanel cannot draw over its text. Measured seated
-   calibration remains a later slice.
+5. **First run — BUILT (updated 2026-08-22).** `StartPrompt` teaches direct-touch
+   controller/hand poke and hold-to-recenter before Main Menu. Left **Edit
+   Layout** enters the normal editor stack; right **Skip** accepts the defaults.
+   Either persists completion, and returning players skip it. The first editor
+   visit lists its movable objects before enabling the handles. The guide copy
+   is bounded and smart-wrapped, with explicit UI render priority so the
+   ClassicPanel cannot draw over its text. Measured seated calibration remains
+   a later slice.
 6. **Highscore name entry — BUILT (2026-07-09).** `VirtualKeyboard` (A-Z + Space/
    Del/Enter poke keys) on death; Enter submits the name (empty = skip) and
    restarts. Score = player_experience for now.
-7. **Haptics — BUILT (2026-07-09).** Fire pulse (aim hand, from shot audio
-   events), strong both-hand pulse on damage, reload-complete tick, via the OpenXR
+7. **Haptics — BUILT (2026-07-09).** Fire pulse (aim controller/hand, from shot
+   audio events), strong both-controller/hand pulse on damage, reload-complete tick, via the OpenXR
    "haptic" action. On-device feel + action binding need eyes.
 8. **Replay recording — BUILT + QUEST-CONFIRMED (2026-08-09).** The
    invasive-ABI slice (ABI 19 -> 21). Every run records to `user://replays/
@@ -999,19 +1001,20 @@ reach-envelope calibration (§5) and the player-centered follow-mode toggle (§5
 - VR-native minimal menu (start survival, settings, quit), version/about.
 - CI builds: Windows x64, Quest APK, Linux x64 (GitHub Actions; Zig cross-
   compile + Godot headless export). Quest and PCVR workflows are manually
-  dispatchable, secret-free and fail closed against public artifact upload;
-  downloadable packages remain private until redistribution is resolved.
-- The workflow must be **private-copy runnable**: `workflow_dispatch` trigger,
+  dispatchable and secret-free. A fork owner can explicitly request a one-day
+  asset-free personal-build artifact; the maintainer repository validates with
+  artifact upload disabled.
+- The workflow must be **fork runnable**: `workflow_dispatch` trigger,
   no repo secrets required, APK signed with an auto-generated keystore — this is
   the §10 worst-case distribution path, so it's a requirement, not a nicety. A
-  public GitHub fork cannot be made private and must not publish the binary.
+  user-owned fork and no maintainer-distributed release binary.
 - ⚠️ *Verify*: the local CI-equivalent Quest build/clean-install contract passed
-  on 2026-08-11. The actual private standalone GitHub workflow dispatch and the
+  on 2026-08-11. The hosted fork workflow dispatch and the
   clean-machine PCVR/package matrix remain release gates.
 
-### M6 — Asset removal + licensing decoupling (runtime flow implemented;
-public-release gate remains)
-Nothing ships publicly until the remaining audit and legal scope are resolved.
+### M6 — Asset removal + distribution decoupling (release scope approved)
+The approved public surface is source/history plus asset-free user-owned build
+workflows. Game assets and maintainer-distributed VR binaries remain excluded.
 The canonical cross-project gate and evidence template now live in
 [`docs/contributor/project-tracking/release-preparation.md`](../docs/contributor/project-tracking/release-preparation.md).
 
@@ -1039,10 +1042,9 @@ The canonical cross-project gate and evidence template now live in
 - **Audit the repo and build outputs** for asset-derived content: committed
   fixtures, screenshots in docs, atlas manifests, test data. Anything derived
   from original art/audio is removed or regenerated-on-device.
-- **Code licensing resolution** (see §10): confirm what we may publish.
-  Expected outcome is publishing only `crimson-vr/`-original code plus an
-  overlay/patch for `host_abi`, with build instructions that fetch banteg's
-  repo — unless explicit permission for more is granted.
+- **Release scope decision** (see §10): publish through GitHub's source/fork
+  mechanism, let each user create their personal asset-free binary in CI, and
+  require their own Classic files locally. Do not upload the local bundled APK.
 - *(Stretch / alternative)* **Original replacement asset set**: a
   CC-licensed minimal sprite/audio pack so the VR build is playable with zero
   external files. Large art effort; only worth starting if user-supplied
@@ -1050,8 +1052,7 @@ The canonical cross-project gate and evidence template now live in
 - ✅ *Verify*: a clean build from the public repo contains zero
   original-asset bytes (automated check comparing build outputs against known
   PAQ-derived hashes); fresh user flow works end-to-end with only a GOG
-  install as input; legal checklist in §10 fully resolved or the release is
-  scoped down accordingly.
+  install as input; the repository and output audits enforce the §10 scope.
 
 ### M7 — Move-hand abilities (aim↔move remap)
 - **Optional setting, off by default.** Preserve the locked hand mapping
@@ -1127,13 +1128,10 @@ The canonical cross-project gate and evidence template now live in
 5. **Upstream drift.** `crimson-zig/runtime` evolves upstream. *Mitigation*:
    `host_abi` is additive and thin over `live_runner`; the M1 replay gate
    catches breakage on every upstream merge.
-6. **Licensing blocks public release.** Upstream code is unlicensed
-   (source-available only; "MIT?" issue closed as not planned) and asset
-   permission is upstream-project-specific. *Mitigation*: M6 release gate —
-   distributed builds ship zero original assets and, absent a code grant, only
-   our own code plus an overlay build against the user's own clone (§10).
-   Worst case, the project remains fully buildable-from-source rather than
-   binary-distributable; development is unaffected either way.
+6. **Distribution scope can drift.** The approved source/fork/user-built model
+   does not include game assets or a maintainer-hosted VR binary. *Mitigation*:
+   M6 source/output gates, distinct artifact names, and documentation that keeps
+   the local bundled APK outside CI (§10).
 7. **Player-centered follow mode causes motion sickness.** Moving the arena
    under a stationary user is a vection source even when critically damped.
    *Mitigation*: off by default, tuned in the M4 comfort pass alongside the
@@ -1151,16 +1149,14 @@ The canonical cross-project gate and evidence template now live in
 
 ## 10. Licensing and distribution
 
-Confirmed findings (2026-07):
+Background findings and owner decision:
 
 - **Upstream code is source-available, not open source.** No LICENSE file, no
   license declaration in `pyproject.toml`, and an issue asking "MIT?" was
   **closed as "not planned"** — so an upstream OSS license should not be
-  assumed forthcoming. Default copyright applies: GitHub's ToS permits
-  viewing/forking public repos, but **not** reproducing, distributing, or
-  creating derivative works beyond that. Redistributing any build or source
-  containing banteg's code (including `crimson-zig/src/runtime/`, which
-  `libcrimson` links) requires explicit written permission.
+  assumed forthcoming. The release therefore stays on GitHub's supported
+  source/fork path; the project owner has selected user-owned CI builds rather
+  than maintainer-distributed VR binaries.
 - **Assets are even more restricted.** The PAQs and source art are distributed
   "with permission from the original developer" *for the upstream project
   specifically* — not a public asset license, and not permission for
@@ -1168,7 +1164,7 @@ Confirmed findings (2026-07):
   (selection, conversion, stitched sprite sheets), so banteg may hold separate
   rights in the pack itself on top of 10tons' rights in the underlying art.
 
-### Permissions that full open-sourcing would require
+### Broader maintainer distribution would require a separate decision
 
 1. **banteg / repo copyright holders**: license to reuse, modify, and
    redistribute the code (or an upstream OSS license).
@@ -1185,27 +1181,20 @@ Confirmed findings (2026-07):
   builds contain only our code and original content; users provide their own
   legally obtained Crimsonland Classic files, imported and baked locally on
   first run. No automatic download via the upstream project's channel.
-- **Publishable-by-default surface = our own code only**: the Godot frontend
-  (`crimson-vr/godot/`), tools, ABI header, and docs. The `host_abi` layer is
-  our code but links against banteg's runtime, so prebuilt `libcrimson` (and
-  any APK containing it) is not distributable without a grant. However,
-  GitHub's ToS permits public forks, so the fork itself — banteg's code with
-  `host_abi` and `crimson-vr/` in place — can stay public on GitHub as one
-  clonable repo. Overlay/patch packaging is only needed if we ever distribute
-  source outside GitHub.
-- **Worst-case user build flow (no code grant)**: primary path is
-  **private-copy-and-CI** — the user imports/mirrors the repo into a private
-  standalone GitHub repository and runs the release workflow there; cloud CI
-  produces their APK / desktop build (auto-generated signing keystore included)
-  with zero local toolchain. A public fork is insufficient: GitHub requires all
-  forks of a public repository to remain public, and its workflow artifacts are
-  downloadable by every signed-in user with read access. Public CI may validate
-  the build but must never upload the upstream-linked binary. The
-  local build script (bootstraps Zig, Android SDK/NDK, JDK, Godot + export
-  templates, .NET) is the fallback. Either way the resulting APK is
-  asset-free; assets are imported on-device afterward (M6 flow), so even
-  self-built APKs contain no 10tons content and one import path serves all
-  scenarios.
+- **Publishable surface**: source, history, the Godot frontend, tools, ABI layer,
+  documentation, and asset-free workflows remain on GitHub's supported
+  source/fork path. No game assets are committed or emitted by CI.
+- **User build flow**: the user creates their own fork/copy and runs the workflow;
+  cloud CI produces their personal APK / desktop build with zero local toolchain.
+  The downloadable-artifact flow runs in the user's fork and emits a one-day
+  personal artifact only when explicitly requested. The explicit
+  `-AssetMode AssetFree` build is the fallback. That APK remains
+  asset-free and assets are imported on-device afterward (M6 flow). Separately,
+  the local build script now defaults to a clearly named, non-shareable
+  `CrimsonVR.personal-assets.quest.apk` for the builder's own headsets: it
+  atomically stages locally owned Classic assets into the ignored project tree
+  and verifies their baked payload. This convenience output must never enter
+  CI, GitHub artifacts, or tester distribution.
 - **Ask anyway**: approach banteg with the finished result for a code
   redistribution grant (which would let us ship prebuilt `libcrimson` /
   all-in-one builds), and 10tons for an asset arrangement. Treat both as
@@ -1261,11 +1250,11 @@ keys alongside the untested cases and new paged-settings/edit-preview/default-la
 
 Remaining, in rough order:
 
-**Release-readiness audit (2026-08-13): NO-GO.** Packaging builds succeeded, but
+**Release-readiness audit baseline (2026-08-13): NO-GO at that time.** Packaging builds succeeded, but
 the reordered rollback smoke failed, Windows native networking was flaky across
 lockstep/relay tests, `0.10.0` was still the already-published package version,
 and the candidate remained uncommitted. These are release blockers in addition
-to the physical, operational, and legal work below. Track closure in the
+to the physical, operational, and distribution-scope work below. Track closure in the
 [Release Preparation](../docs/contributor/project-tracking/release-preparation.md)
 document rather than treating successful compilation as readiness.
 
@@ -1284,16 +1273,15 @@ document rather than treating successful compilation as readiness.
    first launch, import, relaunch reuse, and actionable failure recovery.
 3. **Exercise M5 CI on the eventual default branch.** Quest and Windows/Linux
    PCVR personal-build workflows are implemented as manually dispatched,
-   secret-free clean builds. Public repositories validate without uploading;
-   downloadable APK/key or PCVR archive bundles are restricted to a private
-   standalone copy (see `notes/quest-ci.md` and `notes/pcvr-ci.md`). GitHub only
+   secret-free clean builds. The maintainer repository validates without
+   uploading; each user can request their personal APK/key or PCVR bundle from
+   their own fork (see `notes/quest-ci.md` and `notes/pcvr-ci.md`). GitHub only
    enables manual dispatch after the workflow file exists on the default branch.
 4. **Seated reach calibration (§5).** Now partly served by the Arena & Layout
    sliders; a measured calibration is still the stronger version.
-5. **Release/private-copy rehearsal.** Asset removal and licensing decoupling are
-   built, and the local CI-equivalent build/install contract has been exercised.
-   Still exercise the documented import/rebase and actual private standalone
-   GitHub personal-build workflow end to end.
+5. **Release workflow rehearsal.** The isolated-repository Quest CI path has
+   passed twice, including signing-key reuse. The equivalent Windows/Linux PCVR
+   hosted packages and clean-machine import/runtime matrix remain.
 6. **Validate multiplayer slices 3-6, then implement slice 7.** Direct-LAN
    and relay Survival/Rush, negotiated-slot presentation/results, per-player
    FX, canonical perks, network replays, DNS and reconnect/resync are

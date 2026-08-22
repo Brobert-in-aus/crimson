@@ -4,6 +4,7 @@ Development-checkout implementation of the future standalone helper:
 
     python crimson-vr/tools/prepare_assets.py "C:\Games\Crimsonland Classic"
     python crimson-vr/tools/prepare_assets.py GAME_DIR --quest
+    python crimson-vr/tools/prepare_assets.py GAME_DIR --stage-project crimson-vr/godot/assets
 """
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ def discover_classic(candidates: Iterable[Path] | None = None) -> Path:
     )
 
 
-def prepare(game_dir: Path, output: Path) -> None:
+def bake(game_dir: Path, baked: Path) -> None:
     # Lazy so `--help` and Classic-vs-HD diagnostics work even before the
     # checkout's Python project has been installed (`uv sync`).
     try:
@@ -99,22 +100,60 @@ def prepare(game_dir: Path, output: Path) -> None:
         ) from error
 
     validate_classic(game_dir)
+    extracted = baked.parent / "extracted"
+    cmd_extract(game_dir, extracted)
+    source_music = game_dir / "music"
+    if source_music.is_dir():
+        shutil.copytree(source_music, extracted / "music")
+
+    subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("bake_assets.py")),
+         str(extracted), str(baked / "sprites")],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+
+
+def validate_baked_assets(baked: Path) -> None:
+    required = (
+        baked / "sprites" / "sprite_manifest.json",
+        baked / "audio" / "audio_manifest.json",
+    )
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise RuntimeError("baked asset set is incomplete; missing: " + ", ".join(missing))
+
+
+def prepare(game_dir: Path, output: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="crimsonvr-assets-") as temporary:
         root = Path(temporary)
-        extracted = root / "extracted"
         baked = root / "baked"
-        cmd_extract(game_dir, extracted)
-        source_music = game_dir / "music"
-        if source_music.is_dir():
-            shutil.copytree(source_music, extracted / "music")
-
-        subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("bake_assets.py")),
-             str(extracted), str(baked / "sprites")],
-            cwd=REPO_ROOT,
-            check=True,
-        )
+        bake(game_dir, baked)
+        validate_baked_assets(baked)
         build_pack(baked, output)
+
+
+def stage_project_assets(game_dir: Path, destination: Path) -> None:
+    """Atomically replace the ignored res://assets development fallback."""
+    destination = destination.resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".crimsonvr-assets-", dir=destination.parent) as temporary:
+        root = Path(temporary)
+        baked = root / "baked"
+        bake(game_dir, baked)
+        validate_baked_assets(baked)
+
+        backup = root / "previous-assets"
+        had_previous = destination.exists()
+        if had_previous:
+            destination.replace(backup)
+        try:
+            baked.replace(destination)
+        except BaseException:
+            if had_previous and backup.exists() and not destination.exists():
+                backup.replace(destination)
+            raise
+    print(f"staged personal project assets: {destination}")
 
 
 def connected_devices(adb: str) -> list[tuple[str, str]]:
@@ -205,12 +244,23 @@ def main() -> None:
     parser.add_argument("--adb", default="adb", help="adb executable (default: adb on PATH)")
     parser.add_argument("--device", help="ADB serial when more than one Android device is connected")
     parser.add_argument("--apk", type=Path, help="install/update this asset-free APK before transfer")
+    parser.add_argument(
+        "--stage-project",
+        type=Path,
+        metavar="ASSETS_DIR",
+        help="atomically stage baked assets for a personal bundled project export",
+    )
     args = parser.parse_args()
     if args.quest and args.pcvr:
         parser.error("choose either --quest or --pcvr")
     if args.apk and not args.quest:
         parser.error("--apk is only valid with --quest")
+    if args.stage_project and (args.quest or args.pcvr or args.apk):
+        parser.error("--stage-project cannot be combined with --quest, --pcvr, or --apk")
     game_dir = args.game_dir.resolve() if args.game_dir else discover_classic()
+    if args.stage_project:
+        stage_project_assets(game_dir, args.stage_project)
+        return
     output = args.output.resolve()
     prepare(game_dir, output)
     if args.quest:

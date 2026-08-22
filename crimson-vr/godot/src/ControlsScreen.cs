@@ -6,7 +6,7 @@ namespace CrimsonVR;
 /// <summary>
 /// Controls screen (the base Options screen's Controls button, reimagined for
 /// VR): a read-only reference card for the control mapping — there are no
-/// keybinds to edit, the hands ARE the bindings. Hand roles honour the
+/// keybinds to edit, the controllers/hands ARE the bindings. Roles honour the
 /// hand-swap setting live. Opened from Options, Back returns there.
 /// </summary>
 public sealed partial class ControlsScreen : Node3D
@@ -89,8 +89,8 @@ public sealed partial class ControlsScreen : Node3D
         _fallback?.QueueFree();
         _fallback = null;
 
-        string moveHand = _handSwap ? "Right hand" : "Left hand";
-        string aimHand = _handSwap ? "Left hand" : "Right hand";
+        string moveControl = _handSwap ? "Right controller/hand" : "Left controller/hand";
+        string aimControl = _handSwap ? "Left controller/hand" : "Right controller/hand";
         bool cabinet = _mode == ControlMode.Cabinet;
         // The surface the hands work over is the whole difference between the
         // modes, and it is not guessable from looking at the scene — in Cabinet
@@ -98,14 +98,14 @@ public sealed partial class ControlsScreen : Node3D
         string surface = cabinet ? "the control pad in front of you" : "the arena";
         string[] lines =
         {
-            cabinet ? "Mode: Cabinet  -  hands on the pad, board up ahead"
-                    : "Mode: Tabletop  -  hands reach into the arena",
+            cabinet ? "Mode: Cabinet  -  controllers/hands on the pad, board up ahead"
+                    : "Mode: Tabletop  -  controllers/hands reach into the arena",
             "",
-            $"{moveHand}  -  pinch / trigger over {surface} to move",
-            $"{aimHand}  -  aim: the spread ring is the crosshair",
-            "Pinch / trigger (aim hand)  -  fire",
-            "Reload / swap  -  aim-hand fist / grip; empty clips auto-reload",
-            "Buttons  -  poke with a fingertip or controller top",
+            $"{moveControl}  -  trigger / pinch over {surface} to move",
+            $"{aimControl}  -  aim: the spread ring is the crosshair",
+            "Trigger / pinch (aim controller/hand)  -  fire",
+            "Reload / swap  -  aim-controller grip / hand fist; empty clips auto-reload",
+            "Buttons  -  poke with a controller top or fingertip",
             cabinet ? "Pause  -  the flat button beside the pad"
                     : "Pause  -  the flat button beside the arena",
             "Recenter  -  hold the controller's menu/recenter control",

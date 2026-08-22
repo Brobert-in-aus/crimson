@@ -35,10 +35,17 @@ ast-grep-all:
     sg scan -c sgconfig.local.yml
     sg test -c sgconfig.local.yml
 
+[unix]
 check-zig:
     cd crimson-zig && zig build test --summary all
     cd crimson-zig && zig build -Doptimize=ReleaseFast
     cd crimson-zig && zig build wasm
+
+[windows]
+check-zig:
+    cd crimson-zig; zig build test --summary all; exit $LASTEXITCODE
+    cd crimson-zig; zig build -Doptimize=ReleaseFast; exit $LASTEXITCODE
+    cd crimson-zig; zig build wasm; exit $LASTEXITCODE
 
 ty:
     uv run ty check src tests

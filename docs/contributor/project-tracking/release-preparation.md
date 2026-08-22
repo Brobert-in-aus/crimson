@@ -11,14 +11,17 @@ This is the canonical release-readiness checklist for the Python desktop package
 the native Zig runtime, and CrimsonVR personal builds. It consolidates the gates
 that were previously distributed across the VR plan and platform-specific notes.
 
-!!! danger "Current decision: no-go pending release approvals"
+!!! warning "Current decision: release candidate preparation"
 
     The 2026-08-13 engineering remediation closed the rollback recovery and
-    Windows networking defects found by the initial audit. Publication remains
-    Version `0.11.0` has been selected and applied locally. Publication remains
-    blocked by the final clean-commit validation and unresolved CrimsonVR legal,
-    clean-machine, relay-operations, and physical-device gates. Do not create or
-    push a release tag yet.
+    Windows networking defects found by the initial audit. Version `0.11.0` has
+    been selected and applied. The project owner has approved the source +
+    user-owned fork/CI + user-supplied-assets distribution model described
+    below, closing the previous permission-scope blocker for that release
+    surface. On 2026-08-22 the owner accepted the current Quest, PCVR, and
+    PCVR-to-Quest multiplayer state for this scope and approved the prepared
+    release commit. Private exact-SHA hosted CI and the final GitHub review
+    remain; do not create or push a release tag yet.
 
 ## Release surfaces
 
@@ -28,11 +31,11 @@ Treat these as separate deliverables with separate publication decisions:
 |---|---|---|
 | Python desktop package | Tag-triggered PyPI and GitHub release | Automated gates pass; version selected as `0.11.0`; final clean-commit rerun pending |
 | Zig runtime/build targets | Built and tested as part of the source release | Automated and repeated networking gates pass on Windows |
-| CrimsonVR Quest and PCVR | Asset-free personal builds from manual workflows | Build paths exist; operational, physical-device, and legal gates remain |
+| CrimsonVR Quest and PCVR | Source plus asset-free user-owned personal builds from manual workflows | Owner accepted current Quest, Windows PCVR, and PCVR-to-Quest scope on 2026-08-22; broader matrices are post-release coverage |
 
 The tag-triggered `.github/workflows/release.yml` publishes only the Python
 wheel and source distribution. It does not publish Quest APKs or PCVR packages.
-Those binaries remain subject to the private-copy rules in the
+Those binaries remain subject to the personal-fork rules in the
 [Quest](https://github.com/banteg/crimson/blob/master/crimson-vr/notes/quest-ci.md)
 and
 [PCVR](https://github.com/banteg/crimson/blob/master/crimson-vr/notes/pcvr-ci.md)
@@ -55,7 +58,7 @@ CI-pinned Zig 0.16.0 toolchain.
 | .NET Release build | Zero warnings or errors | Pass |
 | Provenance | Passed with exact CI-pinned, hash-verified binaries | Pass |
 | Repository state | 87 modified and 34 untracked files | **Fail**: candidate is not committed or CI-verifiable |
-| Public CrimsonVR scope | Derived-content/code-licensing decisions remain open | **Fail** |
+| Public CrimsonVR scope | Owner-approved source/fork workflow; no game assets or maintainer-distributed VR binaries | **Pass for this scope** |
 
 Windows tests that create temporary files on a different drive from the checkout
 can fail before exercising product code because `os.path.relpath` cannot cross
@@ -109,9 +112,9 @@ All blockers must be closed with evidence, not merely marked understood.
 | RP-01 | Closed locally | Reordered rollback input smoke returned `RollbackHostInputMismatch` | State-driven catch-up implemented; 20/20 reorder smokes and full Python suite pass |
 | RP-02 | Closed locally | Windows native networking was nondeterministic across lockstep handshake and rollback relay tests | Repeated Windows suites and smokes pass without retry-dependent acceptance |
 | RP-03 | Closed locally | `0.10.0` was already tagged/published | Minor bump selected for the substantial new VR, multiplayer, replay, and tooling capabilities; package and lockfile now use `0.11.0`; intended tag is `v0.11.0` |
-| RP-04 | Release-prep remediation committed; version commit and final rerun pending | The original release candidate existed only as a large dirty worktree | Commit the version/policy update, then run every required gate from the clean, versioned release commit |
-| RP-05 | Open | Public CrimsonVR derived-content and upstream-code scope is unresolved | Written licensing decision and completed repository/output audit, or release scope reduced accordingly |
-| RP-06 | Partial: Quest hosted path passed | Quest private-copy create/build/download/re-sign path passed twice on 2026-08-22; clean-machine PCVR matrix, relay operation, and broader headset testing remain incomplete | Quest runs 32534616770 and 32535378646 plus local evidence JSON; PCVR workflow URLs/manifests and signed physical-validation record still required |
+| RP-04 | Release commit approved; private exact-SHA CI pending | The original release candidate existed only as a large dirty worktree | Candidate consolidated, fully rerun, staged without generated payloads, and approved for the 0.11.0 release commit |
+| RP-05 | Closed by release-scope decision | Public CrimsonVR derived-content and upstream-code scope was unresolved | Publish source/history and asset-free user-owned build workflows only; GitHub forking is the supported source-copy mechanism, users supply Classic assets locally, and maintainer-distributed/bundled VR binaries remain out of scope |
+| RP-06 | Closed by owner acceptance | Quest hosted create/build/download/re-sign passed twice; broader PCVR, relay-operation, and headset matrices exceed the accepted 0.11.0 scope | Quest runs 32534616770 and 32535378646, local package evidence, clean Quest/PCVR first-run tests, PCVR-to-Quest multiplayer test, and owner acceptance on 2026-08-22 |
 
 ## Required automated gates
 
@@ -183,27 +186,36 @@ Before calling a personal build ready:
 - finish or explicitly disposition every active headset validation-checklist
   item.
 
+Use the release-candidate evidence forms at
+`crimson-vr/notes/quest-release-checklist.md` and
+`crimson-vr/notes/pcvr-release-checklist.md`. Casual network Quests and Python
+mixed-runtime rooms are not 0.11.0 claims and therefore use explicit
+out-of-scope dispositions rather than implied passes.
+
 See the
 [multiplayer implementation](https://github.com/banteg/crimson/blob/master/crimson-vr/notes/multiplayer-implementation.md)
 for the detailed matrix and
 [port status](https://github.com/banteg/crimson/blob/master/crimson-vr/notes/port-status.md)
 for deliberately deferred or substituted features.
 
-## Legal and distribution gate
+## Distribution scope decision
 
-CrimsonVR remains asset-free, but that alone does not authorize public binary or
-source redistribution. Before public release:
+The project owner has selected the following release model:
 
-1. Audit committed fixtures, screenshots, generated manifests, documentation
-   media, and every build output for original-asset-derived content.
-2. Record the permitted scope for upstream-linked code and binaries.
-3. If permission is narrower than the repository, publish only the approved
-   original-code/patch surface and keep personal binary workflows private.
-4. Confirm that release notes and user instructions describe the supported GOG
-   Crimsonland Classic asset-import flow without implying redistribution rights.
+1. Publish the source, history, documentation, and asset-free personal-build
+   workflows. GitHub's supported fork mechanism is the source-copy path.
+2. Do not commit, upload, or distribute Crimsonland art, audio, PAQ/PAK files,
+   generated asset packs, manifests derived from a user's install, or the local
+   bundled-assets APK.
+3. Each user runs the build workflow for their own personal binary and supplies
+   their own GOG Crimsonland Classic assets locally after the build.
+4. CI source and output gates must prove that downloadable workflow packages are
+   asset-free. The separate local bundled build has an inverse payload gate and
+   remains a private convenience output for the builder's own headset.
 
-No public CrimsonVR package may be uploaded until this gate has a written owner
-and disposition.
+This is the recorded product-owner release scope, not a general licence grant or
+legal opinion. Any future maintainer-hosted VR binary or bundled asset package is
+a separate release surface and requires a new disposition.
 
 ## Versioning and release procedure
 
@@ -222,8 +234,8 @@ After every blocker above is closed:
 7. Push the commit and tag, then monitor the release workflow through PyPI and
    GitHub release creation.
 8. Verify the published wheel in a new environment and record its hashes.
-9. Publish or distribute VR personal-build artifacts only through the separately
-   approved private flow.
+9. Keep maintainer releases source-only; users request asset-free personal-build
+   artifacts from their own forks.
 
 ## Definition of release-ready
 
@@ -235,7 +247,7 @@ A candidate is release-ready only when all of the following are true:
 - supported platform packages pass clean-machine and payload inspection;
 - every advertised network scenario passes its deterministic and physical gate;
 - known limitations are accurate and do not contradict implementation notes;
-- public distribution has an explicit legal disposition; and
+- public distribution stays within the recorded source/fork/user-supplied-assets scope; and
 - the evidence record identifies the responsible reviewer and artifact hashes.
 
 ## Evidence record template
@@ -252,6 +264,10 @@ than pasting only summaries.
 | Repeated Windows networking gate | |
 | Wheel/sdist hashes and install smoke | |
 | Quest workflow/build manifest | Commit `7e804816885d3bfb2419c268fd0c7c323af08dd3`; private runs [32534616770](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32534616770) and [32535378646](https://github.com/Brobert-in-aus/cvr-e2e-20260822-084949/actions/runs/32535378646); generated and restored signing-key paths passed |
+
+The current 0.11.0 candidate's local test, package, hash, hosted-CI, owner
+acceptance, and deferred-coverage record is maintained in
+`crimson-vr/notes/release-evidence-0.11.0.md`.
 | PCVR workflow/build manifests | |
 | Physical-device matrix | |
 | Relay operations approval | |

@@ -1,25 +1,22 @@
 # Quest playtester handoff
 
-This is the operated path for a small private CrimsonVR playtest when public
-binary redistribution has not been approved. It keeps original Crimsonland
-assets off GitHub and makes each participant responsible for their own private
-build and locally owned game data.
+This is the operated path for a CrimsonVR playtest. It keeps original
+Crimsonland assets off GitHub and makes each participant responsible for their
+own fork-built APK and locally owned game data.
 
 ## Boundary first
 
-- Do not use GitHub's **Fork** button: a fork of a public repository is public.
+- Use GitHub's **Fork** button so the source history and ownership of the
+  personal CI run remain explicit.
 - Do not upload or share `crimson-assets.pack`, PAQ/PAK files, extracted art, or
   audio.
-- A private workflow is not itself a licence grant. The upstream repository has
-  no detected licence file, so the organiser must confirm that the selected
-  source-copy and personal-build arrangement is acceptable. If APK distribution
-  is not approved, each tester must build their own APK using this guide.
-- Do not add testers to a maintainer artifact repository solely to bypass an
-  unresolved binary-distribution decision.
+- The approved release surface is source plus user-owned CI builds. Each tester
+  creates their own personal APK and supplies their own Classic assets; the
+  organiser does not distribute a maintainer-built or bundled-assets APK.
 
 ## What each tester needs
 
-- A GitHub account and a private standalone copy containing the approved
+- A GitHub account and a fork containing the approved
   CrimsonVR revision, with `.github/workflows/quest.yml` on its default branch.
 - A Quest in Developer Mode, a Windows PC with `adb` available, and an approved
   USB debugging connection.
@@ -28,34 +25,34 @@ build and locally owned game data.
 - `uv` for local asset preparation (`winget install --id=astral-sh.uv -e`). Godot,
   Zig, .NET, Java, and the Android SDK are supplied by GitHub Actions.
 
-## Create the private standalone copy
+## Create the fork
 
-The organiser supplies the approved public repository URL and branch name. The
-tester runs the following with GitHub CLI, substituting their account and the
-approved branch. This creates a new private repository; it is not a GitHub fork:
+The organiser supplies the approved public repository URL and revision. The
+tester creates a GitHub fork, clones it, and checks out the approved revision:
 
 ```powershell
-git clone --single-branch --branch APPROVED_BRANCH PUBLIC_REPOSITORY_URL crimsonvr-playtest
+gh repo fork PUBLIC_REPOSITORY
+gh repo clone OWNER/REPOSITORY crimsonvr-playtest
 Set-Location crimsonvr-playtest
-gh repo create OWNER/crimsonvr-playtest --private --source=. --remote=playtest --push
-gh repo edit OWNER/crimsonvr-playtest --default-branch APPROVED_BRANCH
+git checkout APPROVED_REVISION
 ```
 
-Before continuing, open the private repository in a browser and confirm:
+Before continuing, open the fork in a browser and confirm:
 
-- its visibility says **Private**;
-- `APPROVED_BRANCH` is the default branch;
-- `.github/workflows/quest.yml` exists on that branch; and
+- the fork belongs to the tester;
+- `.github/workflows/quest.yml` exists at the approved revision; and
 - the Actions tab shows **Quest personal build**.
 
-GitHub Importer can also copy a publicly accessible Git repository and its
-history, but the default-branch checks above are still required. The current
-maintainer public fork's `master` branch does not contain the Quest workflow, so
-importing it and running the stale default branch is not sufficient.
+If the approved revision is not the fork's default branch, select that branch in
+the workflow dispatcher. Running a stale default branch is not sufficient.
 
 ## Build
 
-1. In the private standalone repository, enable GitHub Actions if prompted.
+This playtester path intentionally uses the asset-free CI contract. The local
+`build_quest.ps1` default is instead a non-shareable bundled-assets APK for the
+builder's own headsets; do not substitute or upload that artifact.
+
+1. In the fork, enable GitHub Actions if prompted.
 2. Confirm **Settings → Actions → General → Workflow permissions** allows read
    repository contents. The workflow requests no write permission.
 3. Open **Actions → Quest personal build → Run workflow** on the default branch.
@@ -70,7 +67,7 @@ importing it and running the stale default branch is not sufficient.
    ```
 
 7. Preserve the keystore. For later in-place updates, configure it in that same
-   private repository:
+   fork:
 
    ```powershell
    $bytes = [IO.File]::ReadAllBytes('.\crimsonvr-ci.keystore')
@@ -101,9 +98,9 @@ as though first launch was skipped.
 
 ## Test and report
 
-Enable **Options → VR Settings → Display → Debug overlays** to open the current
-in-headset checklist. Poking a row cycles untested → PASS → FAIL. Testers should
-return:
+Release exports hide the developer **Debug overlays** control. Use the external
+release checklist below; developer builds retain the in-headset checklist and FX
+tools when deeper diagnostics are required. Testers should return:
 
 - headset model and system software version;
 - controller or optical-hand input;
@@ -111,6 +108,10 @@ return:
 - checklist PASS/FAIL results and reproduction steps for each failure;
 - screenshots or video for spatial/layout issues, with no personal information
   or copyrighted asset pack attached.
+
+For release-candidate sign-off, complete the expanded
+[Quest headset checklist](quest-release-checklist.md); the in-headset list is a
+portable summary, not the complete evidence record.
 
 Before installing a build signed with a different key, export any results that
 matter: uninstalling `xyz.crimsonvr.app` erases settings, scores, imported

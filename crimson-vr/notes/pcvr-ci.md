@@ -1,13 +1,12 @@
 # PCVR personal-build CI
 
-Windows and Linux PCVR use the same no-redistribution model as the Quest build:
-public repositories may validate a complete build, but must not upload packages
-containing the upstream-linked native simulation. A private standalone copy may
-publish short-lived artifacts for its owner.
+Windows and Linux PCVR use the same personal-build model as Quest: each user
+forks the source and may request short-lived, asset-free packages from their own
+fork. The project does not attach maintainer-built packages to a release.
 
 ## User flow
 
-1. Import or mirror the repository into a private standalone GitHub repository.
+1. Fork the approved repository into your GitHub account.
 2. Open **Actions -> PCVR personal build -> Run workflow**.
 3. Set `publish_artifact` to `true`.
 4. Download `CrimsonVR-PCVR-*` within one day and choose the Windows ZIP or Linux
@@ -24,10 +23,11 @@ per-user imported assets; keep the locally generated pack for recovery.
 
 ## Build contract
 
-This workflow is one gate, not release approval. The 2026-08-13 audit remains a
-no-go because native networking, clean-machine packaging, physical validation,
-and legal/distribution work are still open. Record the eventual workflow run,
-package manifests/hashes, platform smoke tests, and legal disposition in the
+This workflow is one gate, not release approval. The project owner has approved
+the source + user-owned CI + user-supplied-assets release model; no game assets
+are included. Clean-machine packaging, physical validation, and operated-relay
+work remain open. Record the eventual workflow run, package manifests/hashes,
+platform smoke tests, and distribution scope in the
 canonical [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
 evidence table.
 
@@ -47,8 +47,8 @@ and export templates. One runner:
 - records executable, PCK, managed-assembly and native-library hashes in
   `PERSONAL-BUILD.txt`;
 - packages Windows as ZIP and Linux as tar.gz with the executable bit preserved;
-- uploads the archives for one day only when the repository is private and the
-  dispatch explicitly requests publication.
+- uploads the archives for one day only when the fork owner explicitly requests
+  publication.
 
 The same path is locally reproducible on Windows:
 
@@ -59,3 +59,7 @@ The same path is locally reproducible on Windows:
 
 `bootstrap_pcvr_ci.ps1` can restore the pinned editor/templates on a clean
 machine. Local output lands under `artifacts/pcvr/`.
+
+Package construction alone is not runtime approval. Complete the Windows/Linux
+clean-machine and headset matrix in the
+[PCVR release checklist](pcvr-release-checklist.md).

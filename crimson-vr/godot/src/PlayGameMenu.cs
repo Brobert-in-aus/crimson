@@ -20,10 +20,6 @@ public sealed partial class PlayGameMenu : Node3D
     private VrButton _tutorial = null!;
     private VrButton _multiplayer = null!;
     private VrButton _back = null!;
-    private float _topY;
-    private float _pitch;
-    private bool _tutorialRecommended;
-
     public bool IsOpen { get; private set; }
 
     public event Action? OnQuests;
@@ -49,15 +45,14 @@ public sealed partial class PlayGameMenu : Node3D
         // Native _mode_entries order: Quests, Rush, Survival.
         float w = s * 0.55f;
         float h = s * 0.115f;
-        _pitch = h + s * 0.03f;
-        _topY = s * 0.32f;
-        float y = _topY;
-        _quests = MakeButton("Quests", w, h, y, () => OnQuests?.Invoke()); y -= _pitch;
-        _rush = MakeButton("Rush", w, h, y, () => OnRush?.Invoke()); y -= _pitch;
-        _survival = MakeButton("Survival", w, h, y, () => OnSurvival?.Invoke()); y -= _pitch;
-        _typo = MakeButton("Typ'o'Shooter", w, h, y, () => OnTypo?.Invoke()); y -= _pitch;
-        _tutorial = MakeButton("Tutorial", w, h, y, () => OnTutorial?.Invoke()); y -= _pitch;
-        _multiplayer = MakeButton("Multiplayer", w, h, y, () => OnMultiplayer?.Invoke()); y -= _pitch;
+        float pitch = h + s * 0.03f;
+        float y = s * 0.32f;
+        _quests = MakeButton("Quests", w, h, y, () => OnQuests?.Invoke()); y -= pitch;
+        _rush = MakeButton("Rush", w, h, y, () => OnRush?.Invoke()); y -= pitch;
+        _survival = MakeButton("Survival", w, h, y, () => OnSurvival?.Invoke()); y -= pitch;
+        _typo = MakeButton("Typ'o'Shooter", w, h, y, () => OnTypo?.Invoke()); y -= pitch;
+        _tutorial = MakeButton("Tutorial", w, h, y, () => OnTutorial?.Invoke()); y -= pitch;
+        _multiplayer = MakeButton("Multiplayer", w, h, y, () => OnMultiplayer?.Invoke()); y -= pitch;
         _back = MakeButton("Back", w * 0.55f, h, y - s * 0.03f, () => OnBack?.Invoke());
 
         Visible = false;
@@ -73,12 +68,8 @@ public sealed partial class PlayGameMenu : Node3D
         return b;
     }
 
-    public void Open(bool? tutorialRecommended = null)
+    public void Open()
     {
-        if (tutorialRecommended.HasValue)
-        {
-            SetTutorialRecommended(tutorialRecommended.Value);
-        }
         IsOpen = true;
         Visible = true;
         _quests.ResetPress();
@@ -88,19 +79,6 @@ public sealed partial class PlayGameMenu : Node3D
         _tutorial.ResetPress();
         _multiplayer.ResetPress();
         _back.ResetPress();
-    }
-
-    public void SetTutorialRecommended(bool recommended)
-    {
-        _tutorialRecommended = recommended;
-        _tutorial.SetText(recommended ? "Tutorial - Start Here" : "Tutorial");
-        VrButton[] order = recommended
-            ? new[] { _tutorial, _quests, _rush, _survival, _typo, _multiplayer }
-            : new[] { _quests, _rush, _survival, _typo, _tutorial, _multiplayer };
-        for (int i = 0; i < order.Length; i++)
-        {
-            order[i].Position = new Vector3(0.0f, _topY - i * _pitch, 0.0f);
-        }
     }
 
     public void Close()

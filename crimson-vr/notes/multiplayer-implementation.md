@@ -11,9 +11,10 @@ flatscreen compatibility remains a gated target until mixed-runtime matches
 pass the determinism matrix below.
 
 The normal user path is relay rollback with a four-character room code. Direct
-UDP lockstep remains an Advanced/LAN path. Multiplayer supports Survival, Rush
-and casual Quests, two to four players. Tutorial, Typo'Shooter and Hardcore are
-out of the initial scope.
+UDP lockstep remains an Advanced/LAN path. The 0.11.0 candidate supports
+Survival and Rush for two to four players. Casual Quests remain slice 7 and are
+not advertised for this release. Tutorial, Typo'Shooter and Hardcore are also
+out of scope.
 
 ## Non-negotiable boundaries
 
@@ -233,36 +234,38 @@ Remaining slice-6 release work is operational and physical: provision the
 friends-only relay, configure DNS/capacity monitoring, and run sleep/resume,
 Wi-Fi roaming and impairment tests on real Quest/native-PC pairs.
 
-## Remaining validation matrix
+## Post-release physical and operated matrix
 
-The 2026-08-13 release audit added two blocking regressions to this matrix:
+The project owner accepted the current PCVR-to-Quest multiplayer behaviour for
+0.11.0 on 2026-08-22. The two automated regressions discovered by the 2026-08-13 audit are closed:
+reordered rollback input, repeated Windows Zig suites, lockstep smoke, and the
+full impairment/resync matrix now pass without retry-dependent acceptance. The
+remaining rows are retained as broader device, topology, operated-service, and
+scope-proof hardening coverage rather than 0.11.0 blockers:
 
-- `smoke-rollback --impair reorder-first-guest-input` fails with
-  `RollbackHostInputMismatch` in the complete Python suite;
-- Windows native runs are timing-dependent: direct lockstep intermittently
-  returns `LockstepHandshakeFailed`, and repeated `zig build test` runs can fail
-  different relay/rollback assertions.
+| ID | Remaining evidence | Release impact |
+|---|---|---|
+| MP-01 | Direct LAN with native PC hosting Quest and Quest hosting native PC | Blocks advertised bidirectional LAN |
+| MP-02 | Two-, three-, and four-player physical matches with Quest as local slot 0, 1, 2, and 3 | Blocks the advertised 2-4 player/slot claim |
+| MP-03 | Survival and Rush: movement/fire, every-player FX/HUD, canonical perk choices, player death, results, and verified all-slot replay | Blocks the advertised gameplay claim |
+| MP-04 | Peer leave, disconnect, reconnect-token recovery, state resync, and useful build/protocol mismatch errors | Blocks recovery claims |
+| MP-05 | Real-device delay, jitter, reorder, loss, and duplicate delivery while recording final convergence and no duplicate audio/terrain FX | Blocks impairment tolerance claims |
+| MP-06 | Quest focus loss, sleep/resume, controller loss, and Wi-Fi transition during LAN and relay matches | Blocks headset lifecycle recovery |
+| MP-07 | Quest CPU, memory, frame timing, thermal state, and catch-up load during a 30+ minute rollback match | Blocks performance sign-off |
+| MP-08 | Provision the owned friends-only relay and release DNS; record region/provider, capacity, timeout, rate limits, room expiry, monitoring/alerts, logs/privacy, incident owner, and shutdown procedure | Blocks enabling room-code relay in release configuration |
+| MP-09 | Two-, three-, and four-player operated-relay matches covering MP-03 through MP-07 | Blocks the normal room-code path |
+| MP-10 | Casual Quest completion and host-owned unlock/progression | Not a 0.11.0 blocker because casual network Quests are explicitly out of scope |
+| MP-11 | Every protocol-v6 golden packet plus Python-host/native-client, native-host/Python-client, and mixed relay parity | Not a 0.11.0 blocker while Python mixed rooms are explicitly unsupported |
 
-Both must pass repeatedly without retry-dependent success before hardware
-results can support a release claim. Preserve failing seeds and logs in the
-[Release Preparation](../../docs/contributor/project-tracking/release-preparation.md)
-evidence record.
-
-- Native PC host/client against Quest VR over direct LAN (slice-3 hardware gate)
-  and relay.
-- Two, three and four players; local Quest slot 0 through 3.
-- Survival, Rush and a full casual Quest.
-- Perk menus, player death, results, disconnect, reconnect and state resync.
-- Delay, reorder, packet loss and duplicate delivery.
-- Build/protocol mismatch with useful frontend errors.
-- Quest focus loss, sleep/resume and Wi-Fi transition.
-- Quest CPU/memory during rollback history and catch-up.
-- Python/native mixed rooms and per-tick state parity before claiming broad
-  flatscreen compatibility.
+Each run records candidate commit/build hashes, topology, player count, local
+slot, mode, devices, impairment settings, final tick/state hash, replay result,
+and logs. A single two-player LAN smoke does not close any broader row.
 
 ## Definition of done
 
-Multiplayer is complete only when native PC/VR cross-play passes the matrix,
-network replays verify, the room-code flow is usable without developer tools,
-and public relay operation has capacity/rate/expiry protections. Python
-cross-play is a separate claim unlocked only by its cross-runtime proof gates.
+The current 0.11.0 multiplayer scope is owner-accepted PCVR-to-Quest play. A
+future broader multiplayer claim is complete only when native PC/VR cross-play
+passes MP-01 through MP-09, network replays verify, the room-code flow is usable
+without developer tools, and public relay operation has capacity/rate/expiry
+protections. Python cross-play is a separate claim unlocked only by its
+cross-runtime proof gates.

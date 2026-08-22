@@ -7,7 +7,7 @@ namespace CrimsonVR;
 /// <summary>
 /// VR presentation for the native nine-stage tutorial. The simulation owns all
 /// stage transitions and scripted spawns; this panel only translates its prompt
-/// and hint indices into hand/controller language and provides the native Skip,
+/// and hint indices into controller/hand language and provides the native Skip,
 /// Play a game, and Repeat tutorial exits.
 /// </summary>
 public sealed partial class TutorialPanel : Node3D
@@ -15,10 +15,10 @@ public sealed partial class TutorialPanel : Node3D
     private static readonly string[] Prompts =
     {
         "Welcome! This tutorial teaches Crimsonland in VR. Pause is beside your control area.",
-        "Move: hold a pinch or trigger with your movement hand and point where you want to go.",
+        "Move: hold the trigger or pinch with your movement controller/hand and point where you want to go.",
         "Walk over the bonuses to pick them up.",
-        "Keep moving, then pinch or hold trigger with your aim hand to shoot.",
-        "Move your aim hand to point the spread ring at the monsters.",
+        "Keep moving, then hold the trigger or pinch with your aim controller/hand to shoot.",
+        "Move your aim controller/hand to point the spread ring at the monsters.",
         "Practice: clear each wave and collect its dropped power-up to continue.",
         "Perks: poke Level Up, select a perk card, then confirm your selection.",
         "Perks grant passive abilities that help you survive.",

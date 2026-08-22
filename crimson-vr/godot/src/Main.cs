@@ -173,6 +173,10 @@ public partial class Main : Node3D
     private readonly XRNode3D?[] _trackedHandNodes = new XRNode3D?[2];
     private readonly Node3D?[] _gloveHands = new Node3D?[2];
     private Node3D _arenaRoot = null!;
+    // Shared translation-only parent for menus, perk selection and results.
+    // Layout edit changes this root's Z offset, keeping every screen co-planar.
+    private Node3D _spatialMenuRoot = null!;
+    private MenuDistanceHandle _menuDistanceHandle = null!;
     // Sibling of _arenaRoot, not a child: the playfield carries its own scale,
     // pitch and placement so growing/tilting the board never drags the menus
     // and panels (which stay parented to _arenaRoot at the reference scale).
@@ -224,6 +228,7 @@ public partial class Main : Node3D
     private bool _controlsOpen;
     private bool _arenaLayoutOpen;
     private ArenaLayoutMenu _arenaLayout = null!;
+    private LayoutEditTutorial _layoutEditTutorial = null!;
     private bool _optionsFromMenu; // options opened from the main menu (vs the pause menu)
     private float _deadZone = VrInput.DefaultDeadZoneGameUnits;
     private StartPrompt _startPrompt = null!;
@@ -256,6 +261,7 @@ public partial class Main : Node3D
     private DebugMenu _debugMenu = null!;
     private MainMenu _mainMenu = null!;
     private PlayGameMenu _playGameMenu = null!;
+    private TutorialRecommendationPanel _tutorialRecommendation = null!;
     private MultiplayerLanMenu _multiplayerLanMenu = null!;
     private QuestSelectMenu _questSelect = null!;
     private QuestResultPanel _questPanel = null!;
@@ -274,7 +280,8 @@ public partial class Main : Node3D
     private bool MenuOwnsScreen => _mainMenu.IsOpen || _playGameMenu.IsOpen || _multiplayerLanMenu.IsOpen || _questSelect.IsOpen
         || _statsMenu.IsOpen || _databaseMenu.IsOpen || _highScoresMenu.IsOpen
         || _creditsMenu.IsOpen || _alienZooKeeper.IsOpen
-        || _startPrompt is { Pending: true } || _sessionErrorPanel is { Active: true }
+        || _startPrompt is { Pending: true } || _tutorialRecommendation is { Active: true }
+        || _sessionErrorPanel is { Active: true }
         || (_optionsFromMenu && (_optionsOpen || _vrSettingsOpen || _controlsOpen || _arenaLayoutOpen));
     private bool _debug;
     private Vector2 _playerGame = new(GameWorldSize * 0.5f, GameWorldSize * 0.5f);
@@ -590,9 +597,20 @@ public partial class Main : Node3D
     {
         // Persisted settings first, so the menus build with the saved values.
         _settings.Load();
+        // ExportRelease packages keep the diagnostics in code but do not expose
+        // or restore the developer overlay state.
+        _settings.Debug &= SettingsMenu.DebugControlsAvailable;
         _handSwap = _settings.HandSwap;
         _deadZone = _settings.DeadZone;
         ApplyHandAppearance();
+
+        _spatialMenuRoot = new Node3D
+        {
+            Name = "SpatialMenuRoot",
+            Position = new Vector3(0.0f, 0.0f,
+                _settings.MenuDistance - SpatialMenuPlacement.DefaultAdditionalDistanceMeters),
+        };
+        _arenaRoot.AddChild(_spatialMenuRoot);
 
         // The playfield and everything registered TO it (terrain, entities,
         // positional audio, the scoreboard) hang off PlayfieldRoot, so they
@@ -632,13 +650,13 @@ public partial class Main : Node3D
 
         // Perk pick cards float above the arena (poke to choose), arena-local.
         _perkMenu = new PerkMenu();
-        _arenaRoot.AddChild(_perkMenu);
+        _spatialMenuRoot.AddChild(_perkMenu);
         _perkMenu.Build(ArenaSideMeters);
 
         // Pause: an always-live flat toggle beside the arena; resume/settings/quit
         // above it while paused. Settings is unhooked until the settings slice.
         _pauseMenu = new PauseMenu();
-        _arenaRoot.AddChild(_pauseMenu);
+        _spatialMenuRoot.AddChild(_pauseMenu);
         _pauseMenu.Build(ArenaSideMeters);
         // EdgeRoot is mounted by SetControlMode, once the mode is known.
         _pauseMenu.OnQuit += ReturnToMenu; // in-game Quit -> main menu (menu Quit exits the app)
@@ -651,7 +669,7 @@ public partial class Main : Node3D
         // UI-info-texts toggle, and a VR Settings submenu. Opened from the main
         // menu or the pause menu; values applied live + persisted.
         _optionsMenu = new VrOptionsMenu();
-        _arenaRoot.AddChild(_optionsMenu);
+        _spatialMenuRoot.AddChild(_optionsMenu);
         _optionsMenu.Build(
             ArenaSideMeters, _settings.SfxVolume, _settings.MusicVolume, _settings.GraphicsDetail,
             LoadReticleTex("ui_menuPanel.png"), LoadReticleTex("ui_rectOn.png"), LoadReticleTex("ui_rectOff.png"));
@@ -664,7 +682,7 @@ public partial class Main : Node3D
 
         // VR Settings submenu (opened from Options): hand-swap + dead-zone + debug.
         _settingsMenu = new SettingsMenu();
-        _arenaRoot.AddChild(_settingsMenu);
+        _spatialMenuRoot.AddChild(_settingsMenu);
         _settingsMenu.Build(ArenaSideMeters, _handSwap, _deadZone, _settings.Debug,
             (ControllerDisplayMode)_settings.ControllerDisplay, _settings.HandModel,
             (ControlMode)_settings.ControlMode,
@@ -709,7 +727,7 @@ public partial class Main : Node3D
         // Controls reference card (the base Options screen's Controls button):
         // read-only VR mapping, honouring hand-swap.
         _controlsScreen = new ControlsScreen();
-        _arenaRoot.AddChild(_controlsScreen);
+        _spatialMenuRoot.AddChild(_controlsScreen);
         _controlsScreen.Build(ArenaSideMeters, _handSwap, (ControlMode)_settings.ControlMode);
         _controlsScreen.OnBack += CloseControls;
 
@@ -771,6 +789,16 @@ public partial class Main : Node3D
         _arenaLayout.OnReset += ResetUiLayout;
         _arenaLayout.OnUndoReset += UndoUiLayoutReset;
 
+        _layoutEditTutorial = new LayoutEditTutorial();
+        _spatialMenuRoot.AddChild(_layoutEditTutorial);
+        _layoutEditTutorial.Build(ArenaSideMeters);
+        _layoutEditTutorial.OnContinue += CompleteLayoutEditTutorial;
+
+        _menuDistanceHandle = new MenuDistanceHandle();
+        _arenaRoot.AddChild(_menuDistanceHandle);
+        _menuDistanceHandle.Build(ArenaSideMeters, _settings.MenuDistance);
+        _menuDistanceHandle.OnDistanceChanged += ApplyMenuDistance;
+
         // A saved placement wins over the mode default: the player put the board
         // where they wanted it, and a mode they never switched should not undo
         // that on every launch.
@@ -795,17 +823,19 @@ public partial class Main : Node3D
         // First-run interaction guide. It teaches the direct-touch control before
         // Main Menu, then stays out of the returning-player path.
         _startPrompt = new StartPrompt();
-        _arenaRoot.AddChild(_startPrompt);
+        _spatialMenuRoot.AddChild(_startPrompt);
         _startPrompt.Build(ArenaSideMeters);
-        _startPrompt.OnAccept += () =>
+        _startPrompt.OnSkip += () =>
         {
             _settings.FirstRunDone = true;
             _settings.Save();
             _mainMenu.Open();
         };
-        _startPrompt.OnCalibrate += () =>
+        _startPrompt.OnEditLayout += () =>
         {
-            // OnAccept runs immediately after this event and opens Main Menu.
+            _settings.FirstRunDone = true;
+            _settings.Save();
+            _mainMenu.Open();
             // Defer the normal options stack until that navigation state exists.
             Callable.From(() =>
             {
@@ -822,18 +852,18 @@ public partial class Main : Node3D
         // Death flow: highscore name entry (virtual keyboard, when the score
         // ranks) then the game-over results panel.
         _keyboard = new VirtualKeyboard();
-        _arenaRoot.AddChild(_keyboard);
+        _spatialMenuRoot.AddChild(_keyboard);
         _keyboard.Build(ArenaSideMeters);
         _keyboard.OnSubmit += SubmitHighscoreName;
 
         _gameOverPanel = new GameOverPanel();
-        _arenaRoot.AddChild(_gameOverPanel);
+        _spatialMenuRoot.AddChild(_gameOverPanel);
         _gameOverPanel.Build(ArenaSideMeters);
         _gameOverPanel.OnPlayAgain += PlayAgain;
         _gameOverPanel.OnMainMenu += () => { _gameOverPanel.Dismiss(); ReturnToMenu(); };
 
         _sessionErrorPanel = new SessionErrorPanel();
-        _arenaRoot.AddChild(_sessionErrorPanel);
+        _spatialMenuRoot.AddChild(_sessionErrorPanel);
         _sessionErrorPanel.Build(ArenaSideMeters);
         _sessionErrorPanel.OnRetry += () =>
         {
@@ -851,25 +881,25 @@ public partial class Main : Node3D
         // Main menu (boot screen): the original Crimsonland menu art, floating and
         // pokeable, over the terrain diorama. Holds the sim until PLAY is poked.
         _mainMenu = new MainMenu();
-        _arenaRoot.AddChild(_mainMenu);
+        _spatialMenuRoot.AddChild(_mainMenu);
         _mainMenu.Build(
             ArenaSideMeters,
             LoadReticleTex("ui_signCrimson.png"),
             LoadReticleTex("ui_menuItem.png"),
             LoadReticleTex("ui_itemTexts.png"));
-        _mainMenu.OnPlay += () => { _mainMenu.Close(); _playGameMenu.Open(!_settings.TutorialCompleted); };
+        _mainMenu.OnPlay += OpenPlayFlow;
         _mainMenu.OnOptions += () => OpenOptions(fromMenu: true);
         _mainMenu.OnStatistics += () => { _mainMenu.Close(); _statsMenu.Open(); };
         _mainMenu.OnQuit += () => { CaptureWeaponUsage(); GetTree().Quit(); };
 
         // Statistics + high-scores browser (lifetime per-mode aggregates).
         _statsMenu = new StatsMenu();
-        _arenaRoot.AddChild(_statsMenu);
+        _spatialMenuRoot.AddChild(_statsMenu);
         _statsMenu.Build(ArenaSideMeters, _settings);
         _statsMenu.OnBack += () => { _statsMenu.Close(); _mainMenu.Open(); };
 
         _highScoresMenu = new HighScoresMenu();
-        _arenaRoot.AddChild(_highScoresMenu);
+        _spatialMenuRoot.AddChild(_highScoresMenu);
         _highScoresMenu.Build(ArenaSideMeters, _settings);
         _statsMenu.OnHighScores += () => { _scoresFromGameOver = false; _statsMenu.Close(); _highScoresMenu.Open(); };
         _gameOverPanel.OnHighScores += () => { _scoresFromGameOver = true; _gameOverPanel.Dismiss(); _highScoresMenu.Open(_gameMode, _runPlayerCount); };
@@ -882,13 +912,13 @@ public partial class Main : Node3D
         };
 
         _creditsMenu = new CreditsMenu();
-        _arenaRoot.AddChild(_creditsMenu);
+        _spatialMenuRoot.AddChild(_creditsMenu);
         _creditsMenu.Build(ArenaSideMeters);
         _statsMenu.OnCredits += () => { _statsMenu.Close(); _creditsMenu.Open(); };
         _creditsMenu.OnBack += () => { _creditsMenu.Close(); _statsMenu.Open(); };
 
         _alienZooKeeper = new AlienZooKeeper();
-        _arenaRoot.AddChild(_alienZooKeeper);
+        _spatialMenuRoot.AddChild(_alienZooKeeper);
         _alienZooKeeper.Build(ArenaSideMeters);
         _creditsMenu.OnSecret += () => { _creditsMenu.Close(); _alienZooKeeper.Open(); };
         _alienZooKeeper.OnBack += () => { _alienZooKeeper.Close(); _creditsMenu.Open(); };
@@ -896,7 +926,7 @@ public partial class Main : Node3D
         // Unlocked Weapons/Perks Databases, behind Statistics like the flat
         // game (panels/stats.py -> panels/databases_*.py).
         _databaseMenu = new DatabaseMenu();
-        _arenaRoot.AddChild(_databaseMenu);
+        _spatialMenuRoot.AddChild(_databaseMenu);
         _databaseMenu.Build(ArenaSideMeters);
         _statsMenu.OnWeapons += () =>
         {
@@ -912,7 +942,7 @@ public partial class Main : Node3D
 
         // Play Game mode select (base play_game.py): Quests / Rush / Survival.
         _playGameMenu = new PlayGameMenu();
-        _arenaRoot.AddChild(_playGameMenu);
+        _spatialMenuRoot.AddChild(_playGameMenu);
         _playGameMenu.Build(ArenaSideMeters);
         _playGameMenu.OnSurvival += () => StartRun(GameModeSurvival);
         _playGameMenu.OnRush += () => StartRun(GameModeRush);
@@ -922,8 +952,14 @@ public partial class Main : Node3D
         _playGameMenu.OnMultiplayer += () => { _playGameMenu.Close(); _multiplayerLanMenu.Open(); };
         _playGameMenu.OnBack += () => { _playGameMenu.Close(); _mainMenu.Open(); };
 
+        _tutorialRecommendation = new TutorialRecommendationPanel();
+        _spatialMenuRoot.AddChild(_tutorialRecommendation);
+        _tutorialRecommendation.Build(ArenaSideMeters);
+        _tutorialRecommendation.OnTutorial += AcceptTutorialRecommendation;
+        _tutorialRecommendation.OnSkip += SkipTutorialRecommendation;
+
         _multiplayerLanMenu = new MultiplayerLanMenu();
-        _arenaRoot.AddChild(_multiplayerLanMenu);
+        _spatialMenuRoot.AddChild(_multiplayerLanMenu);
         _multiplayerLanMenu.Build(ArenaSideMeters);
         _multiplayerLanMenu.OnHost += StartLanHost;
         _multiplayerLanMenu.OnJoin += StartLanJoin;
@@ -934,7 +970,7 @@ public partial class Main : Node3D
         _multiplayerLanMenu.OnBack += () => _playGameMenu.Open();
 
         _tutorialPanel = new TutorialPanel();
-        _arenaRoot.AddChild(_tutorialPanel);
+        _spatialMenuRoot.AddChild(_tutorialPanel);
         _tutorialPanel.Build(ArenaSideMeters);
         _tutorialPanel.OnSkip += LeaveTutorial;
         _tutorialPanel.OnPlay += LeaveTutorial;
@@ -943,13 +979,13 @@ public partial class Main : Node3D
         {
             if (_settings.TutorialCompleted) return;
             _settings.TutorialCompleted = true;
+            _settings.PlayTutorialPromptSeen = true;
             _settings.Save();
-            _playGameMenu.SetTutorialRecommended(false);
         };
 
         // Quest stage/level select, gated by the persisted unlock index.
         _questSelect = new QuestSelectMenu();
-        _arenaRoot.AddChild(_questSelect);
+        _spatialMenuRoot.AddChild(_questSelect);
         _questSelect.Build(ArenaSideMeters);
         _questSelect.OnStart += (key, title) =>
         {
@@ -961,7 +997,7 @@ public partial class Main : Node3D
 
         // Quest end panel: completed (Next Quest) or failed (Retry).
         _questPanel = new QuestResultPanel();
-        _arenaRoot.AddChild(_questPanel);
+        _spatialMenuRoot.AddChild(_questPanel);
         _questPanel.Build(ArenaSideMeters);
         _questPanel.OnNext += StartNextQuest;
         _questPanel.OnRetry += () => StartRun(GameModeQuests, _questKey);
@@ -976,7 +1012,7 @@ public partial class Main : Node3D
 
         // Quest 5.10 finale: Show End Note -> the victory text + mode shortcuts.
         _endNote = new EndNotePanel();
-        _arenaRoot.AddChild(_endNote);
+        _spatialMenuRoot.AddChild(_endNote);
         _endNote.Build(ArenaSideMeters);
         _questPanel.OnEndNote += () =>
         {
@@ -1023,7 +1059,7 @@ public partial class Main : Node3D
         }
 
         // Returning players boot into Main Menu. First-time players remain on the
-        // guide until Continue/Adjust Reach; both paths eventually open Main Menu.
+        // guide until Edit Layout/Skip; both paths eventually open Main Menu.
         if (_settings.FirstRunDone)
         {
             _mainMenu.Open();
@@ -1044,6 +1080,34 @@ public partial class Main : Node3D
         _rightGuide.Visible = visible;
     }
 
+    private void OpenPlayFlow()
+    {
+        _mainMenu.Close();
+        if (OnboardingFlow.ShouldRecommendTutorial(
+            _settings.PlayTutorialPromptSeen, _settings.TutorialCompleted))
+        {
+            _tutorialRecommendation.Open();
+            return;
+        }
+        _playGameMenu.Open();
+    }
+
+    private void AcceptTutorialRecommendation()
+    {
+        _settings.PlayTutorialPromptSeen = true;
+        _settings.Save();
+        _tutorialRecommendation.Dismiss();
+        StartRun(GameModeTutorial);
+    }
+
+    private void SkipTutorialRecommendation()
+    {
+        _settings.PlayTutorialPromptSeen = true;
+        _settings.Save();
+        _tutorialRecommendation.Dismiss();
+        _playGameMenu.Open();
+    }
+
     /// <summary>Leave the menus and begin a run in the given mode (Quests also
     /// carry the level key). Recreates the sim session with the mode's config
     /// and re-applies terrain (quests have per-level terrain slots). The base
@@ -1051,6 +1115,7 @@ public partial class Main : Node3D
     /// first creature hit (randomly gt1/gt2, sim trigger_game_tune).</summary>
     private void StartRun(int gameMode, int questKey = 0)
     {
+        _tutorialRecommendation?.Dismiss();
         _gameMode = gameMode;
         _typoDirector.SetLayout(DetectTypoControllerLayout());
         _typoPromptLayer.Clear();
@@ -1684,12 +1749,29 @@ public partial class Main : Node3D
         _checklist.SetShown(false);
         _debugMenu.SetShown(false);
         _layoutMenu.SetShown(false);
+        if (OnboardingFlow.ShouldShowLayoutTutorial(_settings.LayoutTutorialDone))
+        {
+            SetUiEditMode(false);
+            _layoutEditTutorial.Open();
+        }
+        else
+        {
+            SetUiEditMode(true);
+        }
+    }
+
+    private void CompleteLayoutEditTutorial()
+    {
+        _settings.LayoutTutorialDone = true;
+        _settings.Save();
+        _layoutEditTutorial.Dismiss();
         SetUiEditMode(true);
     }
 
     private void CloseArenaLayout()
     {
         _arenaLayoutOpen = false;
+        _layoutEditTutorial.Dismiss();
         SetUiEditMode(false);
         _arenaLayout.SetShown(false);
         _checklist.SetShown(_settings.Debug);
@@ -1706,6 +1788,16 @@ public partial class Main : Node3D
         _settings.ArenaDistance = _playfieldNearEdge;
         _settings.ArenaDrop = _playfieldNearDrop;
         _settings.Save();
+    }
+
+    private void ApplyMenuDistance(float distanceMeters)
+    {
+        float distance = SpatialMenuPlacement.ClampAdditionalDistance(distanceMeters);
+        _settings.MenuDistance = distance;
+        _spatialMenuRoot.Position = new Vector3(0.0f, 0.0f,
+            distance - SpatialMenuPlacement.DefaultAdditionalDistanceMeters);
+        _menuDistanceHandle.SetDistance(distance);
+        _uiLayoutDirty = true;
     }
 
     private void OpenControls()
@@ -3068,6 +3160,11 @@ public partial class Main : Node3D
             _mainMenu.PollPoke(p);
             return;
         }
+        if (_tutorialRecommendation.Active)
+        {
+            _tutorialRecommendation.PollPoke(p);
+            return;
+        }
         if (_playGameMenu.IsOpen)
         {
             _playGameMenu.PollPoke(p);
@@ -3114,11 +3211,18 @@ public partial class Main : Node3D
         {
             if (_arenaLayoutOpen)
             {
-                _arenaLayout.PollPoke(p);
-                // The preview toggle lives on PerkMenu in the normal Confirm
-                // location. Main-menu options return from this branch early,
-                // so it must be polled here as a peer of ArenaLayoutMenu.
-                _perkMenu.PollPoke(p);
+                if (_layoutEditTutorial.Active)
+                {
+                    _layoutEditTutorial.PollPoke(p);
+                }
+                else
+                {
+                    _arenaLayout.PollPoke(p);
+                    // The preview toggle lives on PerkMenu in the normal Confirm
+                    // location. Main-menu options return from this branch early,
+                    // so it must be polled here as a peer of ArenaLayoutMenu.
+                    _perkMenu.PollPoke(p);
+                }
             }
             else if (_vrSettingsOpen)
             {
@@ -3188,7 +3292,14 @@ public partial class Main : Node3D
         }
         if (_pauseMenu.IsPaused && _arenaLayoutOpen)
         {
-            _arenaLayout.PollPoke(p);
+            if (_layoutEditTutorial.Active)
+            {
+                _layoutEditTutorial.PollPoke(p);
+            }
+            else
+            {
+                _arenaLayout.PollPoke(p);
+            }
         }
         // Perk cards only while a pick is pending AND the pause menu isn't up (they
         // share the space; the pause panel takes precedence). While paused the sim
@@ -3220,6 +3331,7 @@ public partial class Main : Node3D
                 // Resuming out of the pause stack closes these panels wholesale,
                 // so it is the other way edit mode can be left behind.
                 _arenaLayoutOpen = false;
+                _layoutEditTutorial.Dismiss();
                 SetUiEditMode(false);
                 _arenaLayout.SetShown(false);
                 _settingsMenu.SetShown(false);
@@ -3958,6 +4070,7 @@ public partial class Main : Node3D
         // Show the action buttons for placement and make them inert while held.
         _pauseMenu.SetEditMode(on);
         _perkMenu.SetLayoutPreview(on);
+        _menuDistanceHandle.SetShown(on, _settings.MenuDistance);
         if (!on)
         {
             // Record the final state on every edit exit, even if the player did
@@ -3987,6 +4100,7 @@ public partial class Main : Node3D
         {
             grabbing |= e.PollGrab(probes);
         }
+        grabbing |= _menuDistanceHandle.PollGrab(probes);
         return grabbing;
     }
 

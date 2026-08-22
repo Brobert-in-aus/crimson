@@ -76,3 +76,41 @@ def test_send_to_pcvr_uses_godot_user_directory(
 
     assert inbox == appdata / "Godot" / "app_userdata" / "CrimsonVR" / "crimson-assets.pack"
     assert inbox.read_bytes() == b"pack"
+
+
+def test_stage_project_assets_atomically_replaces_existing_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "project" / "assets"
+    destination.mkdir(parents=True)
+    (destination / "stale.txt").write_text("old")
+
+    def fake_bake(_game_dir: Path, baked: Path) -> None:
+        (baked / "sprites").mkdir(parents=True)
+        (baked / "audio").mkdir()
+        (baked / "sprites" / "sprite_manifest.json").write_text("{}")
+        (baked / "audio" / "audio_manifest.json").write_text("{}")
+        (baked / "fresh.txt").write_text("new")
+
+    monkeypatch.setattr(prepare_assets, "bake", fake_bake)
+    prepare_assets.stage_project_assets(tmp_path / "classic", destination)
+
+    assert (destination / "fresh.txt").read_text() == "new"
+    assert not (destination / "stale.txt").exists()
+
+
+def test_stage_project_assets_keeps_existing_tree_when_bake_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = tmp_path / "project" / "assets"
+    destination.mkdir(parents=True)
+    (destination / "keep.txt").write_text("safe")
+
+    def failed_bake(_game_dir: Path, _baked: Path) -> None:
+        raise RuntimeError("extract failed")
+
+    monkeypatch.setattr(prepare_assets, "bake", failed_bake)
+    with pytest.raises(RuntimeError, match="extract failed"):
+        prepare_assets.stage_project_assets(tmp_path / "classic", destination)
+
+    assert (destination / "keep.txt").read_text() == "safe"

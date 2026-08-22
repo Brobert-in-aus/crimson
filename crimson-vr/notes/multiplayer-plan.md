@@ -178,8 +178,10 @@ These are release gates, not optional polish:
 
 The cross-project go/no-go decision and evidence record live in
 [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md).
-The 2026-08-13 audit remains a no-go until the reordered-input regression and
-native networking flakes are fixed as well as the proof gates below.
+The reordered-input regression and native networking flakes found by the
+2026-08-13 audit are closed. The cross-runtime proof gates below remain required
+before Python mixed rooms can be advertised; they are explicitly outside the
+0.11.0 native-PC/Quest Survival/Rush scope.
 
 1. Golden MessagePack packets encoded in Python decode in Zig and vice versa for
    every protocol-v6 message, including status and rollback resync snapshots.

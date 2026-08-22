@@ -44,6 +44,9 @@ public sealed class UserSettings
     public float DeadZone = VrInput.DefaultDeadZoneGameUnits;
     public bool FirstRunDone;
     public bool TutorialCompleted;
+    public bool LayoutTutorialDone;
+    public bool PlayTutorialPromptSeen;
+    public float MenuDistance = SpatialMenuPlacement.DefaultAdditionalDistanceMeters;
     public string PlayerName = string.Empty;
     public bool Debug;
 
@@ -159,7 +162,7 @@ public sealed class UserSettings
     public readonly Dictionary<string, int> Checklist = new();
     // Validation batches are deliberately disposable. A version bump starts a
     // clean headset pass without carrying old PASS/FAIL state into new work.
-    private const int ChecklistVersion = 2;
+    private const int ChecklistVersion = 4;
 
     public void Load()
     {
@@ -172,6 +175,10 @@ public sealed class UserSettings
         DeadZone = cf.GetValue("input", "dead_zone", DeadZone).AsSingle();
         FirstRunDone = cf.GetValue("game", "first_run_done", FirstRunDone).AsBool();
         TutorialCompleted = cf.GetValue("game", "tutorial_completed", TutorialCompleted).AsBool();
+        LayoutTutorialDone = cf.GetValue("game", "layout_tutorial_done", LayoutTutorialDone).AsBool();
+        PlayTutorialPromptSeen = cf.GetValue("game", "play_tutorial_prompt_seen", PlayTutorialPromptSeen).AsBool();
+        MenuDistance = SpatialMenuPlacement.ClampAdditionalDistance(
+            cf.GetValue("ui", "menu_distance", MenuDistance).AsSingle());
         PlayerName = cf.GetValue("game", "player_name", PlayerName).AsString();
         Debug = cf.GetValue("dev", "debug", Debug).AsBool();
         WeaponShowcase = cf.GetValue("dev", "weapon_showcase", WeaponShowcase).AsBool();
@@ -335,6 +342,9 @@ public sealed class UserSettings
         }
         cf.SetValue("game", "first_run_done", FirstRunDone);
         cf.SetValue("game", "tutorial_completed", TutorialCompleted);
+        cf.SetValue("game", "layout_tutorial_done", LayoutTutorialDone);
+        cf.SetValue("game", "play_tutorial_prompt_seen", PlayTutorialPromptSeen);
+        cf.SetValue("ui", "menu_distance", SpatialMenuPlacement.ClampAdditionalDistance(MenuDistance));
         cf.SetValue("game", "player_name", PlayerName);
         cf.SetValue("game", "quest_unlock_index", QuestUnlockIndex);
         cf.SetValue("game", "quest_unlock_index_full", QuestUnlockIndexFull);

@@ -121,7 +121,7 @@ public sealed partial class ArenaLayoutMenu : Node3D
 
         _hint = new Label3D
         {
-            Text = "Grab a corner to move  •  two corners to size",
+            Text = "Grip a corner with a controller/hand to move  •  two corners to size",
             FontSize = 52,
             PixelSize = s / 1100.0f,
             Modulate = new Color(0.7f, 0.72f, 0.8f),

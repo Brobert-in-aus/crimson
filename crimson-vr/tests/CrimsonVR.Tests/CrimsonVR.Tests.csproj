@@ -28,6 +28,7 @@
     <Compile Include="..\..\godot\src\RecenterHold.cs" />
     <Compile Include="..\..\godot\src\ArenaLayoutValues.cs" />
     <Compile Include="..\..\godot\src\SpatialMenuPlacement.cs" />
+    <Compile Include="..\..\godot\src\OnboardingFlow.cs" />
     <Compile Include="..\..\godot\src\Sim.cs" />
     <Compile Include="..\..\godot\src\SimSession.cs" />
     <Compile Include="..\..\godot\src\NetworkSimSession.cs" />

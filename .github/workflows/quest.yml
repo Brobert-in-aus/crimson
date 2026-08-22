@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_artifact:
-        description: Upload the APK and signing key (private repositories only)
+        description: Upload this fork owner's asset-free APK and signing key
         required: true
         default: false
         type: boolean
@@ -26,18 +26,6 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
-      - name: Refuse public binary publication
-        if: ${{ inputs.publish_artifact && !github.event.repository.private }}
-        shell: pwsh
-        run: |
-          throw @'
-          This repository is public. GitHub artifacts from public repositories
-          are downloadable by every signed-in GitHub user, so publishing this
-          upstream-linked APK would defeat the no-binary-redistribution model.
-          Run with publish_artifact=false to validate the build, or import the
-          repository into a private standalone repository and run it there.
-          '@
-
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -100,6 +88,7 @@ jobs:
         shell: pwsh
         run: |
           ./crimson-vr/tools/build_quest.ps1 `
+            -AssetMode AssetFree `
             -Release `
             -InstallAndroidBuildTemplate `
             -Godot '${{ steps.quest-tools.outputs.godot }}' `
@@ -123,8 +112,8 @@ jobs:
             'Keep the keystore: Android requires the same key for in-place updates.'
           ) | Set-Content artifacts/QUEST-PERSONAL-BUILD.txt
 
-      - name: Upload private personal-build bundle
-        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+      - name: Upload personal-build bundle
+        if: ${{ inputs.publish_artifact }}
         uses: actions/upload-artifact@v4
         with:
           name: CrimsonVR-Quest-${{ github.run_number }}
@@ -135,13 +124,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Private playtest summary
-        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+      - name: Personal-build summary
+        if: ${{ inputs.publish_artifact }}
         shell: pwsh
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY @'
-          The asset-free playtest bundle is available for one day. Download all
-          three files. Before the next build, save the keystore as the private
+          This fork owner's asset-free playtest bundle is available for one day. Download all
+          three files. Before the next build, save the keystore as the fork's
           repository secret `QUEST_KEYSTORE_BASE64` to permit in-place updates.
           Each tester must supply Crimsonland Classic assets locally; never
           upload an asset pack to GitHub.
@@ -153,6 +142,6 @@ jobs:
         run: |
           Add-Content $env:GITHUB_STEP_SUMMARY @'
           The asset-free Quest APK built and verified successfully. No binary
-          artifact was uploaded. Use a private standalone repository and set
-          `publish_artifact=true` to receive the personal-build bundle.
+          artifact was requested. Run this workflow in your own fork with
+          `publish_artifact=true` to receive your personal-build bundle.
           '@

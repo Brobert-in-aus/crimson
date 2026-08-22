@@ -29,19 +29,43 @@ validation. The current candidate is not release-ready; maintainers should use
 the [Release Preparation](docs/contributor/project-tracking/release-preparation.md)
 checklist as the canonical go/no-go record.
 
-VR packages are deliberately asset-free. Players create a local pack from a
-user-owned GOG Crimsonland Classic 1.9.93 installation and import it on first
-launch through an in-headset recovery flow with retry feedback. New profiles
+Local Quest builds now default to a clearly named, personal APK that bundles
+baked assets from the builder's own GOG Crimsonland Classic 1.9.93 installation.
+That APK is for the owner's headsets only and must not be shared or uploaded.
+Fork/CI packages remain explicitly asset-free: players create a local pack and
+import it on first launch through an in-headset recovery flow with retry feedback. New profiles
 are guided toward the optional VR tutorial while retaining immediate access to
-every mode; see the [asset-import guide](crimson-vr/notes/asset-import.md). Quest and
+every mode through a one-time Tutorial/Skip recommendation. First-run layout
+setup likewise offers Edit Layout/Skip, with a short editor guide and one
+depth-only control shared by menus, perk selection and results; see the
+[asset-import guide](crimson-vr/notes/asset-import.md). Quest and
 PCVR personal builds are documented in the [Quest CI](crimson-vr/notes/quest-ci.md)
-and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides; small private headset tests
-use the [Quest playtester handoff](crimson-vr/notes/quest-playtest.md). The Quest-specific runtime
+and [PCVR CI](crimson-vr/notes/pcvr-ci.md) guides; headset playtests
+use the [Quest playtester handoff](crimson-vr/notes/quest-playtest.md). Release
+evidence uses the [Quest](crimson-vr/notes/quest-release-checklist.md) and
+[PCVR](crimson-vr/notes/pcvr-release-checklist.md) device checklists. The Quest-specific runtime
 controller model and animation integration is documented in the
 [Godot controller-model guide](crimson-vr/notes/godot-quest-controller-models.md).
-Where binary redistribution is
-not authorized, the downloadable artifact flow requires a **private standalone
-repository**, not GitHub's Fork button or a public fork.
+The current automated and packaging results are recorded in the
+[0.11.0 release evidence](crimson-vr/notes/release-evidence-0.11.0.md).
+
+The supported publication surface is source plus asset-free, user-owned CI
+builds. GitHub forking is the source-copy path and each user supplies Classic
+assets locally. Users explicitly request the short-lived personal artifact from
+their own fork; the project does not attach VR binaries to a maintainer release,
+and the local bundled-assets APK is never uploaded.
+
+For the default local Quest export (auto-detecting GOG Classic, or accepting
+`-GameDir`), run:
+
+```powershell
+.\crimson-vr\tools\build_quest.ps1 -Release
+# Explicit fork/CI asset-free contract:
+.\crimson-vr\tools\build_quest.ps1 -AssetMode AssetFree -Release
+```
+
+The bundled result is `artifacts/CrimsonVR.personal-assets.quest.apk`, with a
+convenience copy at `crimson-vr/CrimsonVR-Quest-testing.apk`.
 
 ## Quick start
 

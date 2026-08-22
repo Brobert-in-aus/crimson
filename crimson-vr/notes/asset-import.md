@@ -2,11 +2,19 @@
 
 ## Decision
 
-Public/personal builds contain no Crimsonland art or audio. Assets are not
-injected into the APK or PCVR executable: a user-owned Crimsonland Classic
-1.9.93 installation is converted locally into a versioned
-`crimson-assets.pack`, then imported into Godot's writable `user://assets`
-directory. `res://assets` remains a development-only fallback.
+There are two deliberately separate Quest build contracts:
+
+- The default **local personal build** bakes a user-owned Crimsonland Classic
+  1.9.93 installation into the ignored `res://assets` tree and bundles it in
+  `CrimsonVR.personal-assets.quest.apk`. It is convenient for the owner's own
+  headsets, but must never be shared or uploaded.
+- The explicit **AssetFree** fork/CI build contains no Crimsonland art or audio.
+  A user-owned installation is converted locally into a versioned
+  `crimson-assets.pack`, then imported into Godot's writable `user://assets`.
+
+`user://assets` takes precedence when present; `res://assets` is the personal
+bundled/development fallback. Raw PAQ/PAK files and `.pack` containers are never
+embedded in either APK.
 
 One pack is preferable to granting broad Android storage access. On Quest the
 helper transfers the pack into CrimsonVR's app-owned external-files inbox. On
@@ -37,7 +45,26 @@ Classic.
 
 ### Quest
 
-1. Install the asset-free personal APK.
+#### Default local personal APK
+
+From the repository root:
+
+```powershell
+.\crimson-vr\tools\build_quest.ps1 -Release
+# For a nonstandard installation, or to force a refresh:
+.\crimson-vr\tools\build_quest.ps1 -Release -GameDir 'D:\Games\Crimsonland Classic'
+```
+
+The wrapper reuses a complete ignored `godot/assets` tree, otherwise discovers
+the usual GOG Classic installation and atomically stages freshly baked assets.
+Passing `-GameDir` always refreshes that tree. It produces
+`artifacts/CrimsonVR.personal-assets.quest.apk` and copies it to
+`crimson-vr/CrimsonVR-Quest-testing.apk`. The output gate requires both baked
+manifests and imported sprite/audio payloads while rejecting raw archives.
+
+#### Asset-free fork/CI APK
+
+1. Install the asset-free personal APK produced with `-AssetMode AssetFree`.
 2. On a PC, run the distributable asset helper against the Classic directory.
    It builds `crimson-assets.pack` and uses ADB to copy it to the app-owned
    `/sdcard/Android/data/xyz.crimsonvr.app/files/` inbox.
@@ -81,8 +108,9 @@ atomic swap ensures a failed import preserves the last working installation.
   prerequisite and is the supported release flow.
 - [ ] **PARTIAL:** Disk-space and archive-size preflights plus atomic retry are
   implemented; progress/cancel and schema-migration UI remain.
-- [x] Source and APK-output asset-free gates are integrated into CI/local builds;
-  clean PCVR and on-headset Quest imports both pass.
+- [x] Fork/CI selects `AssetFree` explicitly and source/APK gates reject assets.
+- [x] The default local Quest build atomically stages ignored baked assets and
+  its inverse APK gate requires them while rejecting raw archives.
 - [x] Asset-free Quest boot has a generated 3D recovery panel with local-only
   instructions and a pokeable Retry Import action, so a pack transferred while
   the app is open can be consumed without an ADB launch or manual restart.
@@ -137,6 +165,10 @@ uv run python crimson-vr/tools/prepare_assets.py "C:\Games\Crimsonland Classic"
 .\crimson-vr\tools\prepare_assets.ps1 -Pcvr
 # Complete Quest setup (installs, transfers, and leaves the app stopped):
 .\crimson-vr\tools\prepare_assets.ps1 -Quest -Apk ".\CrimsonVR.quest.apk"
+# Or make the default personal, non-shareable bundled Quest APK directly:
+.\crimson-vr\tools\build_quest.ps1 -Release
+# Fork/CI and reproducible asset-free local validation are always explicit:
+.\crimson-vr\tools\build_quest.ps1 -AssetMode AssetFree -Release
 ```
 
 The wrapper searches the usual GOG locations. Add `-GameDir "D:\...\Crimsonland Classic"`

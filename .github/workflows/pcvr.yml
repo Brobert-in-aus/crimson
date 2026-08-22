@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish_artifact:
-        description: Upload Windows/Linux packages (private repositories only)
+        description: Upload this fork owner's asset-free Windows/Linux packages
         required: true
         default: false
         type: boolean
@@ -26,12 +26,6 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
-      - name: Refuse public binary publication
-        if: ${{ inputs.publish_artifact && !github.event.repository.private }}
-        shell: pwsh
-        run: |
-          throw 'Public workflow artifacts would redistribute upstream-linked binaries. Validate without upload, or use a private standalone repository.'
-
       - name: Checkout
         uses: actions/checkout@v5
 
@@ -77,8 +71,8 @@ jobs:
         shell: pwsh
         run: ./crimson-vr/tools/build_pcvr.ps1 -Godot '${{ steps.pcvr-tools.outputs.godot }}'
 
-      - name: Upload private personal-build packages
-        if: ${{ inputs.publish_artifact && github.event.repository.private }}
+      - name: Upload personal-build packages
+        if: ${{ inputs.publish_artifact }}
         uses: actions/upload-artifact@v4
         with:
           name: CrimsonVR-PCVR-${{ github.run_number }}

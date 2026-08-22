@@ -10,12 +10,13 @@ _Last updated: 2026-08-22._
 
 ## Release readiness
 
-The 2026-08-13 release audit is **NO-GO**. The current candidate builds, but the
-reordered rollback recovery smoke fails and native Windows networking tests are
-nondeterministic. Broader headset/relay validation, clean-machine workflow
-rehearsals, derived-content review, and code/binary distribution decisions also
-remain open. The canonical blocker register, commands, and evidence template are
-in [Release Preparation](../../docs/contributor/project-tracking/release-preparation.md).
+The automated rollback and Windows networking regressions from the 2026-08-13
+audit are closed, and the project owner has approved the source/fork CI plus
+user-supplied-assets release scope. The candidate is in release preparation:
+broader headset/operated-relay validation, clean-machine PCVR rehearsal, and a
+final clean-commit gate still remain. The canonical blocker register, commands,
+and evidence template are in
+[Release Preparation](../../docs/contributor/project-tracking/release-preparation.md).
 
 Feature status below describes implementation coverage; it must not be read as
 release approval.
@@ -30,9 +31,9 @@ release approval.
   them to controller/hand language and provides Skip, Repeat and Play-a-game
   exits. Practice-round copy explicitly requires collecting each dropped
   power-up as well as clearing its wave, matching the director's advance gate.
-  On a profile that has not completed it, Play Game moves **Tutorial - Start
-  Here** to the first row without blocking the other modes. Completion persists
-  and restores the normal ordering.
+  On a new profile, the first Play Game action recommends the tutorial in a
+  dedicated **Tutorial / Skip** prompt. Tutorial starts it directly; Skip opens
+  the unchanged mode selector, and the recommendation is not repeated.
 - **Typo'Shooter remains deliberately unsurfaced.** A poke keyboard is not a
   viable real-time combat input. It needs a separate voice or physical-keyboard
   design; this is a product/input decision, not missing simulation work.
@@ -55,8 +56,8 @@ release approval.
 ## Implemented in VR
 
 **Flow / screens**
-- First launch opens a short **direct-touch guide** with Continue and Adjust
-  Reach. Its bounded copy and explicit UI render priority keep the text inside
+- First launch opens a short **direct-touch guide** with left **Edit Layout** and
+  right **Skip**. Its bounded copy and explicit UI render priority keep the text inside
   and in front of the ClassicPanel backing; returning players boot straight into
   the **main menu** (custom, using the original `ui_signCrimson`
   logo + `ui_menuItem` neon-bar plates): Play Game, Options, Statistics,
@@ -69,6 +70,10 @@ release approval.
 - Offline run-creation failure is recoverable in-headset through a dedicated
   Retry/Main Menu panel. The asset-free startup screen presents numbered setup
   instructions, visible import progress, and duplicate-poke protection.
+- Local Quest exports default to the owner's non-shareable bundled-assets APK;
+  fork/CI invokes `-AssetMode AssetFree` explicitly and retains the startup
+  import flow. Both signed outputs have inverse payload gates, and neither may
+  contain raw PAQ/PAK/pack archives.
 - **Survival, Rush, Quests and Tutorial gameplay** rendered as the diorama.
 - **Pause** menu (flat toggle + Resume / Settings / Exit to Main Menu). Leaving
   a run requires a consequence confirmation; the main menu's Quit exits the app. **[audit]** The base pause menu
@@ -123,8 +128,9 @@ release approval.
 - **Validation checklist** (dev tool) is a paged poke panel whose pass/fail state
   persists. Passed rows are retired between test batches; current untested and
   changed behavior receives fresh persistence keys.
-- **Controller and optical-hand input**: menus use fingertip poke rather than a
-  laser; left hand moves, right hand aims/fires with pinch, and the weapon-swap
+- **Controller and optical-hand input**: menus use controller-top/fingertip poke
+  rather than a laser; the left controller/hand moves, the right controller/hand
+  aims and fires with trigger/pinch, and the weapon-swap
   perk has a reload gesture. VR Display separately persists the controller
   presentation (poke orbs or models) and optical-hand skin: Glove Caucasian
   Green Camo (Hand Model 1, the clean-profile default) or Glove African Dark
@@ -156,6 +162,10 @@ release approval.
   refresh no longer re-shows it on the following tick. Cabinet's
   built-in Pause/Level-Up positions now match Tabletop's, and two-hand controller
   pitch maps directly rather than rotating the held button backwards.
+  The first editor entry shows a short task-led tutorial listing every movable
+  object. A single centred blue grip point changes only the persisted shared
+  menu depth; menus, perk selection and result screens move together without
+  changing their height, horizontal placement or angle.
 
 **Presentation (diorama)**
 - Creatures (animated sheets, per-type tint, energizer/freeze/hit-flash, death →
@@ -192,15 +202,15 @@ release approval.
   turns a user-owned Crimsonland Classic install into an integrity-checked pack
   for PCVR or the Quest app inbox; import is traversal-safe and atomic, and a
   failed replacement preserves the working asset tree. Clean PCVR and Quest
-  imports have both passed. On 2026-08-11 the private-copy CI build contract was
+  imports have both passed. On 2026-08-11 the isolated-repository CI build contract was
   reproduced locally and its fresh-key Release APK was clean-installed on Quest
   with the known-good pack staged; the app was deliberately left stopped for a
   clean first-launch import check. APK SHA-256 is `9612C1D6…CAB6C4`; the matching
   local/headset pack SHA-256 is `B43B203B…F0736F`.
 - Reproducible asset-free PCVR packaging now builds Windows x64 and cross-builds
-  Linux x64 from one Windows host. The local scripts and private-repository CI
-  emit self-contained archives with loose, hash-recorded native libraries; public
-  CI validates without uploading upstream-linked binaries.
+  Linux x64 from one Windows host. The local scripts and fork CI emit
+  self-contained asset-free archives with loose, hash-recorded native libraries;
+  each user requests their own short-lived artifact.
 
 ## Provided by the sim already (just needs surfacing)
 
@@ -273,7 +283,7 @@ them. Revisit only if the interaction model changes.
 | **Network / co-op** | `network_lobby.py`, `network_session.py`, `crimson-zig/src/net/` | **Slices 1-6 implemented; broader headset/operated-relay validation pending.** The poke-only flow defaults to relay room codes, keeps direct LAN under Advanced, and requires every connected player to Ready before starting. Survival/Rush, local-slot input/HUD/results, per-player effects, canonical perk choices, all-slot replay capture, DNS and resume reconnect/resync are wired. A PC-host/Quest-client direct match is validated at 59.6 Hz. Casual Quests and the Python/native proof matrix remain; see `notes/multiplayer-implementation.md`. |
 | **Demo-trial gating** **[audit]** | `demo_trial.py`, `ui/demo_trial_overlay.py` | **Skip** (see VR-inapplicable table — shareware-build-only). |
 | **Replay playback mode** | `modes/replay_playback_mode.py` | Playback remains missing; native **.crd recording is implemented and Quest-confirmed** (`notes/replay-recording-plan.md`). |
-| First-run seated **calibration** + **arena scale** UI | (VR-specific) | First-run now teaches poke/recenter and routes Adjust Reach directly into the persisted Arena & Layout editor. Measured reach sampling remains deferred. |
+| First-run seated **layout** + **arena scale** UI | (VR-specific) | First-run now teaches controller/hand poke and recenter, then offers left **Edit Layout** or right **Skip**. The editor has a one-time object guide and a depth-only shared menu-distance handle. Measured reach sampling remains deferred. |
 
 **Flow behaviors (cross-screen) not in VR [audit]:**
 - **Screen-fade transitions** — global black fade in/out entering gameplay

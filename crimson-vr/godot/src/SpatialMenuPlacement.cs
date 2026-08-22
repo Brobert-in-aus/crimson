@@ -12,11 +12,20 @@ namespace CrimsonVR;
 /// </summary>
 public static class SpatialMenuPlacement
 {
-    public const float AdditionalDistanceMeters = 0.15f;
+    public const float DefaultAdditionalDistanceMeters = 0.15f;
+    public const float MinimumAdditionalDistanceMeters = 0.05f;
+    public const float MaximumAdditionalDistanceMeters = 0.45f;
     private const float BaseDepthFactor = 0.25f;
 
     public static Vector3 PlayerFacing(float referenceSideMeters, float heightFactor = 0.85f,
-        float horizontalOffset = 0.0f)
+        float horizontalOffset = 0.0f, float additionalDistanceMeters = DefaultAdditionalDistanceMeters)
         => new(horizontalOffset, referenceSideMeters * heightFactor,
-            referenceSideMeters * BaseDepthFactor + AdditionalDistanceMeters);
+            referenceSideMeters * BaseDepthFactor + ClampAdditionalDistance(additionalDistanceMeters));
+
+    public static float ClampAdditionalDistance(float distanceMeters)
+        => Mathf.Clamp(distanceMeters, MinimumAdditionalDistanceMeters, MaximumAdditionalDistanceMeters);
+
+    /// <summary>Apply only recenter-local depth from a layout grab.</summary>
+    public static float AdjustAdditionalDistance(float startingDistanceMeters, Vector3 localGrabDelta)
+        => ClampAdditionalDistance(startingDistanceMeters + localGrabDelta.Z);
 }

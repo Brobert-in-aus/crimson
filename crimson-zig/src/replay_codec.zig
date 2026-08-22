@@ -15,6 +15,7 @@ const canonical_tick_dt_f64: f64 = @as(f32, 1.0 / 60.0);
 pub const latest_ruleset_game_version_prefixes = [_][]const u8{
     "0.9.",
     "0.10.",
+    "0.11.",
 };
 const msgpack_bin8: u8 = 0xC4;
 const msgpack_bin16: u8 = 0xC5;
@@ -2446,6 +2447,12 @@ fn parseU32(value: u32) ReplayCodecError!u32 {
 
 fn parseI64(value: i64) ReplayCodecError!i64 {
     return value;
+}
+
+test "current release version is accepted as the latest replay ruleset" {
+    try std.testing.expect(isLatestRulesetGameVersion("0.11.0"));
+    try std.testing.expect(isLatestRulesetGameVersion("0.11.0+candidate"));
+    try std.testing.expect(!isLatestRulesetGameVersion("0.8.9"));
 }
 
 test "unpack input flags decodes packed fields" {

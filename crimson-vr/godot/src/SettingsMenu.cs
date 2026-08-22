@@ -14,6 +14,12 @@ namespace CrimsonVR;
 /// </summary>
 public sealed partial class SettingsMenu : Node3D
 {
+#if DEBUG
+    public const bool DebugControlsAvailable = true;
+#else
+    public const bool DebugControlsAvailable = false;
+#endif
+
     // Dead zone shown as segmented pips like the Options sliders: value 0-10 maps
     // to 0-40 game units (4 per pip).
     private const int DeadZoneStep = 4;
@@ -33,7 +39,7 @@ public sealed partial class SettingsMenu : Node3D
     private VrButton _mixedReality = null!;
     private VrButton _controllerDisplay = null!;
     private VrButton _handModel = null!;
-    private VrButton _debug = null!;
+    private VrButton? _debug;
     private VrButton _back = null!;
     private VrButton _pageButton = null!;
     private Label3D _title = null!;
@@ -119,7 +125,7 @@ public sealed partial class SettingsMenu : Node3D
         // one, which also stops it growing further.
         _uiEdit = new VrButton();
         AddChild(_uiEdit);
-        _uiEdit.Build(bw, bh, "Arena & Layout", new Color(0.9f, 0.7f, 0.3f), plate: true);
+        _uiEdit.Build(bw, bh, "Edit Layout", new Color(0.9f, 0.7f, 0.3f), plate: true);
         _uiEdit.Position = new Vector3(0.0f, y, 0.0f);
         _uiEdit.OnPress += () => OnArenaLayout?.Invoke();
         y -= pitch;
@@ -128,6 +134,7 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap = new VrButton();
         AddChild(_handSwap);
         _handSwap.Build(bw, bh, HandSwapText(), new Color(0.5f, 0.6f, 0.85f), plate: true);
+        _handSwap.ConfigureLabel(s * 0.00030f, bw * 0.92f);
         _handSwap.Position = new Vector3(0.0f, y, 0.0f);
         _handSwap.OnPress += ToggleHandSwap;
         y -= sPitch; // extra clearance so the dead-zone label doesn't touch this button
@@ -197,14 +204,16 @@ public sealed partial class SettingsMenu : Node3D
         _handModel.OnPress += CycleHandModel;
         y -= pitch;
 
-        // Debug-overlay toggle (validation checklist, status line, debug FX menu,
-        // and the poke markers regardless of their own toggle).
+        // Keep the validation/debug tooling in developer builds without exposing
+        // its toggle in ExportRelease packages.
+#if DEBUG
         _debug = new VrButton();
         AddChild(_debug);
         _debug.Build(bw, bh, DebugText(), new Color(0.55f, 0.55f, 0.7f), plate: true);
         _debug.Position = new Vector3(0.0f, y, 0.0f);
         _debug.OnPress += ToggleDebug;
         y -= pitch;
+#endif
 
         // Back to the pause panel.
         _back = new VrButton();
@@ -279,7 +288,7 @@ public sealed partial class SettingsMenu : Node3D
         _handSwap.ResetPress();
         _controlMode.ResetPress();
         _uiEdit.ResetPress();
-        _debug.ResetPress();
+        _debug?.ResetPress();
         _back.ResetPress();
         _aa.ResetPress();
         _mixedReality.ResetPress();
@@ -305,7 +314,7 @@ public sealed partial class SettingsMenu : Node3D
         }
         else
         {
-            _debug.PollPoke(probes);
+            _debug?.PollPoke(probes);
             _aa.PollPoke(probes);
             _controllerDisplay.PollPoke(probes);
             _handModel.PollPoke(probes);
@@ -344,7 +353,10 @@ public sealed partial class SettingsMenu : Node3D
         _mixedReality.Visible = !controls;
         _controllerDisplay.Visible = !controls;
         _handModel.Visible = !controls;
-        _debug.Visible = !controls;
+        if (_debug != null)
+        {
+            _debug.Visible = !controls;
+        }
 
         if (controls)
         {
@@ -362,7 +374,10 @@ public sealed partial class SettingsMenu : Node3D
             _mixedReality.Position = new Vector3(0.0f, s * 0.03f, 0.0f);
             _controllerDisplay.Position = new Vector3(0.0f, -s * 0.10f, 0.0f);
             _handModel.Position = new Vector3(0.0f, -s * 0.23f, 0.0f);
-            _debug.Position = new Vector3(0.0f, -s * 0.36f, 0.0f);
+            if (_debug != null)
+            {
+                _debug.Position = new Vector3(0.0f, -s * 0.36f, 0.0f);
+            }
         }
 
         _pageButton.SetText(controls ? "Display >" : "< Controls");
@@ -380,7 +395,7 @@ public sealed partial class SettingsMenu : Node3D
     private void ToggleDebug()
     {
         _debugState = !_debugState;
-        _debug.SetText(DebugText());
+        _debug?.SetText(DebugText());
         OnDebugChanged?.Invoke(_debugState);
     }
 
@@ -453,7 +468,9 @@ public sealed partial class SettingsMenu : Node3D
         });
     }
 
-    private string HandSwapText() => _swapState ? "Movement: Right hand" : "Movement: Left hand";
+    private string HandSwapText() => _swapState
+        ? "Movement: Right controller/hand"
+        : "Movement: Left controller/hand";
 
     private string DebugText() => _debugState ? "Debug overlays: ON" : "Debug overlays: off";
 
