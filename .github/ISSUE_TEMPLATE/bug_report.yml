@@ -88,4 +88,3 @@ body:
       options:
         - label: I have not attached game assets, asset packs, personal build packages, signing keys, or sensitive personal information.
           required: true
-

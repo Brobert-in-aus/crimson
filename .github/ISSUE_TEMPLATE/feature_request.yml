@@ -53,4 +53,3 @@ body:
     attributes:
       label: VR context
       description: Note relevant headset, input method, layout mode, accessibility, comfort, or multiplayer constraints.
-
