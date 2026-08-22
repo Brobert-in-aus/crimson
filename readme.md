@@ -23,10 +23,10 @@ Tabletop and Cabinet. Menus use direct controller/hand poke interaction; native
 replays remain compatible with the desktop verifier. VR Display separately
 chooses poke or animated controller models and one of two Godot XR Tools Tac
 Glove skins; optical hand tracking swaps to the selected glove automatically and
-follows reported joints one-for-one. Friends-only multiplayer
-is implemented but still undergoing deterministic and physical-device
-validation. The current candidate is not release-ready; maintainers should use
-the [Release Preparation](docs/contributor/project-tracking/release-preparation.md)
+follows reported joints one-for-one. Friends-only multiplayer has been
+validated between PCVR and Quest for the accepted release scope. The current
+candidate is staged for release; maintainers should use the
+[Release Preparation](docs/contributor/project-tracking/release-preparation.md)
 checklist as the canonical go/no-go record.
 
 Local Quest builds now default to a clearly named, personal APK that bundles
